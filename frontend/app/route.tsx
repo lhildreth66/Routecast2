@@ -277,7 +277,7 @@ export default function RouteScreen() {
   );
   const totalDistance = calculateTotalDistance(routeData.waypoints);
   const hasAlerts = uniqueAlerts.length > 0;
-  const mapHtml = generateMapHtml(routeData.route_geometry, routeData.waypoints);
+  const mapHtml = generateMapHtml(routeData.route_geometry, routeData.waypoints, showTempMarkers);
 
   return (
     <View style={styles.container}>
