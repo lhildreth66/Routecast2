@@ -150,15 +150,23 @@ function generateMapHtml(routeGeometry: string, waypoints: WaypointWeather[]): s
   
   const markersJs = waypoints.map((wp, idx) => {
     const color = wp.alerts.length > 0 ? '#ef4444' : (idx === 0 ? '#22c55e' : idx === waypoints.length - 1 ? '#ef4444' : '#3b82f6');
-    const label = wp.weather?.temperature ? `${wp.weather.temperature}°` : (wp.alerts.length > 0 ? '!' : '?');
+    const label = wp.weather?.temperature ? `${wp.weather.temperature}°` : (wp.alerts.length > 0 ? '⚠' : '?');
     return `
-      L.circleMarker([${wp.waypoint.lat}, ${wp.waypoint.lon}], {
-        radius: 12,
+      var marker${idx} = L.circleMarker([${wp.waypoint.lat}, ${wp.waypoint.lon}], {
+        radius: 14,
         fillColor: '${color}',
-        color: '#fff',
-        weight: 2,
-        fillOpacity: 1
-      }).addTo(map).bindPopup('${wp.waypoint.name || `Point ${idx}`}: ${label}');
+        color: '#ffffff',
+        weight: 3,
+        fillOpacity: 0.9
+      }).addTo(map);
+      
+      var icon${idx} = L.divIcon({
+        className: 'temp-marker',
+        html: '<div style="background:${color};color:#fff;padding:4px 8px;border-radius:12px;font-size:12px;font-weight:bold;border:2px solid #fff;white-space:nowrap;">${label}</div>',
+        iconSize: [50, 30],
+        iconAnchor: [25, 15]
+      });
+      L.marker([${wp.waypoint.lat}, ${wp.waypoint.lon}], {icon: icon${idx}}).addTo(map);
     `;
   }).join('\n');
 
@@ -173,23 +181,42 @@ function generateMapHtml(routeGeometry: string, waypoints: WaypointWeather[]): s
       <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
       <style>
         * { margin: 0; padding: 0; }
-        html, body, #map { width: 100%; height: 100%; }
+        html, body, #map { width: 100%; height: 100%; background: #1a1a1a; }
+        .temp-marker { background: transparent !important; border: none !important; }
       </style>
     </head>
     <body>
       <div id="map"></div>
       <script>
-        var map = L.map('map', { zoomControl: false }).setView([${center[0]}, ${center[1]}], 6);
+        var map = L.map('map', { 
+          zoomControl: false,
+          attributionControl: false
+        }).setView([${center[0]}, ${center[1]}], 6);
+        
         L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-          attribution: '&copy; CARTO'
+          maxZoom: 19
         }).addTo(map);
         
         var routeCoords = [${routeCoordsJs}];
-        L.polyline(routeCoords, {color: '#ef4444', weight: 4}).addTo(map);
+        
+        // Draw route line with glow effect
+        L.polyline(routeCoords, {
+          color: '#ff6b6b',
+          weight: 6,
+          opacity: 0.3
+        }).addTo(map);
+        
+        L.polyline(routeCoords, {
+          color: '#ef4444',
+          weight: 4,
+          opacity: 1
+        }).addTo(map);
         
         ${markersJs}
         
-        map.fitBounds(routeCoords);
+        // Fit map to route bounds with padding
+        var bounds = L.latLngBounds(routeCoords);
+        map.fitBounds(bounds, { padding: [30, 30] });
       </script>
     </body>
     </html>
