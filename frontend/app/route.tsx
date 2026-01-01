@@ -303,16 +303,83 @@ export default function RouteScreen() {
   };
 
   const speakSummary = async () => {
-    if (!routeData?.ai_summary) return;
+    if (!routeData) return;
     
     if (isSpeaking) {
       await Speech.stop();
       setIsSpeaking(false);
     } else {
       setIsSpeaking(true);
-      const text = `Weather summary for your trip from ${routeData.origin} to ${routeData.destination}. ${routeData.ai_summary}`;
-      Speech.speak(text, {
-        language: 'en',
+      
+      // Build comprehensive weather briefing
+      const parts: string[] = [];
+      
+      // Introduction
+      parts.push(`Weather briefing for your trip from ${routeData.origin} to ${routeData.destination}.`);
+      
+      // Duration and distance
+      const totalDist = calculateTotalDistance(routeData.waypoints);
+      const duration = routeData.total_duration_minutes 
+        ? `${Math.floor(routeData.total_duration_minutes / 60)} hours and ${Math.round(routeData.total_duration_minutes % 60)} minutes`
+        : `approximately ${Math.floor(totalDist / 55)} hours`;
+      parts.push(`Total distance is ${Math.round(totalDist)} miles, taking ${duration}.`);
+      
+      // Weather alerts warning
+      if (hasAlerts) {
+        parts.push(`Warning: There are ${uniqueAlerts.length} weather alerts along your route. Please use caution.`);
+      }
+      
+      // Weather at each waypoint
+      parts.push(`Here's the weather along your route:`);
+      
+      routeData.waypoints.forEach((wp, index) => {
+        if (wp.weather) {
+          const locationName = wp.waypoint.name || (index === 0 ? 'Starting point' : `Point ${index}`);
+          const temp = wp.weather.temperature;
+          const conditions = wp.weather.conditions || 'unknown conditions';
+          const wind = wp.weather.wind_speed || 'calm winds';
+          
+          let wpText = `${locationName}: ${temp} degrees, ${conditions}, with ${wind}.`;
+          
+          // Add alert info for this waypoint
+          if (wp.alerts.length > 0) {
+            wpText += ` Alert: ${wp.alerts[0].event}.`;
+          }
+          
+          parts.push(wpText);
+        }
+      });
+      
+      // Packing suggestions
+      if (routeData.packing_suggestions && routeData.packing_suggestions.length > 0) {
+        const essentialItems = routeData.packing_suggestions
+          .filter(p => p.priority === 'essential')
+          .map(p => p.item);
+        
+        if (essentialItems.length > 0) {
+          parts.push(`Essential items to pack: ${essentialItems.join(', ')}.`);
+        }
+      }
+      
+      // Sunrise/sunset
+      const sunTimes = routeData.waypoints.find(wp => wp.weather?.sunrise)?.weather;
+      if (sunTimes?.sunrise && sunTimes?.sunset) {
+        parts.push(`Sunrise is at ${sunTimes.sunrise}, sunset at ${sunTimes.sunset}.`);
+      }
+      
+      // AI Summary or closing
+      if (routeData.ai_summary && !routeData.ai_summary.includes('unavailable')) {
+        parts.push(routeData.ai_summary);
+      } else {
+        parts.push('Drive safely and check conditions before departing.');
+      }
+      
+      const fullText = parts.join(' ');
+      
+      Speech.speak(fullText, {
+        language: 'en-US',
+        pitch: 1.0,
+        rate: 0.9, // Slightly slower for clarity
         onDone: () => setIsSpeaking(false),
         onError: () => setIsSpeaking(false),
       });
