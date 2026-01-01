@@ -252,14 +252,21 @@ export default function RouteScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Map WebView */}
+      {/* Map WebView - Only show on native platforms */}
       <View style={styles.mapContainer}>
-        <WebView
-          style={styles.map}
-          source={{ html: mapHtml }}
-          scrollEnabled={false}
-          javaScriptEnabled={true}
-        />
+        {Platform.OS === 'web' ? (
+          <View style={styles.webMapPlaceholder}>
+            <Ionicons name="map" size={64} color="#3f3f46" />
+            <Text style={styles.webMapText}>Map view available on mobile</Text>
+          </View>
+        ) : (
+          <WebView
+            style={styles.map}
+            source={{ html: mapHtml }}
+            scrollEnabled={false}
+            javaScriptEnabled={true}
+          />
+        )}
       </View>
 
       {/* Header */}
