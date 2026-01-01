@@ -316,10 +316,10 @@ Provide a 2-3 sentence summary focusing on:
 
 Be concise and practical."""
 
-        model = genai.GenerativeModel('gemini-2.0-flash')
         response = await asyncio.to_thread(
-            model.generate_content,
-            prompt
+            genai_client.models.generate_content,
+            model='gemini-2.0-flash',
+            contents=prompt
         )
         
         return response.text if response.text else "Unable to generate summary."
