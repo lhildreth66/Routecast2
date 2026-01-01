@@ -295,6 +295,19 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#a1a1aa',
   },
+  descriptionBox: {
+    backgroundColor: 'rgba(234, 179, 8, 0.1)',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 20,
+    borderLeftWidth: 3,
+    borderLeftColor: '#eab308',
+  },
+  descriptionText: {
+    color: '#d4d4d8',
+    fontSize: 13,
+    lineHeight: 19,
+  },
   inputSection: {
     marginBottom: 16,
   },
