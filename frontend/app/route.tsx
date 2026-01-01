@@ -228,6 +228,7 @@ export default function RouteScreen() {
   const params = useLocalSearchParams();
   const [routeData, setRouteData] = useState<RouteData | null>(null);
   const [showWeatherPanel, setShowWeatherPanel] = useState(true);
+  const [showTempMarkers, setShowTempMarkers] = useState(true);
 
   useEffect(() => {
     if (params.routeData) {
