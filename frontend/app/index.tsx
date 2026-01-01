@@ -46,6 +46,7 @@ export default function HomeScreen() {
   const [recentRoutes, setRecentRoutes] = useState<SavedRoute[]>([]);
   const [favoriteRoutes, setFavoriteRoutes] = useState<SavedRoute[]>([]);
   const [showFavorites, setShowFavorites] = useState(false);
+  const [saveMessage, setSaveMessage] = useState('');
   
   // Departure time
   const [departureTime, setDepartureTime] = useState(new Date());
