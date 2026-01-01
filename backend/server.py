@@ -775,7 +775,15 @@ async def add_favorite_route(request: FavoriteRouteRequest):
 async def remove_favorite_route(route_id: str):
     """Remove a route from favorites."""
     try:
+        from bson import ObjectId
+        # Try custom id field first
         result = await db.favorites.delete_one({"id": route_id})
+        if result.deleted_count == 0:
+            # Try with MongoDB ObjectId
+            try:
+                result = await db.favorites.delete_one({"_id": ObjectId(route_id)})
+            except:
+                pass
         if result.deleted_count == 0:
             raise HTTPException(status_code=404, detail="Favorite not found")
         return {"success": True}
