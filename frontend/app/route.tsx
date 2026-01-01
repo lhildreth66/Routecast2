@@ -144,32 +144,52 @@ function getMapboxStaticUrl(routeGeometry: string, waypoints: WaypointWeather[])
 }
 
 // Generate HTML for WebView map
-function generateMapHtml(routeGeometry: string, waypoints: WaypointWeather[], showMarkers: boolean = true): string {
+function generateMapHtml(routeGeometry: string, waypoints: WaypointWeather[], showAlertMarkers: boolean = true): string {
   const routeCoords = decodePolyline(routeGeometry);
   const center = routeCoords[Math.floor(routeCoords.length / 2)];
   
-  const markersJs = showMarkers ? waypoints.map((wp, idx) => {
-    const hasAlert = wp.alerts.length > 0;
-    const temp = wp.weather?.temperature || '?';
-    const bgColor = hasAlert ? '#dc2626' : '#3b82f6';
-    
+  // Only show markers for waypoints with alerts
+  const alertWaypoints = waypoints.filter(wp => wp.alerts.length > 0);
+  
+  const markersJs = showAlertMarkers && alertWaypoints.length > 0 ? alertWaypoints.map((wp, idx) => {
     return `
       (function() {
-        var markerDiv = document.createElement('div');
-        markerDiv.innerHTML = '<div style="background:${bgColor};color:#fff;padding:5px 10px;border-radius:14px;font-size:13px;font-weight:bold;border:2px solid #fff;white-space:nowrap;box-shadow:0 2px 6px rgba(0,0,0,0.5);text-align:center;">${temp}°</div>';
-        markerDiv.style.cssText = 'display:flex;justify-content:center;align-items:center;';
-        
         var icon = L.divIcon({
           className: '',
-          html: markerDiv.innerHTML,
-          iconSize: [50, 28],
-          iconAnchor: [25, 14]
+          html: '<div style="width:0;height:0;border-left:12px solid transparent;border-right:12px solid transparent;border-bottom:22px solid #dc2626;position:relative;filter:drop-shadow(0 2px 4px rgba(0,0,0,0.5));"><span style="position:absolute;top:6px;left:-4px;color:#fff;font-size:14px;font-weight:bold;">!</span></div>',
+          iconSize: [24, 22],
+          iconAnchor: [12, 22]
         });
         
         L.marker([${wp.waypoint.lat}, ${wp.waypoint.lon}], {icon: icon}).addTo(map);
       })();
     `;
   }).join('\n') : '';
+
+  // Add start and end markers
+  const startEndMarkers = `
+    // Start marker (green)
+    (function() {
+      var startIcon = L.divIcon({
+        className: '',
+        html: '<div style="background:#22c55e;width:14px;height:14px;border-radius:50%;border:3px solid #fff;box-shadow:0 2px 4px rgba(0,0,0,0.4);"></div>',
+        iconSize: [14, 14],
+        iconAnchor: [7, 7]
+      });
+      L.marker([${routeCoords[0][0]}, ${routeCoords[0][1]}], {icon: startIcon}).addTo(map);
+    })();
+    
+    // End marker (red circle)
+    (function() {
+      var endIcon = L.divIcon({
+        className: '',
+        html: '<div style="background:#ef4444;width:14px;height:14px;border-radius:50%;border:3px solid #fff;box-shadow:0 2px 4px rgba(0,0,0,0.4);"></div>',
+        iconSize: [14, 14],
+        iconAnchor: [7, 7]
+      });
+      L.marker([${routeCoords[routeCoords.length - 1][0]}, ${routeCoords[routeCoords.length - 1][1]}], {icon: endIcon}).addTo(map);
+    })();
+  `;
 
   const routeCoordsJs = routeCoords.map(c => `[${c[0]}, ${c[1]}]`).join(',');
 
@@ -213,6 +233,7 @@ function generateMapHtml(routeGeometry: string, waypoints: WaypointWeather[], sh
           opacity: 1
         }).addTo(map);
         
+        ${startEndMarkers}
         ${markersJs}
         
         // Fit map to route bounds with padding
