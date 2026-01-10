@@ -65,9 +65,50 @@ VEHICLE_TYPES = {
     "trailer": {"wind_sensitivity": 1.6, "ice_sensitivity": 1.3, "visibility_sensitivity": 1.1, "name": "Vehicle + Trailer"},
 }
 
+# Road condition types
+ROAD_CONDITIONS = {
+    "dry": {"severity": 0, "color": "#22c55e", "icon": "✓", "label": "DRY"},
+    "wet": {"severity": 1, "color": "#3b82f6", "icon": "💧", "label": "WET"},
+    "slippery": {"severity": 2, "color": "#f59e0b", "icon": "⚠️", "label": "SLIPPERY"},
+    "icy": {"severity": 3, "color": "#ef4444", "icon": "🧊", "label": "ICY"},
+    "snow_covered": {"severity": 3, "color": "#93c5fd", "icon": "❄️", "label": "SNOW"},
+    "flooded": {"severity": 4, "color": "#dc2626", "icon": "🌊", "label": "FLOODING"},
+    "low_visibility": {"severity": 2, "color": "#9ca3af", "icon": "🌫️", "label": "LOW VIS"},
+    "dangerous_wind": {"severity": 3, "color": "#8b5cf6", "icon": "💨", "label": "HIGH WIND"},
+}
+
 class StopPoint(BaseModel):
     location: str
     type: str = "stop"  # stop, gas, food, rest
+
+class RoadCondition(BaseModel):
+    condition: str  # dry, wet, icy, snow_covered, flooded, low_visibility, dangerous_wind
+    severity: int  # 0-4 (0=good, 4=dangerous)
+    label: str
+    icon: str
+    color: str
+    description: str
+    recommendation: str
+
+class TurnByTurnStep(BaseModel):
+    instruction: str
+    distance_miles: float
+    duration_minutes: int
+    road_name: str
+    maneuver: str  # turn-left, turn-right, merge, etc.
+    road_condition: Optional[RoadCondition] = None
+    weather_at_step: Optional[str] = None
+    temperature: Optional[int] = None
+    has_alert: bool = False
+
+class AlternateRoute(BaseModel):
+    name: str
+    distance_miles: float
+    duration_minutes: int
+    road_condition_summary: str
+    safety_score: int
+    recommendation: str
+    avoids: List[str]  # What hazards this route avoids
 
 class RouteRequest(BaseModel):
     origin: str
