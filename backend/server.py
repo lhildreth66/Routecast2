@@ -175,6 +175,13 @@ class RouteWeatherResponse(BaseModel):
     weather_timeline: List[HourlyForecast] = []
     created_at: datetime = Field(default_factory=datetime.utcnow)
     is_favorite: bool = False
+    # New fields for enhanced features
+    safety_score: Optional[SafetyScore] = None
+    hazard_alerts: List[HazardAlert] = []
+    rest_stops: List[RestStop] = []
+    optimal_departure: Optional[DepartureWindow] = None
+    trucker_warnings: List[str] = []
+    vehicle_type: str = "car"
 
 class SavedRoute(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
