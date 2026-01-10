@@ -274,28 +274,13 @@ export default function RouteScreen() {
           </Text>
           <Text style={styles.headerSubtitle}>
             {routeData.total_distance_miles ? `${Math.round(routeData.total_distance_miles)} mi` : ''} • {routeData.total_duration_minutes ? formatDuration(routeData.total_duration_minutes) : ''}
+            {routeData.safety_score ? ` • Safety: ${routeData.safety_score.overall_score}` : ''}
           </Text>
         </View>
         <TouchableOpacity onPress={speakSummary} style={styles.speakBtn}>
           <Ionicons name={isSpeaking ? "stop-circle" : "volume-high"} size={24} color={isSpeaking ? "#ef4444" : "#60a5fa"} />
         </TouchableOpacity>
       </View>
-
-      {/* Safety Score Banner */}
-      {routeData.safety_score && (
-        <View style={[styles.safetyBanner, { borderLeftColor: getSafetyColor(routeData.safety_score.overall_score) }]}>
-          <View style={styles.safetyLeft}>
-            <Text style={[styles.safetyScore, { color: getSafetyColor(routeData.safety_score.overall_score) }]}>
-              {routeData.safety_score.overall_score}
-            </Text>
-            <Text style={styles.safetyLabel}>SAFETY</Text>
-          </View>
-          <View style={styles.safetyRight}>
-            <Text style={styles.safetyRisk}>{routeData.safety_score.risk_level.toUpperCase()} RISK</Text>
-            <Text style={styles.safetyVehicle}>{routeData.safety_score.vehicle_type}</Text>
-          </View>
-        </View>
-      )}
 
       {/* Reroute Warning */}
       {routeData.reroute_recommended && (
