@@ -902,6 +902,105 @@ export default function RouteScreen() {
               </>
             )}
 
+            {/* Alerts Tab */}
+            {activeTab === 'alerts' && (
+              <View style={styles.alertsContainer}>
+                <Text style={styles.alertsTabTitle}>Hazard Countdown Alerts</Text>
+                <Text style={styles.alertsTabSubtitle}>Proactive warnings based on your route & speed</Text>
+                
+                {routeData.hazard_alerts && routeData.hazard_alerts.length > 0 ? (
+                  routeData.hazard_alerts.map((alert, index) => (
+                    <View key={index} style={[
+                      styles.hazardCard,
+                      alert.severity === 'extreme' ? styles.hazardExtreme :
+                      alert.severity === 'high' ? styles.hazardHigh :
+                      styles.hazardMedium
+                    ]}>
+                      <View style={styles.hazardHeader}>
+                        <View style={styles.hazardIcon}>
+                          <Ionicons 
+                            name={
+                              alert.type === 'wind' ? 'cloud-outline' :
+                              alert.type === 'rain' ? 'rainy-outline' :
+                              alert.type === 'snow' ? 'snow-outline' :
+                              alert.type === 'ice' ? 'snow' :
+                              alert.type === 'visibility' ? 'eye-off-outline' :
+                              'warning-outline'
+                            } 
+                            size={24} 
+                            color="#fff" 
+                          />
+                        </View>
+                        <View style={styles.hazardInfo}>
+                          <Text style={styles.hazardCountdown}>{alert.countdown_text}</Text>
+                          <Text style={styles.hazardMessage}>{alert.message}</Text>
+                        </View>
+                      </View>
+                      <View style={styles.hazardRecommendation}>
+                        <Ionicons name="checkmark-circle" size={16} color="#22c55e" />
+                        <Text style={styles.hazardRecText}>{alert.recommendation}</Text>
+                      </View>
+                      <View style={styles.hazardMeta}>
+                        <Text style={styles.hazardDistance}>📍 {Math.round(alert.distance_miles)} miles ahead</Text>
+                        <Text style={styles.hazardEta}>⏱ In {alert.eta_minutes} min</Text>
+                      </View>
+                    </View>
+                  ))
+                ) : (
+                  <View style={styles.noAlertsBox}>
+                    <Ionicons name="checkmark-circle" size={48} color="#22c55e" />
+                    <Text style={styles.noAlertsTitle}>All Clear!</Text>
+                    <Text style={styles.noAlertsText}>No significant hazards detected along your route</Text>
+                  </View>
+                )}
+              </View>
+            )}
+
+            {/* Rest Stops Tab */}
+            {activeTab === 'stops' && (
+              <View style={styles.stopsContainer}>
+                <Text style={styles.stopsTabTitle}>Rest Stop Weather Planner</Text>
+                <Text style={styles.stopsTabSubtitle}>Plan your breaks based on weather conditions</Text>
+                
+                {routeData.rest_stops && routeData.rest_stops.length > 0 ? (
+                  routeData.rest_stops.map((stop, index) => (
+                    <View key={index} style={styles.restStopCard}>
+                      <View style={styles.restStopHeader}>
+                        <Ionicons 
+                          name={stop.type === 'gas' ? 'car-outline' : stop.type === 'food' ? 'restaurant-outline' : 'cafe-outline'} 
+                          size={24} 
+                          color="#60a5fa" 
+                        />
+                        <View style={styles.restStopInfo}>
+                          <Text style={styles.restStopName}>{stop.name}</Text>
+                          <Text style={styles.restStopDistance}>
+                            {Math.round(stop.distance_miles)} miles • {stop.eta_minutes} min
+                          </Text>
+                        </View>
+                      </View>
+                      <View style={styles.restStopWeather}>
+                        <View style={styles.restStopWeatherInfo}>
+                          {stop.temperature_at_arrival && (
+                            <Text style={styles.restStopTemp}>{stop.temperature_at_arrival}°F</Text>
+                          )}
+                          <Text style={styles.restStopConditions}>{stop.weather_at_arrival || 'Weather TBD'}</Text>
+                        </View>
+                        <View style={styles.restStopRec}>
+                          <Ionicons name="bulb-outline" size={14} color="#eab308" />
+                          <Text style={styles.restStopRecText}>{stop.recommendation}</Text>
+                        </View>
+                      </View>
+                    </View>
+                  ))
+                ) : (
+                  <View style={styles.noStopsBox}>
+                    <Ionicons name="map-outline" size={48} color="#6b7280" />
+                    <Text style={styles.noStopsText}>No rest stops found along this route</Text>
+                  </View>
+                )}
+              </View>
+            )}
+
             {activeTab === 'timeline' && (
               <View style={styles.timelineContainer}>
                 <Text style={styles.timelineTitle}>Hourly Weather Timeline</Text>
