@@ -315,7 +315,7 @@ export default function RouteScreen() {
   const [routeData, setRouteData] = useState<RouteData | null>(null);
   const [showWeatherPanel, setShowWeatherPanel] = useState(true);
   const [showAlertMarkers, setShowAlertMarkers] = useState(true);
-  const [activeTab, setActiveTab] = useState<'weather' | 'timeline' | 'packing'>('weather');
+  const [activeTab, setActiveTab] = useState<'weather' | 'alerts' | 'stops' | 'timeline' | 'packing'>('weather');
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [speakingWaypointIndex, setSpeakingWaypointIndex] = useState<number | null>(null);
 
