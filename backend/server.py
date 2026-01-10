@@ -1432,12 +1432,22 @@ async def get_route_weather(request: RouteRequest):
     if request.trucker_mode:
         trucker_warnings = generate_trucker_warnings(list(waypoints_weather), request.vehicle_height_ft)
     
+    # NEW: Analyze road conditions
+    road_condition_summary, worst_road_condition, reroute_recommended, reroute_reason = analyze_route_conditions(list(waypoints_weather))
+    
+    # NEW: Get turn-by-turn directions with road conditions
+    turn_by_turn = await get_turn_by_turn_directions(origin_coords, dest_coords, list(waypoints_weather))
+    
+    # Calculate total distance
+    total_distance = route_data.get('distance', 0) / 1609.34  # meters to miles
+    
     response = RouteWeatherResponse(
         origin=request.origin,
         destination=request.destination,
         stops=request.stops or [],
         departure_time=departure_time.isoformat(),
         total_duration_minutes=total_duration,
+        total_distance_miles=round(total_distance, 1),
         route_geometry=route_geometry,
         waypoints=list(waypoints_weather),
         ai_summary=ai_summary,
@@ -1450,7 +1460,13 @@ async def get_route_weather(request: RouteRequest):
         rest_stops=rest_stops,
         optimal_departure=optimal_departure,
         trucker_warnings=trucker_warnings,
-        vehicle_type=vehicle_type
+        vehicle_type=vehicle_type,
+        # Road conditions and navigation
+        turn_by_turn=turn_by_turn,
+        road_condition_summary=road_condition_summary,
+        worst_road_condition=worst_road_condition,
+        reroute_recommended=reroute_recommended,
+        reroute_reason=reroute_reason
     )
     
     # Save to database
