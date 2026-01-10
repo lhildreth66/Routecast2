@@ -1352,7 +1352,11 @@ async def get_route_weather(request: RouteRequest):
     # Get route from Mapbox
     route_data = await get_mapbox_route(origin_coords, dest_coords, stop_coords if stop_coords else None)
     if not route_data:
-        raise HTTPException(status_code=500, detail="Could not get route from Mapbox")
+        # Provide helpful error message for unreachable routes
+        raise HTTPException(
+            status_code=400, 
+            detail=f"No drivable route found between {request.origin} and {request.destination}. These locations may not be connected by roads (e.g., Nome, Alaska is only accessible by air). Try different locations."
+        )
     
     route_geometry = route_data['geometry']
     total_duration = int(route_data.get('duration', 0))
