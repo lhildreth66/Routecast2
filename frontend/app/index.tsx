@@ -225,46 +225,67 @@ export default function HomeScreen() {
   // Voice-to-text function
   const startVoiceRecognition = () => {
     if (Platform.OS !== 'web') {
-      // For native, we'd need expo-speech-recognition or similar
       alert('Voice input is available on web browsers');
       return;
     }
 
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     if (!SpeechRecognition) {
-      alert('Speech recognition not supported in this browser');
+      alert('Speech recognition not supported in this browser. Try Chrome or Edge.');
       return;
     }
 
-    const recognition = new SpeechRecognition();
-    recognition.continuous = false;
-    recognition.interimResults = true;
-    recognition.lang = 'en-US';
-
-    recognition.onstart = () => {
-      setIsListening(true);
-    };
-
-    recognition.onresult = (event: any) => {
-      const transcript = Array.from(event.results)
-        .map((result: any) => result[0].transcript)
-        .join('');
-      setChatMessage(transcript);
-    };
-
-    recognition.onerror = (event: any) => {
-      console.error('Speech recognition error:', event.error);
+    // Already listening, stop it
+    if (isListening) {
       setIsListening(false);
-      if (event.error === 'not-allowed') {
-        alert('Microphone access denied. Please allow microphone access in your browser settings.');
-      }
-    };
+      return;
+    }
 
-    recognition.onend = () => {
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      recognition.onstart = () => {
+        console.log('Voice recognition started');
+        setIsListening(true);
+        setChatMessage(''); // Clear existing text
+      };
+
+      recognition.onresult = (event: any) => {
+        const transcript = Array.from(event.results)
+          .map((result: any) => result[0].transcript)
+          .join('');
+        console.log('Transcript:', transcript);
+        setChatMessage(transcript);
+      };
+
+      recognition.onerror = (event: any) => {
+        console.error('Speech recognition error:', event.error);
+        setIsListening(false);
+        
+        if (event.error === 'not-allowed') {
+          alert('🎤 Microphone access denied.\n\nPlease click the lock icon in your browser address bar and allow microphone access.');
+        } else if (event.error === 'no-speech') {
+          alert('No speech detected. Please try again and speak clearly.');
+        } else {
+          alert(`Voice error: ${event.error}. Please try again.`);
+        }
+      };
+
+      recognition.onend = () => {
+        console.log('Voice recognition ended');
+        setIsListening(false);
+      };
+
+      recognition.start();
+      console.log('Recognition.start() called');
+    } catch (err) {
+      console.error('Failed to start recognition:', err);
+      alert('Failed to start voice recognition. Please try Chrome or Edge browser.');
       setIsListening(false);
-    };
-
-    recognition.start();
+    }
   };
 
   const fetchRecentRoutes = async () => {
