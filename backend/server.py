@@ -581,6 +581,371 @@ def build_weather_timeline(waypoints_weather: List[WaypointWeather]) -> List[Hou
     timeline.sort(key=lambda x: x.time)
     return timeline[:12]  # Return up to 12 hours
 
+def calculate_safety_score(waypoints_weather: List[WaypointWeather], vehicle_type: str = "car") -> SafetyScore:
+    """Calculate safety score based on weather conditions and vehicle type."""
+    vehicle = VEHICLE_TYPES.get(vehicle_type, VEHICLE_TYPES["car"])
+    
+    base_score = 100
+    factors = []
+    recommendations = []
+    
+    for wp in waypoints_weather:
+        if not wp.weather:
+            continue
+            
+        # Temperature risks
+        temp = wp.weather.temperature or 70
+        if temp < 32:
+            penalty = 15 * vehicle["ice_sensitivity"]
+            base_score -= penalty
+            if "Freezing temperatures - ice risk" not in factors:
+                factors.append("Freezing temperatures - ice risk")
+                recommendations.append("Reduce speed on bridges and overpasses")
+        elif temp < 40:
+            base_score -= 5 * vehicle["ice_sensitivity"]
+            
+        # Wind risks
+        wind_str = wp.weather.wind_speed or "0 mph"
+        try:
+            wind_speed = int(''.join(filter(str.isdigit, wind_str.split()[0])))
+        except:
+            wind_speed = 0
+            
+        if wind_speed > 30:
+            penalty = 20 * vehicle["wind_sensitivity"]
+            base_score -= penalty
+            if "High winds" not in factors:
+                factors.append("High winds")
+                if vehicle_type in ["semi", "rv", "trailer", "motorcycle"]:
+                    recommendations.append("Consider delaying trip - dangerous wind conditions for your vehicle")
+                else:
+                    recommendations.append("Maintain firm grip on steering wheel")
+        elif wind_speed > 20:
+            base_score -= 8 * vehicle["wind_sensitivity"]
+            
+        # Visibility/condition risks
+        conditions = (wp.weather.conditions or "").lower()
+        if "snow" in conditions or "blizzard" in conditions:
+            penalty = 25 * vehicle["visibility_sensitivity"]
+            base_score -= penalty
+            if "Snow/winter conditions" not in factors:
+                factors.append("Snow/winter conditions")
+                recommendations.append("Use winter driving mode, increase following distance")
+        elif "rain" in conditions or "storm" in conditions:
+            penalty = 15 * vehicle["visibility_sensitivity"]
+            base_score -= penalty
+            if "Rain/storm conditions" not in factors:
+                factors.append("Rain/storm conditions")
+                recommendations.append("Turn on headlights, reduce speed")
+        elif "fog" in conditions:
+            penalty = 20 * vehicle["visibility_sensitivity"]
+            base_score -= penalty
+            if "Low visibility - fog" not in factors:
+                factors.append("Low visibility - fog")
+                recommendations.append("Use low beam headlights, avoid sudden stops")
+                
+        # Alerts
+        for alert in wp.alerts:
+            if alert.severity in ["Extreme", "Severe"]:
+                base_score -= 20
+                if alert.event not in factors:
+                    factors.append(f"Weather alert: {alert.event}")
+    
+    # Clamp score
+    final_score = max(0, min(100, int(base_score)))
+    
+    # Determine risk level
+    if final_score >= 80:
+        risk_level = "low"
+    elif final_score >= 60:
+        risk_level = "moderate"
+    elif final_score >= 40:
+        risk_level = "high"
+    else:
+        risk_level = "extreme"
+        recommendations.insert(0, "⚠️ Consider postponing trip if possible")
+    
+    if not factors:
+        factors.append("Good driving conditions")
+    if not recommendations:
+        recommendations.append("Safe travels! Normal driving conditions expected")
+        
+    return SafetyScore(
+        overall_score=final_score,
+        risk_level=risk_level,
+        vehicle_type=vehicle.get("name", vehicle_type),
+        factors=factors[:5],
+        recommendations=recommendations[:4]
+    )
+
+def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_time: datetime) -> List[HazardAlert]:
+    """Generate proactive hazard alerts with countdown timers."""
+    alerts = []
+    
+    for wp in waypoints_weather:
+        if not wp.weather:
+            continue
+            
+        distance = wp.waypoint.distance_from_start or 0
+        eta_mins = wp.waypoint.eta_minutes or int(distance / 55 * 60)
+        
+        # Wind hazards
+        wind_str = wp.weather.wind_speed or "0 mph"
+        try:
+            wind_speed = int(''.join(filter(str.isdigit, wind_str.split()[0])))
+        except:
+            wind_speed = 0
+            
+        if wind_speed > 25:
+            severity = "extreme" if wind_speed > 40 else "high" if wind_speed > 30 else "medium"
+            alerts.append(HazardAlert(
+                type="wind",
+                severity=severity,
+                distance_miles=distance,
+                eta_minutes=eta_mins,
+                message=f"Strong winds of {wind_speed} mph",
+                recommendation=f"Reduce speed to {max(35, 65 - wind_speed + 25)} mph",
+                countdown_text=f"High winds in {eta_mins} minutes" if eta_mins > 0 else "High winds at start"
+            ))
+            
+        # Rain/visibility hazards
+        conditions = (wp.weather.conditions or "").lower()
+        if "heavy rain" in conditions or "storm" in conditions:
+            alerts.append(HazardAlert(
+                type="rain",
+                severity="high",
+                distance_miles=distance,
+                eta_minutes=eta_mins,
+                message="Heavy rain expected",
+                recommendation="Reduce speed, increase following distance to 4 seconds",
+                countdown_text=f"Heavy rain in {eta_mins} minutes at mile {int(distance)}"
+            ))
+        elif "rain" in conditions or "shower" in conditions:
+            alerts.append(HazardAlert(
+                type="rain",
+                severity="medium",
+                distance_miles=distance,
+                eta_minutes=eta_mins,
+                message="Rain expected",
+                recommendation="Turn on headlights and wipers",
+                countdown_text=f"Rain in {eta_mins} minutes"
+            ))
+            
+        # Snow/ice hazards
+        if "snow" in conditions:
+            alerts.append(HazardAlert(
+                type="snow",
+                severity="high",
+                distance_miles=distance,
+                eta_minutes=eta_mins,
+                message="Snow conditions expected",
+                recommendation="Reduce speed by 50%, use winter tires if available",
+                countdown_text=f"Snow conditions in {eta_mins} minutes"
+            ))
+            
+        # Temperature-based ice warnings
+        temp = wp.weather.temperature or 70
+        if temp <= 32:
+            alerts.append(HazardAlert(
+                type="ice",
+                severity="high",
+                distance_miles=distance,
+                eta_minutes=eta_mins,
+                message=f"Freezing temperature ({temp}°F) - ice risk",
+                recommendation="Watch for black ice on bridges and overpasses",
+                countdown_text=f"Ice risk zone in {eta_mins} minutes"
+            ))
+            
+        # Fog warnings
+        if "fog" in conditions:
+            alerts.append(HazardAlert(
+                type="visibility",
+                severity="high",
+                distance_miles=distance,
+                eta_minutes=eta_mins,
+                message="Fog reducing visibility",
+                recommendation="Use low beams, reduce speed to match visibility",
+                countdown_text=f"Fog in {eta_mins} minutes"
+            ))
+            
+        # Weather alerts from NOAA
+        for alert in wp.alerts:
+            severity_map = {"Extreme": "extreme", "Severe": "high", "Moderate": "medium"}
+            alerts.append(HazardAlert(
+                type="alert",
+                severity=severity_map.get(alert.severity, "medium"),
+                distance_miles=distance,
+                eta_minutes=eta_mins,
+                message=alert.event,
+                recommendation=alert.headline[:100],
+                countdown_text=f"{alert.event} in {eta_mins} minutes"
+            ))
+    
+    # Sort by distance and deduplicate similar alerts
+    alerts.sort(key=lambda x: x.distance_miles)
+    return alerts[:10]  # Return top 10 alerts
+
+async def find_rest_stops(route_geometry: str, waypoints_weather: List[WaypointWeather]) -> List[RestStop]:
+    """Find rest stops, gas stations along the route with weather at arrival."""
+    rest_stops = []
+    route_coords = polyline.decode(route_geometry)
+    
+    # Sample points along route (every ~75 miles)
+    total_points = len(route_coords)
+    sample_interval = max(1, total_points // 5)
+    
+    for i in range(sample_interval, total_points - sample_interval, sample_interval):
+        lat, lon = route_coords[i]
+        
+        # Calculate approximate distance and ETA
+        approx_distance = (i / total_points) * (waypoints_weather[-1].waypoint.distance_from_start or 100)
+        approx_eta = int(approx_distance / 55 * 60)
+        
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                # Search for POIs near this point
+                url = f"https://api.mapbox.com/geocoding/v5/mapbox.places/rest+stop+gas+station.json"
+                params = {
+                    'access_token': MAPBOX_ACCESS_TOKEN,
+                    'proximity': f"{lon},{lat}",
+                    'types': 'poi',
+                    'limit': 2
+                }
+                response = await client.get(url, params=params)
+                
+                if response.status_code == 200:
+                    data = response.json()
+                    for feature in data.get('features', [])[:1]:
+                        place_name = feature.get('text', 'Rest Stop')
+                        coords = feature.get('center', [lon, lat])
+                        
+                        # Find nearest waypoint weather
+                        weather_desc = "Unknown"
+                        temp = None
+                        for wp in waypoints_weather:
+                            if wp.weather and abs(wp.waypoint.distance_from_start - approx_distance) < 30:
+                                weather_desc = wp.weather.conditions or "Clear"
+                                temp = wp.weather.temperature
+                                break
+                        
+                        # Generate recommendation
+                        recommendation = "Good rest stop option"
+                        if temp and temp > 85:
+                            recommendation = "Cool down and hydrate here"
+                        elif "rain" in weather_desc.lower():
+                            recommendation = "Wait out the rain here"
+                        elif "clear" in weather_desc.lower() or "sunny" in weather_desc.lower():
+                            recommendation = "Good weather - stretch your legs!"
+                            
+                        rest_stops.append(RestStop(
+                            name=place_name,
+                            type="rest_area",
+                            lat=coords[1],
+                            lon=coords[0],
+                            distance_miles=round(approx_distance, 1),
+                            eta_minutes=approx_eta,
+                            weather_at_arrival=weather_desc,
+                            temperature_at_arrival=temp,
+                            recommendation=recommendation
+                        ))
+        except Exception as e:
+            logger.error(f"Error finding rest stops: {e}")
+            
+    return rest_stops[:5]
+
+def generate_trucker_warnings(waypoints_weather: List[WaypointWeather], vehicle_height_ft: Optional[float] = None) -> List[str]:
+    """Generate trucker-specific warnings for high-profile vehicles."""
+    warnings = []
+    
+    for wp in waypoints_weather:
+        if not wp.weather:
+            continue
+            
+        distance = wp.waypoint.distance_from_start or 0
+        location = wp.waypoint.name or f"Mile {int(distance)}"
+        
+        # Wind warnings for high-profile vehicles
+        wind_str = wp.weather.wind_speed or "0 mph"
+        try:
+            wind_speed = int(''.join(filter(str.isdigit, wind_str.split()[0])))
+        except:
+            wind_speed = 0
+            
+        if wind_speed > 20:
+            if wind_speed > 35:
+                warnings.append(f"⚠️ DANGER: {wind_speed} mph winds at {location} - Consider stopping until winds subside")
+            elif wind_speed > 25:
+                warnings.append(f"🚛 High crosswind risk ({wind_speed} mph) at {location} - Reduce speed significantly")
+            else:
+                warnings.append(f"💨 Moderate winds ({wind_speed} mph) at {location} - Stay alert")
+                
+        # Snow/ice warnings
+        conditions = (wp.weather.conditions or "").lower()
+        temp = wp.weather.temperature or 70
+        
+        if "snow" in conditions:
+            warnings.append(f"❄️ Snow at {location} - Chain requirements may be in effect")
+            
+        if temp <= 32:
+            warnings.append(f"🧊 Freezing temps at {location} - Bridge decks may be icy")
+            
+        # Visibility
+        if "fog" in conditions:
+            warnings.append(f"🌫️ Reduced visibility at {location} - Maintain safe following distance")
+            
+    # Deduplicate similar warnings
+    unique_warnings = []
+    seen = set()
+    for w in warnings:
+        key = w.split(" - ")[0]
+        if key not in seen:
+            unique_warnings.append(w)
+            seen.add(key)
+            
+    return unique_warnings[:8]
+
+def calculate_optimal_departure(origin: str, destination: str, waypoints_weather: List[WaypointWeather], base_departure: datetime) -> Optional[DepartureWindow]:
+    """Calculate optimal departure window based on weather patterns."""
+    # Analyze current conditions
+    current_hazards = 0
+    current_conditions = []
+    
+    for wp in waypoints_weather:
+        if wp.weather:
+            conditions = (wp.weather.conditions or "").lower()
+            if any(bad in conditions for bad in ["rain", "storm", "snow", "fog"]):
+                current_hazards += 1
+                current_conditions.append(wp.weather.conditions)
+        current_hazards += len(wp.alerts)
+    
+    # Calculate current safety score
+    safety = calculate_safety_score(waypoints_weather, "car")
+    
+    # Generate recommendation
+    if current_hazards == 0 and safety.overall_score >= 80:
+        recommendation = "✅ Current departure time is optimal - clear conditions expected"
+        conditions_summary = "Good driving conditions throughout your route"
+    elif current_hazards <= 2 and safety.overall_score >= 60:
+        recommendation = "👍 Acceptable conditions - drive with caution"
+        conditions_summary = f"Some weather: {', '.join(set(current_conditions)[:2]) if current_conditions else 'Minor concerns'}"
+    else:
+        # Suggest waiting
+        recommendation = "⏰ Consider departing 2-3 hours later for improved conditions"
+        conditions_summary = f"Current concerns: {', '.join(set(current_conditions)[:3]) if current_conditions else 'Weather alerts active'}"
+    
+    # Calculate estimated arrival
+    total_duration = waypoints_weather[-1].waypoint.eta_minutes if waypoints_weather else 120
+    arrival_time = base_departure + timedelta(minutes=total_duration)
+    
+    return DepartureWindow(
+        departure_time=base_departure.isoformat(),
+        arrival_time=arrival_time.isoformat(),
+        safety_score=safety.overall_score,
+        hazard_count=current_hazards,
+        recommendation=recommendation,
+        conditions_summary=conditions_summary
+    )
+
 async def generate_ai_summary(waypoints_weather: List[WaypointWeather], origin: str, destination: str, packing: List[PackingSuggestion]) -> str:
     """Generate AI-powered weather summary using Gemini Flash."""
     try:
