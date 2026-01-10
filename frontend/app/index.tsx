@@ -336,10 +336,33 @@ export default function HomeScreen() {
                     placeholder="Enter starting location"
                     placeholderTextColor="#6b7280"
                     value={origin}
-                    onChangeText={setOrigin}
+                    onChangeText={handleOriginChange}
+                    onFocus={() => origin.length >= 2 && setShowOriginSuggestions(originSuggestions.length > 0)}
+                    onBlur={() => setTimeout(() => setShowOriginSuggestions(false), 200)}
                     returnKeyType="next"
                   />
+                  {autocompleteLoading && origin.length >= 2 && (
+                    <ActivityIndicator size="small" color="#eab308" style={{ marginRight: 8 }} />
+                  )}
                 </View>
+                {/* Origin Suggestions Dropdown */}
+                {showOriginSuggestions && originSuggestions.length > 0 && (
+                  <View style={styles.suggestionsDropdown}>
+                    {originSuggestions.map((suggestion, index) => (
+                      <TouchableOpacity
+                        key={index}
+                        style={styles.suggestionItem}
+                        onPress={() => selectOriginSuggestion(suggestion)}
+                      >
+                        <Ionicons name="location-outline" size={16} color="#a1a1aa" />
+                        <View style={styles.suggestionTextContainer}>
+                          <Text style={styles.suggestionShortName}>{suggestion.short_name}</Text>
+                          <Text style={styles.suggestionFullName} numberOfLines={1}>{suggestion.place_name}</Text>
+                        </View>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
               </View>
 
               {/* Stops */}
