@@ -186,6 +186,32 @@ export default function HomeScreen() {
     setDestSuggestions([]);
   };
 
+  // AI Chat functions
+  const sendChatMessage = async (message?: string) => {
+    const msgToSend = message || chatMessage;
+    if (!msgToSend.trim()) return;
+    
+    setChatLoading(true);
+    setChatHistory(prev => [...prev, { role: 'user', text: msgToSend }]);
+    setChatMessage('');
+    
+    try {
+      const response = await axios.post(`${API_BASE}/api/chat`, {
+        message: msgToSend,
+        route_context: origin && destination ? `${origin} to ${destination}` : null
+      });
+      
+      setChatHistory(prev => [...prev, { role: 'ai', text: response.data.response }]);
+      if (response.data.suggestions) {
+        setChatSuggestions(response.data.suggestions);
+      }
+    } catch (err) {
+      setChatHistory(prev => [...prev, { role: 'ai', text: "Sorry, I couldn't process that. Please try again." }]);
+    } finally {
+      setChatLoading(false);
+    }
+  };
+
   const fetchRecentRoutes = async () => {
     try {
       const response = await axios.get(`${API_BASE}/api/routes/history`);
