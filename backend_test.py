@@ -11,7 +11,7 @@ from datetime import datetime
 from typing import Dict, Any
 
 # Use the production URL from frontend .env
-BASE_URL = "https://journey-weather.preview.emergentagent.com/api"
+BASE_URL = "https://roadweather.preview.emergentagent.com/api"
 
 class RoutecastAPITester:
     def __init__(self):
