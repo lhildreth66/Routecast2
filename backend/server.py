@@ -1117,6 +1117,24 @@ async def get_route_weather(request: RouteRequest):
     # Generate AI summary
     ai_summary = await generate_ai_summary(list(waypoints_weather), request.origin, request.destination, packing_suggestions)
     
+    # NEW: Calculate safety score based on vehicle type
+    vehicle_type = request.vehicle_type or "car"
+    safety_score = calculate_safety_score(list(waypoints_weather), vehicle_type)
+    
+    # NEW: Generate hazard alerts with countdown
+    hazard_alerts = generate_hazard_alerts(list(waypoints_weather), departure_time)
+    
+    # NEW: Find rest stops along the route
+    rest_stops = await find_rest_stops(route_geometry, list(waypoints_weather))
+    
+    # NEW: Calculate optimal departure window
+    optimal_departure = calculate_optimal_departure(request.origin, request.destination, list(waypoints_weather), departure_time)
+    
+    # NEW: Generate trucker-specific warnings if enabled
+    trucker_warnings = []
+    if request.trucker_mode:
+        trucker_warnings = generate_trucker_warnings(list(waypoints_weather), request.vehicle_height_ft)
+    
     response = RouteWeatherResponse(
         origin=request.origin,
         destination=request.destination,
@@ -1128,7 +1146,14 @@ async def get_route_weather(request: RouteRequest):
         ai_summary=ai_summary,
         has_severe_weather=has_severe,
         packing_suggestions=packing_suggestions,
-        weather_timeline=weather_timeline
+        weather_timeline=weather_timeline,
+        # New fields
+        safety_score=safety_score,
+        hazard_alerts=hazard_alerts,
+        rest_stops=rest_stops,
+        optimal_departure=optimal_departure,
+        trucker_warnings=trucker_warnings,
+        vehicle_type=vehicle_type
     )
     
     # Save to database
