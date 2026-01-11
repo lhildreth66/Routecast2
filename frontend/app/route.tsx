@@ -731,7 +731,8 @@ export default function RouteScreen() {
                     routeData.waypoints[Math.floor(routeData.waypoints.length / 2)]?.waypoint.lat || 39.8283,
                     routeData.waypoints[Math.floor(routeData.waypoints.length / 2)]?.waypoint.lon || -98.5795
                   )}
-                  style={{ flex: 1, border: 'none', width: '100%', height: '100%' }}
+                  style={{ flex: 1, border: 'none', width: '100%', height: '100%', touchAction: 'none' }}
+                  allowFullScreen
                 />
               ) : (
                 <WebView
@@ -742,6 +743,13 @@ export default function RouteScreen() {
                   style={styles.radarWebView}
                   javaScriptEnabled={true}
                   domStorageEnabled={true}
+                  scalesPageToFit={true}
+                  scrollEnabled={false}
+                  bounces={false}
+                  overScrollMode="never"
+                  nestedScrollEnabled={false}
+                  setBuiltInZoomControls={false}
+                  setDisplayZoomControls={false}
                 />
               )}
             </View>
