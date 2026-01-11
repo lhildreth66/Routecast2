@@ -927,41 +927,96 @@ export default function RouteScreen() {
         {/* Alerts Tab */}
         {activeTab === 'alerts' && (
           <View style={styles.alertsTab}>
-            <Text style={styles.sectionTitle}>Hazard Countdown Alerts</Text>
+            <Text style={styles.sectionTitle}>⚠️ Weather Alerts Along Route</Text>
+            <Text style={styles.sectionSubtitle}>Tap any alert to see full details</Text>
             
             {routeData.hazard_alerts && routeData.hazard_alerts.length > 0 ? (
-              routeData.hazard_alerts.map((alert, index) => (
-                <View key={index} style={[
-                  styles.alertCard,
-                  alert.severity === 'extreme' ? styles.alertExtreme :
-                  alert.severity === 'high' ? styles.alertHigh : styles.alertMedium
-                ]}>
-                  <View style={styles.alertHeader}>
-                    <Ionicons 
-                      name={
-                        alert.type === 'ice' ? 'snow' :
-                        alert.type === 'rain' ? 'rainy' :
-                        alert.type === 'wind' ? 'cloudy' :
-                        'warning'
-                      } 
-                      size={28} 
-                      color="#fff" 
-                    />
-                    <View style={styles.alertInfo}>
-                      <Text style={styles.alertCountdown}>{alert.countdown_text}</Text>
-                      <Text style={styles.alertMessage}>{alert.message}</Text>
+              routeData.hazard_alerts.map((alert, index) => {
+                const isExpanded = expandedCards.has(index + 1000); // Use offset to differentiate from road cards
+                
+                return (
+                  <TouchableOpacity 
+                    key={index} 
+                    style={[
+                      styles.alertCard,
+                      alert.severity === 'extreme' ? styles.alertExtreme :
+                      alert.severity === 'high' ? styles.alertHigh : styles.alertMedium,
+                      isExpanded && styles.alertCardExpanded
+                    ]}
+                    onPress={() => toggleCardExpand(index + 1000)}
+                    activeOpacity={0.8}
+                  >
+                    <View style={styles.alertHeader}>
+                      <Ionicons 
+                        name={
+                          alert.type === 'ice' ? 'snow' :
+                          alert.type === 'rain' ? 'rainy' :
+                          alert.type === 'wind' ? 'cloudy' :
+                          'warning'
+                        } 
+                        size={28} 
+                        color="#fff" 
+                      />
+                      <View style={styles.alertInfo}>
+                        <Text style={styles.alertCountdown}>{alert.countdown_text}</Text>
+                        <Text style={styles.alertMessage}>{alert.message}</Text>
+                      </View>
+                      <Ionicons 
+                        name={isExpanded ? "chevron-up" : "chevron-down"} 
+                        size={20} 
+                        color="#fff" 
+                      />
                     </View>
-                  </View>
-                  <View style={styles.alertAction}>
-                    <Ionicons name="checkmark-circle" size={16} color="#22c55e" />
-                    <Text style={styles.alertRec}>{alert.recommendation}</Text>
-                  </View>
-                  <View style={styles.alertMeta}>
-                    <Text style={styles.alertDistance}>📍 {Math.round(alert.distance_miles)} mi</Text>
-                    <Text style={styles.alertEta}>⏱ {alert.eta_minutes} min</Text>
-                  </View>
-                </View>
-              ))
+                    
+                    {/* Expanded Alert Details */}
+                    {isExpanded && (
+                      <View style={styles.alertExpandedContent}>
+                        <View style={styles.alertFullDescription}>
+                          <Text style={styles.alertFullTitle}>Full Alert Details:</Text>
+                          <Text style={styles.alertFullText}>
+                            {alert.full_description || alert.description || 
+                             `This ${alert.message || 'weather alert'} is active for your route area. ` +
+                             `Exercise caution and monitor local weather updates. ` +
+                             `Conditions may include reduced visibility, slippery roads, or other hazards.`}
+                          </Text>
+                        </View>
+                        
+                        {alert.instruction && (
+                          <View style={styles.alertInstructionBox}>
+                            <Text style={styles.alertInstructionTitle}>📋 What To Do:</Text>
+                            <Text style={styles.alertInstructionText}>{alert.instruction}</Text>
+                          </View>
+                        )}
+                        
+                        <View style={styles.alertAction}>
+                          <Ionicons name="checkmark-circle" size={16} color="#22c55e" />
+                          <Text style={styles.alertRec}>{alert.recommendation}</Text>
+                        </View>
+                      </View>
+                    )}
+                    
+                    {!isExpanded && (
+                      <>
+                        <View style={styles.alertAction}>
+                          <Ionicons name="checkmark-circle" size={16} color="#22c55e" />
+                          <Text style={styles.alertRec}>{alert.recommendation}</Text>
+                        </View>
+                        <View style={styles.alertMeta}>
+                          <Text style={styles.alertDistance}>📍 {Math.round(alert.distance_miles)} mi</Text>
+                          <Text style={styles.alertEta}>⏱ {alert.eta_minutes} min</Text>
+                        </View>
+                      </>
+                    )}
+                    
+                    {isExpanded && (
+                      <View style={styles.alertMeta}>
+                        <Text style={styles.alertDistance}>📍 {Math.round(alert.distance_miles)} mi away</Text>
+                        <Text style={styles.alertEta}>⏱ ETA: {alert.eta_minutes} min</Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                );
+              })
             ) : (
               <View style={styles.noAlerts}>
                 <Ionicons name="checkmark-circle" size={64} color="#22c55e" />
