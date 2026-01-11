@@ -674,43 +674,69 @@ export default function RouteScreen() {
             )}
 
             {/* Waypoint Road Conditions */}
-            <Text style={styles.sectionTitle}>Road Conditions by Location</Text>
+            <Text style={styles.sectionTitle}>🛣️ Road Surface Conditions</Text>
+            <Text style={styles.sectionSubtitle}>Based on current weather at each location</Text>
             {routeData.waypoints.map((wp, index) => {
               // Derive road condition from weather
               const temp = wp.weather?.temperature || 50;
               const conditions = (wp.weather?.conditions || '').toLowerCase();
               const hasAlert = wp.alerts.length > 0;
+              const windSpeed = wp.weather?.wind_speed ? parseInt(wp.weather.wind_speed) : 0;
               
               let condIcon = '✓';
               let condLabel = 'DRY';
               let condColor = '#22c55e';
-              let condDesc = 'Good conditions';
+              let condDesc = 'Roads clear and dry';
+              let roadSurface = 'Normal driving conditions';
               
               if (hasAlert) {
                 condIcon = '⚠️';
-                condLabel = 'ALERT';
+                condLabel = 'HAZARD';
                 condColor = '#ef4444';
-                condDesc = wp.alerts[0]?.event || 'Weather alert';
-              } else if (temp <= 32 && (conditions.includes('rain') || conditions.includes('freezing'))) {
+                condDesc = wp.alerts[0]?.event || 'Weather alert active';
+                roadSurface = 'Check conditions before driving';
+              } else if (temp <= 32 && (conditions.includes('rain') || conditions.includes('freezing') || conditions.includes('drizzle'))) {
                 condIcon = '🧊';
                 condLabel = 'ICY';
                 condColor = '#ef4444';
-                condDesc = `Freezing ${temp}°F - Ice likely`;
-              } else if (conditions.includes('snow')) {
+                condDesc = `BLACK ICE LIKELY - ${temp}°F`;
+                roadSurface = 'Roads may be ice-covered. Reduce speed significantly.';
+              } else if (temp <= 32 && conditions.includes('snow')) {
                 condIcon = '❄️';
                 condLabel = 'SNOW';
-                condColor = '#93c5fd';
-                condDesc = 'Snow-covered roads';
-              } else if (conditions.includes('fog')) {
+                condColor = '#60a5fa';
+                condDesc = `SNOW-COVERED ROADS - ${temp}°F`;
+                roadSurface = 'Snow accumulation on roadway. Use caution.';
+              } else if (temp > 32 && temp <= 40 && conditions.includes('snow')) {
+                condIcon = '🌨️';
+                condLabel = 'SLUSH';
+                condColor = '#f59e0b';
+                condDesc = `SLUSHY CONDITIONS - ${temp}°F`;
+                roadSurface = 'Wet, slushy roads. Reduced traction.';
+              } else if (conditions.includes('fog') || conditions.includes('mist')) {
                 condIcon = '🌫️';
                 condLabel = 'FOG';
                 condColor = '#9ca3af';
-                condDesc = 'Low visibility';
-              } else if (conditions.includes('rain') || conditions.includes('shower')) {
+                condDesc = 'LIMITED VISIBILITY';
+                roadSurface = 'Use low beams. Increase following distance.';
+              } else if (conditions.includes('rain') || conditions.includes('shower') || conditions.includes('drizzle')) {
                 condIcon = '💧';
                 condLabel = 'WET';
                 condColor = '#3b82f6';
-                condDesc = 'Wet roads';
+                condDesc = 'WET ROADS';
+                roadSurface = 'Reduced traction. Watch for hydroplaning.';
+              } else if (conditions.includes('thunder') || conditions.includes('storm')) {
+                condIcon = '⛈️';
+                condLabel = 'STORM';
+                condColor = '#7c3aed';
+                condDesc = 'STORM CONDITIONS';
+                roadSurface = 'Heavy rain, possible flooding. Consider delaying.';
+              } else if (windSpeed > 30) {
+                condIcon = '💨';
+                condLabel = 'WINDY';
+                condColor = '#f59e0b';
+                condDesc = `HIGH WINDS - ${windSpeed} mph`;
+                roadSurface = 'Crosswinds may affect vehicle control.';
               }
               
               return (
@@ -724,8 +750,9 @@ export default function RouteScreen() {
                       {wp.waypoint.name || `Mile ${Math.round(wp.waypoint.distance_from_start || 0)}`}
                     </Text>
                     <Text style={styles.conditionDesc}>{condDesc}</Text>
+                    <Text style={styles.roadSurface}>{roadSurface}</Text>
                     <Text style={styles.conditionWeather}>
-                      {wp.weather?.temperature}°F • {wp.weather?.conditions || 'Clear'}
+                      Weather: {wp.weather?.temperature}°F • {wp.weather?.conditions || 'Clear'}
                     </Text>
                   </View>
                   <View style={styles.conditionMeta}>
