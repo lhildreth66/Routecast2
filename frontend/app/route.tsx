@@ -302,8 +302,8 @@ const generateRadarMapHtml = (centerLat: number, centerLon: number): string => {
       <script>
         // US-only bounds - absolutely NO other countries
         var usBounds = L.latLngBounds(
-          L.latLng(27.5, -120),  // Southwest - raised to cut off ALL of Mexico
-          L.latLng(48, -70)      // Northeast
+          L.latLng(29, -118),   // Southwest - high enough to cut Mexico completely
+          L.latLng(48, -72)     // Northeast
         );
         
         var map = L.map('map', { 
@@ -316,8 +316,8 @@ const generateRadarMapHtml = (centerLat: number, centerLon: number): string => {
           bounceAtZoomLimits: true
         });
         
-        // Fit to US, centered a bit higher to avoid showing Mexico
-        map.fitBounds(usBounds, { padding: [5, 5] });
+        // Start zoomed in more - centered on mid-US
+        map.setView([39, -95], 5);
         
         // Dark base map
         L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
