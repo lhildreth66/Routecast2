@@ -300,20 +300,29 @@ const generateRadarMapHtml = (centerLat: number, centerLon: number): string => {
         </div>
       </div>
       <script>
-        // US-only view with smooth zoom
+        // Initialize map with explicit touch zoom settings
         var map = L.map('map', { 
           zoomControl: false,
           attributionControl: false,
-          minZoom: 5,  // Prevents zooming out enough to see other countries
+          minZoom: 4,
           maxZoom: 12,
+          // Enable all zoom methods
+          touchZoom: 'center',
+          scrollWheelZoom: true,
+          doubleClickZoom: true,
+          boxZoom: false,
+          // Smooth zooming
+          zoomSnap: 0.1,
+          zoomDelta: 0.5,
+          wheelPxPerZoomLevel: 60,
+          // No restrictions
           bounceAtZoomLimits: false,
           worldCopyJump: false,
-          touchZoom: true,
-          zoomSnap: 0,
-          zoomDelta: 0.25
+          inertia: true,
+          inertiaDeceleration: 3000
         });
         
-        // Start centered on US at zoom level that only shows US
+        // Center on US
         map.setView([39, -96], 5);
         
         // Dark base map
@@ -321,6 +330,14 @@ const generateRadarMapHtml = (centerLat: number, centerLon: number): string => {
           maxZoom: 19,
           attribution: ''
         }).addTo(map);
+        
+        // Force enable touch handlers
+        if (map.touchZoom) {
+          map.touchZoom.enable();
+        }
+        if (map.dragging) {
+          map.dragging.enable();
+        }
         
         // RainViewer radar layer
         var radarLayer = null;
