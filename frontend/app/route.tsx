@@ -1228,14 +1228,21 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   conditionDesc: {
-    color: '#a1a1aa',
-    fontSize: 12,
+    color: '#fbbf24',
+    fontSize: 13,
+    fontWeight: '600',
     marginTop: 2,
+  },
+  roadSurface: {
+    color: '#a1a1aa',
+    fontSize: 11,
+    marginTop: 2,
+    fontStyle: 'italic',
   },
   conditionWeather: {
     color: '#6b7280',
-    fontSize: 11,
-    marginTop: 2,
+    fontSize: 10,
+    marginTop: 4,
   },
   conditionMeta: {
     alignItems: 'flex-end',
