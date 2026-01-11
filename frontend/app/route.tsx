@@ -1404,13 +1404,68 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   conditionCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
     backgroundColor: '#27272a',
     borderRadius: 10,
     padding: 10,
     marginBottom: 8,
+  },
+  conditionCardExpanded: {
+    borderWidth: 1,
+    borderColor: '#fbbf24',
+  },
+  conditionCardMain: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
+  },
+  expandIndicator: {
+    padding: 4,
+  },
+  alertDetailBox: {
+    marginTop: 12,
+    padding: 12,
+    backgroundColor: '#1f1f23',
+    borderRadius: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: '#fbbf24',
+  },
+  alertDetailHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  alertDetailTitle: {
+    color: '#fbbf24',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  alertDetailDesc: {
+    color: '#d4d4d8',
+    fontSize: 13,
+    lineHeight: 20,
+  },
+  alertDetailInstruction: {
+    marginTop: 10,
+    padding: 10,
+    backgroundColor: '#27272a',
+    borderRadius: 6,
+  },
+  alertDetailInstructionLabel: {
+    color: '#22c55e',
+    fontSize: 11,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  alertDetailInstructionText: {
+    color: '#a1a1aa',
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  alertDetailExpires: {
+    marginTop: 8,
+    color: '#6b7280',
+    fontSize: 11,
   },
   mileMarkerBox: {
     backgroundColor: '#3f3f46',
