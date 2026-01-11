@@ -786,13 +786,13 @@ export default function RouteScreen() {
             )}
 
             {/* Waypoint Road Conditions */}
-            <Text style={styles.sectionTitle}>🛣️ Road Surface Conditions</Text>
-            <Text style={styles.sectionSubtitle}>Based on current weather at each location</Text>
+            <Text style={styles.sectionTitle}>🛣️ Road Conditions Along Route</Text>
+            <Text style={styles.sectionSubtitle}>Weather-based road surface conditions</Text>
             {routeData.waypoints.map((wp, index) => {
-              // Derive road condition from weather
+              // Derive road condition from weather ONLY (no alerts shown here)
               const temp = wp.weather?.temperature || 50;
               const conditions = (wp.weather?.conditions || '').toLowerCase();
-              const hasAlert = wp.alerts.length > 0;
+              const windSpeed = wp.weather?.wind_speed ? parseInt(wp.weather.wind_speed) : 0;
               const windSpeed = wp.weather?.wind_speed ? parseInt(wp.weather.wind_speed) : 0;
               
               let condIcon = '✓';
