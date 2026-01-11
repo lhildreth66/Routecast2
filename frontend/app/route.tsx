@@ -300,18 +300,20 @@ const generateRadarMapHtml = (centerLat: number, centerLon: number): string => {
         </div>
       </div>
       <script>
-        // US-only view - free zoom without bounce
+        // US-only view with smooth zoom
         var map = L.map('map', { 
           zoomControl: false,
           attributionControl: false,
-          minZoom: 4,
+          minZoom: 5,  // Prevents zooming out enough to see other countries
           maxZoom: 12,
-          // Remove all bounce/restriction settings to allow free zoom
           bounceAtZoomLimits: false,
-          worldCopyJump: false
+          worldCopyJump: false,
+          touchZoom: true,
+          zoomSnap: 0,
+          zoomDelta: 0.25
         });
         
-        // Start centered on US
+        // Start centered on US at zoom level that only shows US
         map.setView([39, -96], 5);
         
         // Dark base map
