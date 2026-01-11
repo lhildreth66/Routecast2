@@ -378,6 +378,14 @@ const generateRadarMapHtml = (centerLat: number, centerLon: number): string => {
             }, 500);
           }
         };
+        
+        // Zoom button handlers
+        document.getElementById('zoomInBtn').onclick = function() {
+          map.zoomIn();
+        };
+        document.getElementById('zoomOutBtn').onclick = function() {
+          map.zoomOut();
+        };
       </script>
     </body>
     </html>
