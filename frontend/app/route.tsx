@@ -271,23 +271,24 @@ const generateRadarMapHtml = (centerLat: number, centerLon: number): string => {
         </div>
       </div>
       <script>
-        // Strict continental US bounds only - no Mexico, Canada
-        var southWest = L.latLng(28, -120);
-        var northEast = L.latLng(47, -72);
-        var usBounds = L.latLngBounds(southWest, northEast);
-        
+        // US-centered map with free zoom/pan (no bounce-back)
         var map = L.map('map', { 
-          zoomControl: false,
+          zoomControl: true,
           attributionControl: false,
-          maxBounds: usBounds,
-          maxBoundsViscosity: 1.0,
-          minZoom: 5,
-          maxZoom: 10
+          minZoom: 3,
+          maxZoom: 12,
+          zoomSnap: 0.5,
+          zoomDelta: 0.5,
+          wheelPxPerZoomLevel: 120
         }).setView([${usLat}, ${usLon}], 6);
         
-        // Dark base map
+        // Position zoom control
+        map.zoomControl.setPosition('topleft');
+        
+        // Dark base map - US focused
         L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-          maxZoom: 19
+          maxZoom: 19,
+          attribution: ''
         }).addTo(map);
         
         // RainViewer radar layer
