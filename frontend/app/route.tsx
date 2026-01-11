@@ -271,27 +271,26 @@ const generateRadarMapHtml = (centerLat: number, centerLon: number): string => {
         </div>
       </div>
       <script>
-        // Strict continental US bounds only
-        var southWest = L.latLng(25, -124);
-        var northEast = L.latLng(48, -68);
+        // Strict continental US bounds only - no Mexico, Canada, or Caribbean
+        var southWest = L.latLng(26, -123);
+        var northEast = L.latLng(48, -70);
         var usBounds = L.latLngBounds(southWest, northEast);
         
         var map = L.map('map', { 
           zoomControl: false,
           attributionControl: false,
-          maxBounds: usBounds.pad(0.05),
+          maxBounds: usBounds.pad(0.02),
           maxBoundsViscosity: 1.0,
-          minZoom: 4,
+          minZoom: 5,
           maxZoom: 10
         }).setView([${usLat}, ${usLon}], 5);
         
-        // Fit to US bounds initially
-        map.fitBounds(usBounds);
+        // Fit to US bounds initially, but padded to show only US
+        map.setMaxBounds(usBounds.pad(0.02));
         
         // Dark base map
         L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-          maxZoom: 19,
-          bounds: usBounds
+          maxZoom: 19
         }).addTo(map);
         
         // RainViewer radar layer
