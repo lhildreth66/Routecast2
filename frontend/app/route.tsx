@@ -544,27 +544,44 @@ export default function RouteScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
+      {/* Compact Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
+          <Text style={styles.backText}>Back</Text>
         </TouchableOpacity>
-        <View style={styles.headerCenter}>
-          <Text style={styles.headerTitle} numberOfLines={1}>
-            {routeData.origin.split(',')[0]} → {routeData.destination.split(',')[0]}
-          </Text>
-          <Text style={styles.headerSubtitle}>
-            {routeData.total_distance_miles ? `${Math.round(routeData.total_distance_miles)} mi` : ''} • {routeData.total_duration_minutes ? formatDuration(routeData.total_duration_minutes) : ''}
-            {routeData.safety_score ? ` • Safety: ${routeData.safety_score.overall_score}` : ''}
+        <View style={styles.headerActions}>
+          <TouchableOpacity onPress={() => setShowRadarMap(true)} style={styles.radarBtn}>
+            <Ionicons name="radio-outline" size={18} color="#22c55e" />
+            <Text style={styles.radarBtnText}>Radar</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={speakSummary} style={styles.speakBtn}>
+            <Ionicons name={isSpeaking ? "stop-circle" : "volume-high"} size={22} color={isSpeaking ? "#ef4444" : "#60a5fa"} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={shareRoute} style={styles.shareBtn}>
+            <Ionicons name="share-outline" size={22} color="#fff" />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Route Stats Bar */}
+      <View style={styles.statsBar}>
+        <View style={styles.statItem}>
+          <Ionicons name="speedometer-outline" size={16} color="#60a5fa" />
+          <Text style={styles.statValue}>{routeData.total_distance_miles ? `${Math.round(routeData.total_distance_miles)} mi` : '--'}</Text>
+        </View>
+        <View style={styles.statDivider} />
+        <View style={styles.statItem}>
+          <Ionicons name="time-outline" size={16} color="#60a5fa" />
+          <Text style={styles.statValue}>{routeData.total_duration_minutes ? formatDuration(routeData.total_duration_minutes) : '--'}</Text>
+        </View>
+        <View style={styles.statDivider} />
+        <View style={styles.statItem}>
+          <Ionicons name="shield-checkmark-outline" size={16} color={routeData.safety_score ? getSafetyColor(routeData.safety_score.overall_score) : '#6b7280'} />
+          <Text style={[styles.statValue, { color: routeData.safety_score ? getSafetyColor(routeData.safety_score.overall_score) : '#6b7280' }]}>
+            {routeData.safety_score ? `${routeData.safety_score.overall_score}/100` : '--'}
           </Text>
         </View>
-        <TouchableOpacity onPress={() => setShowRadarMap(true)} style={styles.radarBtn}>
-          <Ionicons name="radio-outline" size={18} color="#22c55e" />
-          <Text style={styles.radarBtnText}>Radar</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={speakSummary} style={styles.speakBtn}>
-          <Ionicons name={isSpeaking ? "stop-circle" : "volume-high"} size={24} color={isSpeaking ? "#ef4444" : "#60a5fa"} />
-        </TouchableOpacity>
       </View>
 
       {/* Radar Map Modal */}
