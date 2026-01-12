@@ -307,8 +307,8 @@ const generateRadarMapHtml = (centerLat: number, centerLon: number): string => {
         // Center on US
         map.setView([39, -96], 5);
         
-        // Dark base map
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        // Light base map (Positron - white/light green)
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
           maxZoom: 19,
           attribution: ''
         }).addTo(map);
