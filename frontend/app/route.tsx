@@ -321,48 +321,69 @@ const generateRadarMapHtml = (centerLat: number, centerLon: number): string => {
           map.dragging.enable();
         }
         
-        // NOAA NWS Radar - shows rain, snow, and mixed precipitation
+        // RainViewer radar with smooth tiles and snow coverage
         var radarLayer = null;
-        var currentTime = new Date();
+        var radarFrames = [];
+        var currentFrame = 0;
+        var isPlaying = false;
+        var playInterval = null;
         
-        // Add NOAA radar layer (Iowa Environmental Mesonet - official NWS data)
-        function updateRadar() {
-          var timestamp = Math.floor(Date.now() / 1000);
-          var timeStr = new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+        // Fetch radar data from RainViewer
+        fetch('https://api.rainviewer.com/public/weather-maps.json')
+          .then(response => response.json())
+          .then(data => {
+            radarFrames = data.radar.past.concat(data.radar.nowcast || []);
+            if (radarFrames.length > 0) {
+              currentFrame = radarFrames.length - 1;
+              showRadarFrame(currentFrame);
+            }
+          })
+          .catch(err => {
+            document.getElementById('timeDisplay').textContent = 'Radar unavailable';
+          });
+        
+        function showRadarFrame(index) {
+          if (index < 0 || index >= radarFrames.length) return;
+          
+          var frame = radarFrames[index];
+          var timestamp = new Date(frame.time * 1000);
+          var timeStr = timestamp.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+          
           document.getElementById('timeDisplay').textContent = 'Radar: ' + timeStr;
           
           if (radarLayer) {
             map.removeLayer(radarLayer);
           }
           
-          // NOAA/NWS composite radar - includes ALL precipitation types (rain, snow, ice, mixed)
+          // Smooth tiles with snow: /256/{z}/{x}/{y}/{colorScheme}/{smooth}_{snow}.png
+          // colorScheme 2 = Universal Blue (clean look)
+          // smooth 1 = smooth rendering
+          // snow 1 = show snow coverage
           radarLayer = L.tileLayer(
-            'https://mesonet.agron.iastate.edu/cache/tile.py/1.0.0/ridge::USCOMP-N0Q-0/{z}/{x}/{y}.png?_=' + timestamp,
+            'https://tilecache.rainviewer.com' + frame.path + '/512/{z}/{x}/{y}/2/1_1.png',
             {
-              opacity: 0.5,
+              opacity: 0.6,
               zIndex: 100,
-              attribution: 'NOAA/NWS'
+              tileSize: 512,
+              zoomOffset: -1
             }
           ).addTo(map);
         }
         
-        // Initial load
-        updateRadar();
-        
-        // Add labels layer ON TOP of radar so they're always visible
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_only_labels/{z}/{x}/{y}{r}.png', {
-          maxZoom: 19,
-          zIndex: 200
-        }).addTo(map);
-        
-        // Auto-refresh every 5 minutes
-        setInterval(updateRadar, 300000);
-        
-        // Play button refreshes radar
+        // Play/pause animation
         document.getElementById('playBtn').onclick = function() {
-          updateRadar();
-          this.textContent = '↻';
-          setTimeout(() => { this.textContent = '▶'; }, 1000);
+          if (isPlaying) {
+            clearInterval(playInterval);
+            isPlaying = false;
+            this.textContent = '▶';
+          } else {
+            isPlaying = true;
+            this.textContent = '⏸';
+            playInterval = setInterval(function() {
+              currentFrame = (currentFrame + 1) % radarFrames.length;
+              showRadarFrame(currentFrame);
+            }, 500);
+          }
         };
         
         // Zoom button handlers
