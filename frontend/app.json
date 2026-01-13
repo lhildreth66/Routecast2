@@ -9,7 +9,6 @@
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "description": "Plan your road trip with real-time weather forecasts along your route. Get alerts for bad weather and AI-powered driving recommendations.",
-    "owner": "promedtrans01",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.routecast.app",
