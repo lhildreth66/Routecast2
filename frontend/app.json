@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "Routecast",
-    "slug": "routecast",
+    "name": "Routecast2",
+    "slug": "routecast2",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -81,7 +81,7 @@
     },
     "extra": {
       "eas": {
-        "projectId": ""
+        "projectId": "7b6c21be-1c86-4aee-b78e-0be00853818f"
       }
     }
   }
