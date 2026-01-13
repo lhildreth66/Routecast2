@@ -3,43 +3,7 @@
     "name": "Routecast2",
     "slug": "routecast2",
     "version": "1.0.0",
-    "orientation": "portrait",
-    "icon": "./assets/images/icon.png",
-    "scheme": "routecast",
-    "userInterfaceStyle": "dark",
-    "newArchEnabled": true,
     "description": "Plan your road trip with real-time weather forecasts along your route. Get alerts for bad weather and AI-powered driving recommendations.",
-    "ios": {
-      "supportsTablet": true,
-      "bundleIdentifier": "com.routecast.app",
-      "buildNumber": "1",
-      "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Routecast needs your location to show weather along your route.",
-        "NSLocationAlwaysAndWhenInUseUsageDescription": "Routecast needs your location to provide weather updates during your trip.",
-        "UIBackgroundModes": ["location", "fetch", "remote-notification"]
-      }
-    },
-    "android": {
-      "package": "com.routecast.app",
-      "versionCode": 1,
-      "adaptiveIcon": {
-        "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#0a0a0a"
-      },
-      "edgeToEdgeEnabled": true,
-      "permissions": [
-        "ACCESS_COARSE_LOCATION",
-        "ACCESS_FINE_LOCATION",
-        "ACCESS_BACKGROUND_LOCATION",
-        "RECEIVE_BOOT_COMPLETED",
-        "VIBRATE",
-        "WAKE_LOCK",
-        "SCHEDULE_EXACT_ALARM",
-        "POST_NOTIFICATIONS",
-        "INTERNET",
-        "ACCESS_NETWORK_STATE"
-      ]
-    },
     "web": {
       "bundler": "metro",
       "output": "static",
