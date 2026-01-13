@@ -7,7 +7,7 @@
     "icon": "./assets/images/icon.png",
     "scheme": "routecast",
     "userInterfaceStyle": "dark",
-    "newArchEnabled": false,
+    "newArchEnabled": true,
     "description": "Plan your road trip with real-time weather forecasts along your route. Get alerts for bad weather and AI-powered driving recommendations.",
     "ios": {
       "supportsTablet": true,

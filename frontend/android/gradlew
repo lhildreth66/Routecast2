@@ -1,7 +1,9 @@
 #!/bin/sh
 
-# Set Java 21 for compatibility with Gradle and build tools
-export JAVA_HOME=/home/codespace/java/21.0.9-ms
+# Prefer user-provided JAVA_HOME (EAS sets this). Only fall back to the Codespaces path if it exists.
+if [ -z "$JAVA_HOME" ] && [ -d /home/codespace/java/21.0.9-ms ]; then
+    export JAVA_HOME=/home/codespace/java/21.0.9-ms
+fi
 
 #
 # Copyright © 2015-2021 the original authors.
