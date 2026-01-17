@@ -14,7 +14,15 @@ import polyline
 from openai import AsyncOpenAI
 import asyncio
 import math
-from emergentintegrations.llm.chat import LlmChat, UserMessage
+
+# Optional: emergentintegrations for chat (not available in Render)
+try:
+    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    CHAT_AVAILABLE = True
+except ImportError:
+    CHAT_AVAILABLE = False
+    LlmChat = None
+    UserMessage = None
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -1646,6 +1654,12 @@ async def autocomplete_location(query: str, limit: int = 5):
 @api_router.post("/chat", response_model=ChatResponse)
 async def driver_chat(request: ChatMessage):
     """AI-powered chat for drivers to ask questions about weather, routes, and driving."""
+    if not CHAT_AVAILABLE:
+        return ChatResponse(
+            response="Chat feature is not available. Please check your route conditions on the main screen or contact support.",
+            suggestions=["Check road conditions", "View weather alerts", "Contact support"]
+        )
+    
     try:
         # Initialize the chat with Emergent LLM
         chat = LlmChat(
