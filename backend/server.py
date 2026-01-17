@@ -1598,6 +1598,8 @@ async def geocode(location: str):
 @api_router.get("/geocode/autocomplete")
 async def autocomplete_location(query: str, limit: int = 5):
     """Get autocomplete suggestions for a location query using Mapbox."""
+    print("AUTOCOMPLETE ROUTE HIT")
+    logger.info(f"Autocomplete request: query={query}, limit={limit}")
     if not query or len(query) < 2:
         return []
     
@@ -1702,9 +1704,7 @@ Always prioritize safety in your recommendations."""
             suggestions=["Check road conditions", "View weather alerts", "Contact support"]
         )
 
-# Include the router in the main app
-app.include_router(api_router)
-
+# Add CORS middleware first, before including router
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
@@ -1712,6 +1712,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include the router in the main app
+app.include_router(api_router)
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
