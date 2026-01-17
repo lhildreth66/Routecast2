@@ -44,8 +44,9 @@ NOAA_HEADERS = {
 # Create the main app
 app = FastAPI()
 
-# Create a router with the /api prefix
+# Create routers
 api_router = APIRouter(prefix="/api")
+geocode_router = APIRouter()
 
 # Configure logging
 logging.basicConfig(
@@ -1587,7 +1588,8 @@ async def get_route_by_id(route_id: str):
         logger.error(f"Error fetching route {route_id}: {e}")
         raise HTTPException(status_code=500, detail="Error fetching route")
 
-@api_router.post("/geocode")
+# Geocode endpoints under dedicated router
+@geocode_router.post("")
 async def geocode(location: str):
     """Geocode a location string."""
     coords = await geocode_location(location)
@@ -1595,7 +1597,7 @@ async def geocode(location: str):
         raise HTTPException(status_code=404, detail="Location not found")
     return coords
 
-@api_router.get("/geocode/autocomplete")
+@geocode_router.get("/autocomplete")
 async def autocomplete_location(query: str, limit: int = 5):
     """Get autocomplete suggestions for a location query using Mapbox."""
     print("AUTOCOMPLETE ROUTE HIT")
@@ -1713,7 +1715,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include the router in the main app
+# Include routers in the main app
+app.include_router(geocode_router, prefix="/api/geocode")
 app.include_router(api_router)
 
 @app.on_event("shutdown")
