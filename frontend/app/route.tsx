@@ -20,8 +20,8 @@ import * as Speech from 'expo-speech';
 import { format, parseISO } from 'date-fns';
 import axios from 'axios';
 import { WebView } from 'react-native-webview';
+import { API_BASE } from './apiConfig';
 
-const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 // Types
@@ -168,13 +168,13 @@ const generateRadarMapHtml = (centerLat: number, centerLon: number): string => {
           left: 0;
           right: 0;
           height: 50px;
-          background: rgba(24,24,27,0.98);
+          background: rgba(30,30,30,0.95);
           z-index: 1000;
           font-family: -apple-system, BlinkMacSystemFont, sans-serif;
           display: flex;
           flex-direction: column;
           padding: 8px 16px;
-          border-top: 1px solid #3f3f46;
+          border-top: 1px solid #555;
         }
         .gradient-legend {
           display: flex;
@@ -182,8 +182,8 @@ const generateRadarMapHtml = (centerLat: number, centerLon: number): string => {
           gap: 4px;
         }
         .gradient-bar {
-          height: 8px;
-          border-radius: 4px;
+          height: 10px;
+          border-radius: 5px;
           background: linear-gradient(to right, 
             #00ff00 0%, 
             #ffff00 20%, 
@@ -194,6 +194,7 @@ const generateRadarMapHtml = (centerLat: number, centerLon: number): string => {
             #91d3ff 80%, 
             #ffffff 100%
           );
+          border: 1px solid #444;
         }
         .gradient-labels {
           display: flex;
