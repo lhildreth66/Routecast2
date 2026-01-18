@@ -16,6 +16,7 @@ import asyncio
 from bridge_database import get_bridge_warnings
 from road_passability_service import RoadPassabilityService
 from solar_forecast_service import SolarForecastService
+from propane_usage_service import PropaneUsageService
 
 # Google Gemini for chat
 try:
@@ -315,6 +316,25 @@ class SolarForecastResponse(BaseModel):
     panel_watts: Optional[float] = None
     shade_pct: Optional[float] = None
     advisory: Optional[str] = None
+    is_premium_locked: bool = False
+    premium_message: Optional[str] = None
+
+class PropaneUsageRequest(BaseModel):
+    """Request for propane consumption estimate (Premium feature)"""
+    furnace_btu: int  # Furnace BTU capacity (e.g., 20000, 30000)
+    duty_cycle_pct: float  # Percentage furnace runs (0-100, will be clamped)
+    nights_temp_f: List[int]  # Nightly low temperatures in Fahrenheit
+    people: int = 2  # Number of people in RV (default: 2)
+    subscription_id: Optional[str] = None  # For premium gating
+
+class PropaneUsageResponse(BaseModel):
+    """Response for propane consumption estimate"""
+    daily_lbs: Optional[List[float]] = None  # lbs propane per day
+    nights_temp_f: Optional[List[int]] = None  # Echo of input temperatures
+    furnace_btu: Optional[int] = None
+    duty_cycle_pct: Optional[float] = None
+    people: Optional[int] = None
+    advisory: Optional[str] = None  # Human-readable summary
     is_premium_locked: bool = False
     premium_message: Optional[str] = None
 
@@ -2163,6 +2183,95 @@ async def forecast_solar_energy(request: SolarForecastRequest):
         raise HTTPException(
             status_code=500,
             detail="Unable to forecast solar energy at this time"
+        )
+
+@api_router.post("/pro/propane-usage", response_model=PropaneUsageResponse)
+async def estimate_propane_usage(request: PropaneUsageRequest):
+    """
+    Estimate daily propane consumption for RV boondocking.
+    
+    PREMIUM FEATURE - Requires active Boondocking Pro subscription.
+    
+    Args:
+        furnace_btu: Furnace heating capacity in BTU (e.g., 20000, 30000)
+        duty_cycle_pct: Percentage of time furnace runs (0-100, will be clamped)
+        nights_temp_f: List of nightly low temperatures in Fahrenheit
+        people: Number of people in RV (default: 2)
+        subscription_id: Optional subscription ID for premium access validation
+    
+    Returns:
+        - If premium locked: paywall message
+        - If authorized: daily lbs/day list with advisory
+    
+    Logging: All premium feature access logged with [PREMIUM] prefix
+    """
+    logger.info(f"[PREMIUM] Propane usage estimate requested")
+    
+    # Check premium entitlement
+    is_premium = False
+    if request.subscription_id:
+        # Verify subscription is active
+        try:
+            sub = await db.subscriptions.find_one(
+                {'subscription_id': request.subscription_id, 'status': 'active'}
+            )
+            is_premium = sub is not None
+            
+            if is_premium:
+                logger.info(f"[PREMIUM] Propane usage accessed by: {request.subscription_id}")
+        except Exception as e:
+            logger.error(f"[PREMIUM] Error checking subscription: {e}")
+            is_premium = False
+    
+    # Return premium-locked response if not authorized
+    if not is_premium:
+        logger.info(f"[PREMIUM] Propane usage access denied - premium required")
+        return PropaneUsageResponse(
+            is_premium_locked=True,
+            premium_message="Upgrade to Routecast Pro to estimate propane consumption for boondocking trips."
+        )
+    
+    # Call pure domain service
+    try:
+        daily_lbs = PropaneUsageService.estimate_lbs_per_day(
+            furnace_btu=request.furnace_btu,
+            duty_cycle_pct=request.duty_cycle_pct,
+            nights_temp_f=request.nights_temp_f,
+            people=request.people,
+        )
+        
+        # Generate advisory text
+        advisory = PropaneUsageService.format_advisory(
+            furnace_btu=request.furnace_btu,
+            duty_cycle_pct=request.duty_cycle_pct,
+            nights_temp_f=request.nights_temp_f,
+            people=request.people,
+            daily_lbs=daily_lbs,
+        )
+        
+        logger.info(f"[PREMIUM] Propane usage estimate completed successfully")
+        
+        # Convert domain result to API response
+        return PropaneUsageResponse(
+            daily_lbs=daily_lbs,
+            nights_temp_f=request.nights_temp_f,
+            furnace_btu=request.furnace_btu,
+            duty_cycle_pct=request.duty_cycle_pct,
+            people=request.people,
+            advisory=advisory,
+            is_premium_locked=False,
+        )
+    except ValueError as e:
+        logger.error(f"[PREMIUM] Invalid parameters for propane usage: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid parameters: {str(e)}"
+        )
+    except Exception as e:
+        logger.error(f"[PREMIUM] Error estimating propane usage: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to estimate propane usage at this time"
         )
 
 # Add CORS middleware first, before including router
