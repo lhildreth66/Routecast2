@@ -14,6 +14,7 @@ import httpx
 import polyline
 import asyncio
 from bridge_database import get_bridge_warnings
+from road_passability_service import RoadPassabilityService
 
 # Google Gemini for chat
 try:
@@ -275,6 +276,26 @@ class SubscriptionResponse(BaseModel):
     is_valid: bool
     subscription_id: str
     message: str
+
+class RoadPassabilityRequest(BaseModel):
+    """Request for road passability assessment (Premium feature)"""
+    precip_72h: float  # Precipitation in last 72h (mm)
+    slope_pct: float   # Road grade percentage
+    min_temp_f: float  # Minimum temperature (°F)
+    soil_type: str     # Soil type: clay, sand, rocky, loam
+    subscription_id: Optional[str] = None  # For premium gating
+
+class RoadPassabilityResponse(BaseModel):
+    """Response for road passability assessment"""
+    passability_score: float  # 0-100
+    condition_assessment: str  # Excellent, Good, Fair, Poor, Impassable
+    advisory: str
+    min_clearance_cm: float
+    recommended_vehicle_type: str  # sedan, suv, 4x4
+    needs_four_x_four: bool
+    risks: Dict[str, bool]  # mud_risk, ice_risk, deep_rut_risk, high_clearance_recommended, four_x_four_recommended
+    is_premium_locked: bool = False
+    premium_message: Optional[str] = None
 
 # ==================== Helper Functions ====================
 
@@ -1945,6 +1966,100 @@ async def get_feature_gating_info():
             },
         ]
     }
+
+# ==================== Premium Features Endpoints ====================
+
+@api_router.post("/pro/road-passability", response_model=RoadPassabilityResponse)
+async def assess_road_passability(request: RoadPassabilityRequest):
+    """
+    Assess road passability and conditions along a route segment.
+    
+    PREMIUM FEATURE - Requires active subscription.
+    
+    Args:
+        precip_72h: Precipitation in last 72 hours (mm)
+        slope_pct: Road grade/slope percentage
+        min_temp_f: Minimum temperature (°F)
+        soil_type: Soil type classification
+        subscription_id: Optional subscription ID for premium access validation
+    
+    Returns:
+        - If premium locked: 403 with paywall message
+        - If authorized: Complete passability assessment with score, risks, recommendations
+    
+    Logging: All premium feature access logged with [PREMIUM] prefix
+    """
+    logger.info(f"[PREMIUM] Road passability assessment requested")
+    
+    # Check premium entitlement
+    is_premium = False
+    if request.subscription_id:
+        # Verify subscription is active
+        try:
+            sub = await db.subscriptions.find_one(
+                {'subscription_id': request.subscription_id, 'status': 'active'}
+            )
+            is_premium = sub is not None
+            
+            if is_premium:
+                logger.info(f"[PREMIUM] Road passability accessed by: {request.subscription_id}")
+        except Exception as e:
+            logger.error(f"[PREMIUM] Error checking subscription: {e}")
+            is_premium = False
+    
+    # Return premium-locked response if not authorized
+    if not is_premium:
+        logger.info(f"[PREMIUM] Road passability access denied - premium required")
+        return RoadPassabilityResponse(
+            passability_score=0,
+            condition_assessment="Unavailable",
+            advisory="Upgrade to Routecast Pro to assess road conditions by soil type and weather",
+            min_clearance_cm=0,
+            recommended_vehicle_type="unknown",
+            needs_four_x_four=False,
+            risks={},
+            is_premium_locked=True,
+            premium_message="This feature requires Routecast Pro. Upgrade to unlock mud/ice/grade analysis."
+        )
+    
+    # Call pure domain service
+    try:
+        result = RoadPassabilityService.assess_road_passability(
+            precip_72h=request.precip_72h,
+            slope_pct=request.slope_pct,
+            min_temp_f=request.min_temp_f,
+            soil_type=request.soil_type,
+        )
+        
+        # Convert domain result to API response
+        return RoadPassabilityResponse(
+            passability_score=result.passability_score,
+            condition_assessment=result.condition_assessment,
+            advisory=result.advisory,
+            min_clearance_cm=result.min_clearance_cm,
+            recommended_vehicle_type=result.recommended_vehicle_type,
+            needs_four_x_four=result.risks.four_x_four_recommended,
+            risks={
+                'mud_risk': result.risks.mud_risk,
+                'ice_risk': result.risks.ice_risk,
+                'deep_rut_risk': result.risks.deep_rut_risk,
+                'high_clearance_recommended': result.risks.high_clearance_recommended,
+                'four_x_four_recommended': result.risks.four_x_four_recommended,
+            },
+            is_premium_locked=False,
+        )
+    except ValueError as e:
+        logger.error(f"[PREMIUM] Invalid parameters for road passability: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid parameters: {str(e)}"
+        )
+    except Exception as e:
+        logger.error(f"[PREMIUM] Error assessing road passability: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to assess road passability at this time"
+        )
 
 # Add CORS middleware first, before including router
 app.add_middleware(
