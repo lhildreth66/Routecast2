@@ -1309,7 +1309,8 @@ Be concise and practical."""
 
         # Use Gemini for summary if available
         if CHAT_AVAILABLE and GOOGLE_API_KEY:
-            model = genai.GenerativeModel(model_name='gemini-1.5-flash')\n            loop = asyncio.get_event_loop()
+            model = genai.GenerativeModel(model_name='gemini-1.5-flash')
+            loop = asyncio.get_event_loop()
             response_obj = await loop.run_in_executor(
                 None,
                 lambda: model.generate_content(prompt)
