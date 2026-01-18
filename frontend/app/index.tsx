@@ -18,10 +18,8 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import DateTimePicker from '@react-native-community/datetimepicker';
 import { format } from 'date-fns';
-
-const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+import { API_BASE } from './apiConfig';
 
 // Vehicle types for safety scoring
 const VEHICLE_TYPES = [
@@ -757,71 +755,52 @@ export default function HomeScreen() {
                 </TouchableOpacity>
               </View>
               
-              {Platform.OS === 'web' ? (
-                // Web-compatible date/time input
-                <View style={styles.webDatePicker}>
-                  <Text style={styles.datePickerLabel}>Date</Text>
-                  <input
-                    type="date"
-                    value={departureTime.toISOString().split('T')[0]}
-                    min={new Date().toISOString().split('T')[0]}
-                    onChange={(e) => {
-                      const newDate = new Date(departureTime);
-                      const [year, month, day] = e.target.value.split('-');
-                      newDate.setFullYear(parseInt(year), parseInt(month) - 1, parseInt(day));
-                      setDepartureTime(newDate);
-                    }}
-                    style={{
-                      width: '100%',
-                      padding: 12,
-                      fontSize: 16,
-                      backgroundColor: '#3f3f46',
-                      border: '1px solid #52525b',
-                      borderRadius: 8,
-                      color: '#fff',
-                      marginBottom: 16,
-                    }}
-                  />
-                  
-                  <Text style={styles.datePickerLabel}>Time</Text>
-                  <input
-                    type="time"
-                    value={`${String(departureTime.getHours()).padStart(2, '0')}:${String(departureTime.getMinutes()).padStart(2, '0')}`}
-                    onChange={(e) => {
-                      const newDate = new Date(departureTime);
-                      const [hours, minutes] = e.target.value.split(':');
-                      newDate.setHours(parseInt(hours), parseInt(minutes));
-                      setDepartureTime(newDate);
-                    }}
-                    style={{
-                      width: '100%',
-                      padding: 12,
-                      fontSize: 16,
-                      backgroundColor: '#3f3f46',
-                      border: '1px solid #52525b',
-                      borderRadius: 8,
-                      color: '#fff',
-                      marginBottom: 16,
-                    }}
-                  />
-                  
-                  <Text style={styles.selectedDateTime}>
-                    Selected: {format(departureTime, 'MMM d, yyyy h:mm a')}
-                  </Text>
-                </View>
-              ) : (
-                // Native DateTimePicker for iOS/Android
-                <DateTimePicker
-                  value={departureTime}
-                  mode="datetime"
-                  display="spinner"
-                  onChange={(event, date) => {
-                    if (date) setDepartureTime(date);
+              {/* Custom Date/Time Picker */}
+              <View style={styles.customDatePicker}>
+                <Text style={styles.datePickerLabel}>Date</Text>
+                <TextInput
+                  style={styles.dateInput}
+                  value={departureTime.toISOString().split('T')[0]}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor="#6b7280"
+                  onChangeText={(text) => {
+                    try {
+                      const [year, month, day] = text.split('-');
+                      if (year && month && day) {
+                        const newDate = new Date(departureTime);
+                        newDate.setFullYear(parseInt(year), parseInt(month) - 1, parseInt(day));
+                        setDepartureTime(newDate);
+                      }
+                    } catch (e) {
+                      console.log('Date parse error:', e);
+                    }
                   }}
-                  textColor="#fff"
-                  minimumDate={new Date()}
                 />
-              )}
+                
+                <Text style={[styles.datePickerLabel, { marginTop: 12 }]}>Time</Text>
+                <TextInput
+                  style={styles.dateInput}
+                  value={`${String(departureTime.getHours()).padStart(2, '0')}:${String(departureTime.getMinutes()).padStart(2, '0')}`}
+                  placeholder="HH:MM"
+                  placeholderTextColor="#6b7280"
+                  onChangeText={(text) => {
+                    try {
+                      const [hours, minutes] = text.split(':');
+                      if (hours && minutes) {
+                        const newDate = new Date(departureTime);
+                        newDate.setHours(parseInt(hours), parseInt(minutes));
+                        setDepartureTime(newDate);
+                      }
+                    } catch (e) {
+                      console.log('Time parse error:', e);
+                    }
+                  }}
+                />
+                
+                <Text style={[styles.datePickerLabel, { marginTop: 16, fontWeight: '600' }]}>
+                  Selected: {format(departureTime, 'MMM d, yyyy h:mm a')}
+                </Text>
+              </View>
               
               <TouchableOpacity 
                 style={styles.modalButton}
@@ -1398,6 +1377,32 @@ const styles = StyleSheet.create({
     color: '#1a1a1a',
     fontSize: 15,
     fontWeight: '700',
+  },
+  customDatePicker: {
+    marginVertical: 16,
+    gap: 12,
+  },
+  datePickerLabel: {
+    color: '#a1a1aa',
+    fontSize: 12,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+  },
+  dateInput: {
+    backgroundColor: '#3f3f46',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontSize: 15,
+    color: '#fff',
+    borderWidth: 1,
+    borderColor: '#52525b',
+  },
+  selectedDateTime: {
+    color: '#eab308',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   suggestionsDropdown: {
     backgroundColor: '#3f3f46',
