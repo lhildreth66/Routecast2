@@ -924,6 +924,10 @@ def generate_trucker_warnings(waypoints_weather: List[WaypointWeather], vehicle_
     """Generate trucker-specific warnings for high-profile vehicles."""
     warnings = []
     
+    # Default to standard semi truck height if not provided
+    if vehicle_height_ft is None:
+        vehicle_height_ft = 13.5
+    
     for wp in waypoints_weather:
         if not wp.weather:
             continue
@@ -931,7 +935,7 @@ def generate_trucker_warnings(waypoints_weather: List[WaypointWeather], vehicle_
         distance = wp.waypoint.distance_from_start or 0
         location = wp.waypoint.name or f"Mile {int(distance)}"
         
-        # Wind warnings for high-profile vehicles
+        # WIND WARNINGS for high-profile vehicles
         wind_str = wp.weather.wind_speed or "0 mph"
         try:
             wind_speed = int(''.join(filter(str.isdigit, wind_str.split()[0])))
@@ -940,36 +944,43 @@ def generate_trucker_warnings(waypoints_weather: List[WaypointWeather], vehicle_
             
         if wind_speed > 20:
             if wind_speed > 35:
-                warnings.append(f"⚠️ DANGER: {wind_speed} mph winds at {location} - Consider stopping until winds subside")
+                warnings.append(f"⚠️ DANGER: {wind_speed} mph winds at {location} - IMMEDIATE: Consider stopping until winds subside")
             elif wind_speed > 25:
-                warnings.append(f"🚛 High crosswind risk ({wind_speed} mph) at {location} - Reduce speed significantly")
+                warnings.append(f"🚛 High crosswind risk ({wind_speed} mph) at {location} - Reduce speed significantly and exercise caution")
             else:
-                warnings.append(f"💨 Moderate winds ({wind_speed} mph) at {location} - Stay alert")
+                warnings.append(f"💨 Moderate winds ({wind_speed} mph) at {location} - Stay alert and maintain firm grip on wheel")
                 
-        # Snow/ice warnings
+        # SNOW/ICE WARNINGS - especially critical for bridge clearances
         conditions = (wp.weather.conditions or "").lower()
         temp = wp.weather.temperature or 70
         
         if "snow" in conditions:
-            warnings.append(f"❄️ Snow at {location} - Chain requirements may be in effect")
+            warnings.append(f"❄️ SNOW at {location} - Chain requirements may be in effect; bridges ice before roads")
             
         if temp <= 32:
-            warnings.append(f"🧊 Freezing temps at {location} - Bridge decks may be icy")
+            warnings.append(f"🧊 Freezing ({temp}°F) at {location} - BLACK ICE RISK on bridges/overpasses; reduce speed to 35 mph")
             
-        # Visibility
+        # VISIBILITY WARNINGS
         if "fog" in conditions:
-            warnings.append(f"🌫️ Reduced visibility at {location} - Maintain safe following distance")
+            warnings.append(f"🌫️ Fog at {location} - Reduced visibility; maintain 10+ second following distance")
+        
+        if "rain" in conditions and temp <= 40:
+            warnings.append(f"🌧️ Cold rain at {location} - Roads may be slick; bridges freeze first")
             
-    # Deduplicate similar warnings
+        # BRIDGE CLEARANCE INFORMATION (generic since we don't have real bridge data)
+        if vehicle_height_ft and vehicle_height_ft > 12:
+            warnings.append(f"📏 Vehicle height {vehicle_height_ft} ft - Standard overpasses are 14-16 ft; avoid low-clearance bridges")
+    
+    # Deduplicate similar warnings and limit
     unique_warnings = []
     seen = set()
     for w in warnings:
-        key = w.split(" - ")[0]
+        key = w.split(" - ")[0][:20]  # Use first 20 chars as key
         if key not in seen:
             unique_warnings.append(w)
             seen.add(key)
             
-    return unique_warnings[:8]
+    return unique_warnings[:10]  # Return top 10 warnings
 
 def calculate_optimal_departure(origin: str, destination: str, waypoints_weather: List[WaypointWeather], base_departure: datetime) -> Optional[DepartureWindow]:
     """Calculate optimal departure window based on weather patterns."""

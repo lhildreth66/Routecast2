@@ -74,6 +74,7 @@ export default function HomeScreen() {
   const [vehicleType, setVehicleType] = useState('car');
   const [truckerMode, setTruckerMode] = useState(false);
   const [showVehicleSelector, setShowVehicleSelector] = useState(false);
+  const [vehicleHeight, setVehicleHeight] = useState('13.5'); // Default semi truck height in feet
   
   // Departure time
   const [departureTime, setDepartureTime] = useState(new Date());
@@ -328,6 +329,11 @@ export default function HomeScreen() {
         vehicle_type: vehicleType,
         trucker_mode: truckerMode,
       };
+      
+      // Include vehicle height if in trucker mode
+      if (truckerMode && vehicleHeight) {
+        requestData.vehicle_height_ft = parseFloat(vehicleHeight);
+      }
       
       if (useCustomTime) {
         requestData.departure_time = departureTime.toISOString();
@@ -625,6 +631,26 @@ export default function HomeScreen() {
                   thumbColor={truckerMode ? '#f59e0b' : '#71717a'}
                 />
               </View>
+
+              {/* Vehicle Height Input (shown when trucker mode enabled) */}
+              {truckerMode && (
+                <View style={styles.heightInput}>
+                  <Text style={styles.heightLabel}>Vehicle Height (feet)</Text>
+                  <View style={styles.heightInputContainer}>
+                    <TextInput
+                      style={styles.heightInputField}
+                      placeholder="13.5"
+                      placeholderTextColor="#9ca3af"
+                      value={vehicleHeight}
+                      onChangeText={setVehicleHeight}
+                      keyboardType="decimal-pad"
+                      editable={truckerMode}
+                    />
+                    <Text style={styles.heightUnit}>ft</Text>
+                  </View>
+                  <Text style={styles.heightHint}>Standard semi: 13.5 ft | Box truck: 10-12 ft | RV: 12-14 ft</Text>
+                </View>
+              )}
 
               {/* Weather Alerts Toggle */}
               <View style={styles.alertsToggle}>
@@ -1550,6 +1576,48 @@ const styles = StyleSheet.create({
   truckerSubtext: {
     color: '#6b7280',
     fontSize: 11,
+  },
+  heightInput: {
+    backgroundColor: '#3f3f46',
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 12,
+    borderLeftWidth: 3,
+    borderLeftColor: '#f59e0b',
+  },
+  heightLabel: {
+    color: '#e4e4e7',
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  heightInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  heightInputField: {
+    flex: 1,
+    backgroundColor: '#27272a',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    color: '#ffffff',
+    fontSize: 16,
+    borderWidth: 1,
+    borderColor: '#52525b',
+  },
+  heightUnit: {
+    color: '#a1a1aa',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  heightHint: {
+    color: '#71717a',
+    fontSize: 11,
+    marginTop: 6,
+    fontStyle: 'italic',
   },
   vehicleModalSubtext: {
     color: '#a1a1aa',
