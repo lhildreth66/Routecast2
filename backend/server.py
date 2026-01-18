@@ -17,6 +17,7 @@ from bridge_database import get_bridge_warnings
 from road_passability_service import RoadPassabilityService
 from solar_forecast_service import SolarForecastService
 from propane_usage_service import PropaneUsageService
+from water_budget_service import WaterBudgetService
 
 # Google Gemini for chat
 try:
@@ -334,6 +335,27 @@ class PropaneUsageResponse(BaseModel):
     furnace_btu: Optional[int] = None
     duty_cycle_pct: Optional[float] = None
     people: Optional[int] = None
+    advisory: Optional[str] = None  # Human-readable summary
+    is_premium_locked: bool = False
+    premium_message: Optional[str] = None
+
+class WaterBudgetRequest(BaseModel):
+    """Request for water budget estimation (Premium feature)"""
+    fresh_gal: int  # Capacity of fresh water tank in gallons
+    gray_gal: int   # Capacity of gray water tank in gallons
+    black_gal: int  # Capacity of black water tank in gallons
+    people: int = 2  # Number of people in RV (default: 2)
+    showers_per_week: float = 2  # Number of showers per week (default: 2)
+    hot_days: bool = False  # Whether it's hot weather (affects usage)
+    subscription_id: Optional[str] = None  # For premium gating
+
+class WaterBudgetResponse(BaseModel):
+    """Response for water budget estimation"""
+    days_remaining: Optional[int] = None  # Days until first tank runs out
+    limiting_factor: Optional[str] = None  # Which tank limits trip: fresh/gray/black
+    daily_fresh_gal: Optional[float] = None  # Daily fresh water usage
+    daily_gray_gal: Optional[float] = None   # Daily gray water usage
+    daily_black_gal: Optional[float] = None  # Daily black water usage
     advisory: Optional[str] = None  # Human-readable summary
     is_premium_locked: bool = False
     premium_message: Optional[str] = None
@@ -2272,6 +2294,97 @@ async def estimate_propane_usage(request: PropaneUsageRequest):
         raise HTTPException(
             status_code=500,
             detail="Unable to estimate propane usage at this time"
+        )
+
+@api_router.post("/pro/water-budget", response_model=WaterBudgetResponse)
+async def estimate_water_budget(request: WaterBudgetRequest):
+    """
+    Estimate days remaining before water tanks run out during boondocking.
+    
+    PREMIUM FEATURE - Requires active Boondocking Pro subscription.
+    
+    Water usage model:
+    - Fresh water: 2 gal/person/day for drinking & cooking
+    - Gray water: 2 gal/person/day for sinks + shower water (33 gal/shower)
+    - Black water: 1 gal/person/day for toilet + hand wash
+    - Temperature adjustment: 1.2x usage in hot weather, 0.85x in cool weather
+    - Days remaining: min(fresh_days, gray_days, black_days) - limited by first tank
+    
+    Args:
+        fresh_gal: Fresh water tank capacity in gallons
+        gray_gal: Gray water tank capacity in gallons
+        black_gal: Black water tank capacity in gallons
+        people: Number of people in RV (default: 2)
+        showers_per_week: Showers per week (default: 2)
+        hot_days: Whether it's hot weather (affects water usage)
+        subscription_id: Optional subscription ID for premium access validation
+    
+    Returns:
+        - If premium locked: paywall message
+        - If authorized: days_remaining with limiting_factor and daily usage breakdown
+    
+    Logging: All premium feature access logged with [PREMIUM] prefix
+    """
+    logger.info(f"[PREMIUM] Water budget estimate requested")
+    
+    # Check premium entitlement
+    is_premium = False
+    if request.subscription_id:
+        # Verify subscription is active
+        try:
+            sub = await db.subscriptions.find_one(
+                {'subscription_id': request.subscription_id, 'status': 'active'}
+            )
+            is_premium = sub is not None
+            
+            if is_premium:
+                logger.info(f"[PREMIUM] Water budget accessed by: {request.subscription_id}")
+        except Exception as e:
+            logger.error(f"[PREMIUM] Error checking subscription: {e}")
+            is_premium = False
+    
+    # Return premium-locked response if not authorized
+    if not is_premium:
+        logger.info(f"[PREMIUM] Water budget access denied - premium required")
+        return WaterBudgetResponse(
+            is_premium_locked=True,
+            premium_message="Upgrade to Routecast Pro to plan water usage for boondocking trips."
+        )
+    
+    # Call pure domain service
+    try:
+        result = WaterBudgetService.days_remaining_with_breakdown(
+            fresh_gal=request.fresh_gal,
+            gray_gal=request.gray_gal,
+            black_gal=request.black_gal,
+            people=request.people,
+            showers_per_week=request.showers_per_week,
+            hot_days=request.hot_days,
+        )
+        
+        logger.info(f"[PREMIUM] Water budget estimate completed successfully")
+        
+        # Convert domain result to API response
+        return WaterBudgetResponse(
+            days_remaining=result.days_remaining,
+            limiting_factor=result.limiting_factor,
+            daily_fresh_gal=result.daily_fresh_gal,
+            daily_gray_gal=result.daily_gray_gal,
+            daily_black_gal=result.daily_black_gal,
+            advisory=result.advisory,
+            is_premium_locked=False,
+        )
+    except ValueError as e:
+        logger.error(f"[PREMIUM] Invalid parameters for water budget: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid parameters: {str(e)}"
+        )
+    except Exception as e:
+        logger.error(f"[PREMIUM] Unexpected error estimating water budget: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to estimate water budget at this time"
         )
 
 # Add CORS middleware first, before including router
