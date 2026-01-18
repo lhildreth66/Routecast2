@@ -156,7 +156,7 @@ const generateRadarMapHtml = (centerLat: number, centerLon: number): string => {
         }
         #map { 
           width: 100%; 
-          height: calc(100% - 130px);
+          height: calc(100% - 120px);
           touch-action: none;
         }
         .leaflet-container {
@@ -164,7 +164,7 @@ const generateRadarMapHtml = (centerLat: number, centerLon: number): string => {
         }
         .legend-bar {
           position: fixed;
-          bottom: 0;
+          bottom: 60px;
           left: 0;
           right: 0;
           height: 50px;
@@ -175,6 +175,7 @@ const generateRadarMapHtml = (centerLat: number, centerLon: number): string => {
           flex-direction: column;
           justify-content: center;
           padding: 8px 16px;
+          border-radius: 8px 8px 0 0;
           border-top: 1px solid #555;
           box-shadow: 0 -2px 8px rgba(0,0,0,0.4);
         }
@@ -210,17 +211,18 @@ const generateRadarMapHtml = (centerLat: number, centerLon: number): string => {
         }
         .controls-row {
           position: fixed;
-          bottom: 80px;
+          bottom: 8px;
           left: 50%;
           transform: translateX(-50%);
           display: flex;
           align-items: center;
           gap: 12px;
-          background: rgba(24,24,27,0.9);
-          padding: 6px 14px;
+          background: rgba(24,24,27,0.95);
+          padding: 8px 16px;
           border-radius: 20px;
           z-index: 999;
           max-width: 90%;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.4);
         }
         .time-display {
           color: #eab308;
