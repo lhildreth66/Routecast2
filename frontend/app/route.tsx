@@ -469,7 +469,7 @@ export default function RouteScreen() {
   const params = useLocalSearchParams();
   const [routeData, setRouteData] = useState<RouteData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'conditions' | 'directions' | 'alerts'>('conditions');
+  const [activeTab, setActiveTab] = useState<'conditions' | 'alerts'>('conditions');
   const [isSpeaking, setIsSpeaking] = useState(false);
   
   // Radar map state
@@ -821,13 +821,6 @@ export default function RouteScreen() {
           <Text style={[styles.tabText, activeTab === 'conditions' && styles.tabTextActive]}>Road</Text>
         </TouchableOpacity>
         <TouchableOpacity 
-          style={[styles.tab, activeTab === 'directions' && styles.tabActive]}
-          onPress={() => setActiveTab('directions')}
-        >
-          <Ionicons name="navigate" size={18} color={activeTab === 'directions' ? '#eab308' : '#6b7280'} />
-          <Text style={[styles.tabText, activeTab === 'directions' && styles.tabTextActive]}>Directions</Text>
-        </TouchableOpacity>
-        <TouchableOpacity 
           style={[styles.tab, activeTab === 'alerts' && styles.tabActive]}
           onPress={() => setActiveTab('alerts')}
         >
@@ -961,54 +954,6 @@ export default function RouteScreen() {
           </View>
         )}
 
-        {/* Turn-by-Turn Directions Tab */}
-        {activeTab === 'directions' && (
-          <View style={styles.directionsTab}>
-            <TouchableOpacity style={styles.openMapsBtn} onPress={openInMaps}>
-              <Ionicons name="navigate" size={20} color="#fff" />
-              <Text style={styles.openMapsText}>Open in Maps App</Text>
-            </TouchableOpacity>
-
-            <Text style={styles.sectionTitle}>Turn-by-Turn with Road Conditions</Text>
-            
-            {routeData.turn_by_turn && routeData.turn_by_turn.length > 0 ? (
-              routeData.turn_by_turn.map((step, index) => (
-                <View key={index} style={[styles.stepCard, step.has_alert && styles.stepCardAlert]}>
-                  <View style={styles.stepIcon}>
-                    <Ionicons 
-                      name={getManeuverIcon(step.maneuver) as any} 
-                      size={20} 
-                      color={step.has_alert ? '#ef4444' : '#60a5fa'} 
-                    />
-                  </View>
-                  <View style={styles.stepContent}>
-                    <Text style={styles.stepInstruction}>{step.instruction}</Text>
-                    <Text style={styles.stepRoad}>{step.road_name}</Text>
-                    <View style={styles.stepMeta}>
-                      <Text style={styles.stepDistance}>{step.distance_miles} mi</Text>
-                      {step.road_condition && (
-                        <View style={[styles.stepConditionBadge, { backgroundColor: step.road_condition.color }]}>
-                          <Text style={styles.stepConditionText}>
-                            {step.road_condition.icon} {step.road_condition.label}
-                          </Text>
-                        </View>
-                      )}
-                      {step.temperature && (
-                        <Text style={styles.stepTemp}>{step.temperature}°F</Text>
-                      )}
-                    </View>
-                  </View>
-                </View>
-              ))
-            ) : (
-              <View style={styles.noDirections}>
-                <Ionicons name="navigate-outline" size={48} color="#6b7280" />
-                <Text style={styles.noDirectionsText}>Tap "Open in Maps App" for navigation</Text>
-              </View>
-            )}
-          </View>
-        )}
-
         {/* Alerts Tab */}
         {activeTab === 'alerts' && (
           <View style={styles.alertsTab}>
@@ -1123,7 +1068,7 @@ export default function RouteScreen() {
         </TouchableOpacity>
         <TouchableOpacity style={styles.navBtn} onPress={openInMaps}>
           <Ionicons name="navigate" size={24} color="#fff" />
-          <Text style={styles.navText}>Start Navigation</Text>
+          <Text style={styles.navText}>Google Maps Navigation</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.actionBtn} onPress={speakSummary}>
           <Ionicons name={isSpeaking ? "stop" : "volume-high"} size={22} color="#fff" />
