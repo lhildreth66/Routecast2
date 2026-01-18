@@ -615,12 +615,12 @@ export default function HomeScreen() {
                 <Ionicons name="chevron-forward" size={18} color="#6b7280" />
               </TouchableOpacity>
 
-              {/* Trucker Mode Toggle */}
+              {/* Trucker/RV Mode Toggle */}
               <View style={styles.truckerToggle}>
                 <View style={styles.alertsLeft}>
                   <Ionicons name="bus-outline" size={22} color="#f59e0b" />
                   <View>
-                    <Text style={styles.alertsText}>Trucker Mode</Text>
+                    <Text style={styles.alertsText}>Trucker/RV Mode</Text>
                     <Text style={styles.truckerSubtext}>Wind & height warnings</Text>
                   </View>
                 </View>
