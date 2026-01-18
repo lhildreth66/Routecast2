@@ -8,21 +8,19 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 import uuid
+import math
 from datetime import datetime, timedelta
 import httpx
 import polyline
-from openai import AsyncOpenAI
 import asyncio
-import math
 
-# Optional: emergentintegrations for chat (not available in Render)
+# Google Gemini for chat
 try:
-    from emergentintegrations.llm.chat import LlmChat, UserMessage
+    import google.generativeai as genai
     CHAT_AVAILABLE = True
 except ImportError:
     CHAT_AVAILABLE = False
-    LlmChat = None
-    UserMessage = None
+    genai = None
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -34,13 +32,11 @@ db = client[os.environ['DB_NAME']]
 
 # API Keys
 MAPBOX_ACCESS_TOKEN = os.environ.get('MAPBOX_ACCESS_TOKEN', '')
-EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
+GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY', '')
 
-# Configure OpenAI client with Emergent LLM key
-openai_client = AsyncOpenAI(
-    api_key=EMERGENT_LLM_KEY,
-    base_url="https://api.emergentagi.com/v1"
-)
+# Configure Gemini if available
+if CHAT_AVAILABLE and GOOGLE_API_KEY:
+    genai.configure(api_key=GOOGLE_API_KEY)
 
 # NOAA API Headers
 NOAA_USER_AGENT = os.environ.get('NOAA_USER_AGENT', 'Routecast/1.0 (contact@routecast.app)')
@@ -1311,17 +1307,16 @@ Provide a 2-3 sentence summary focusing on:
 
 Be concise and practical."""
 
-        response = await openai_client.chat.completions.create(
-            model="gemini-2.0-flash",
-            messages=[
-                {"role": "system", "content": "You are a helpful travel weather assistant providing concise, driver-friendly weather summaries."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=300,
-            temperature=0.7
-        )
-        
-        return response.choices[0].message.content if response.choices else "Unable to generate summary."
+        # Use Gemini for summary if available
+        if CHAT_AVAILABLE and GOOGLE_API_KEY:
+            model = genai.GenerativeModel(model_name='gemini-1.5-flash')\n            loop = asyncio.get_event_loop()
+            response_obj = await loop.run_in_executor(
+                None,
+                lambda: model.generate_content(prompt)
+            )
+            return response_obj.text
+        else:
+            return "Weather summary unavailable. AI features require Google API key."
     except Exception as e:
         logger.error(f"AI summary error: {e}")
         return f"Weather summary unavailable. Check individual waypoints for conditions."
@@ -1653,18 +1648,15 @@ async def autocomplete_location(query: str, limit: int = 5):
 @api_router.post("/chat", response_model=ChatResponse)
 async def driver_chat(request: ChatMessage):
     """AI-powered chat for drivers to ask questions about weather, routes, and driving."""
-    if not CHAT_AVAILABLE:
+    if not CHAT_AVAILABLE or not GOOGLE_API_KEY:
         return ChatResponse(
             response="Chat feature is not available. Please check your route conditions on the main screen or contact support.",
             suggestions=["Check road conditions", "View weather alerts", "Contact support"]
         )
     
     try:
-        # Initialize the chat with Emergent LLM
-        chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
-            session_id=f"driver-{uuid.uuid4().hex[:8]}",
-            system_message="""You are Routecast AI, a helpful driving assistant that helps drivers with:
+        # Build the user message with optional route context and system instructions
+        system_message = """You are Routecast AI, a helpful driving assistant that helps drivers with:
 - Weather and road condition questions
 - Safe driving tips based on weather
 - Route planning advice
@@ -1675,20 +1667,24 @@ async def driver_chat(request: ChatMessage):
 Keep responses concise (2-3 sentences max) and actionable. Use emojis sparingly.
 If asked about specific locations, provide general advice since you don't have real-time data in this chat.
 Always prioritize safety in your recommendations."""
-        )
         
-        # Use Gemini Flash for fast responses
-        chat.with_model("gemini", "gemini-2.5-flash")
-        
-        # Build the user message with optional route context
         message_text = request.message
         if request.route_context:
             message_text = f"[Route context: {request.route_context}]\n\nUser question: {request.message}"
         
-        user_message = UserMessage(text=message_text)
+        # Use Gemini Flash for fast responses
+        model = genai.GenerativeModel(
+            model_name='gemini-1.5-flash',
+            system_instruction=system_message
+        )
         
-        # Get response
-        response = await chat.send_message(user_message)
+        # Get response (run in thread pool since Gemini SDK is synchronous)
+        loop = asyncio.get_event_loop()
+        response_obj = await loop.run_in_executor(
+            None,
+            lambda: model.generate_content(message_text)
+        )
+        response = response_obj.text
         
         # Generate quick suggestions based on the question
         suggestions = []
