@@ -847,14 +847,27 @@ export default function RouteScreen() {
         {/* Road Conditions Tab */}
         {activeTab === 'conditions' && (
           <View style={styles.conditionsTab}>
-            {/* Trucker Warnings */}
+            {/* Trucker Alerts Button */}
             {routeData.trucker_warnings && routeData.trucker_warnings.length > 0 && (
-              <View style={styles.truckerBox}>
-                <Text style={styles.truckerTitle}>🚛 TRUCKER ALERTS</Text>
-                {routeData.trucker_warnings.map((warning, idx) => (
-                  <Text key={idx} style={styles.truckerWarning}>{warning}</Text>
-                ))}
-              </View>
+              <TouchableOpacity
+                style={styles.truckerAlertsButton}
+                onPress={() => router.push({
+                  pathname: '/truckerAlerts',
+                  params: { routeData: JSON.stringify(routeData) }
+                })}
+                activeOpacity={0.7}
+              >
+                <Text style={styles.truckerAlertsButtonIcon}>🚛</Text>
+                <View style={styles.truckerAlertsButtonContent}>
+                  <Text style={styles.truckerAlertsButtonTitle}>
+                    Trucker Alerts ({routeData.trucker_warnings.length})
+                  </Text>
+                  <Text style={styles.truckerAlertsButtonSubtitle}>
+                    Tap to view all alerts and safety tips
+                  </Text>
+                </View>
+                <Text style={styles.truckerAlertsButtonArrow}>›</Text>
+              </TouchableOpacity>
             )}
 
             {/* Waypoint Road Conditions */}
@@ -1472,6 +1485,38 @@ const styles = StyleSheet.create({
     color: '#fde68a',
     fontSize: 12,
     marginBottom: 4,
+  },
+  truckerAlertsButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#422006',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#f59e0b',
+  },
+  truckerAlertsButtonIcon: {
+    fontSize: 24,
+    marginRight: 12,
+  },
+  truckerAlertsButtonContent: {
+    flex: 1,
+  },
+  truckerAlertsButtonTitle: {
+    color: '#fbbf24',
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  truckerAlertsButtonSubtitle: {
+    color: '#fde68a',
+    fontSize: 12,
+  },
+  truckerAlertsButtonArrow: {
+    color: '#f59e0b',
+    fontSize: 20,
+    marginLeft: 8,
   },
   conditionCard: {
     backgroundColor: '#27272a',
