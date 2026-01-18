@@ -707,10 +707,13 @@ export default function HomeScreen() {
                 />
               </View>
 
-              {/* Vehicle Height Input (shown when trucker mode enabled) */}
+              {/* Vehicle Height Section (shown when trucker mode enabled) */}
               {truckerMode && (
-                <View style={styles.heightInput}>
-                  <Text style={styles.heightLabel}>Vehicle Height (feet)</Text>
+                <View style={styles.heightSection}>
+                  <Text style={styles.heightSectionTitle}>⚠️ Bridge Clearance Alert</Text>
+                  <Text style={styles.heightSectionSubtitle}>Set your vehicle height to get alerts for bridges you can't drive under</Text>
+                  
+                  {/* Height Input */}
                   <View style={styles.heightInputContainer}>
                     <TextInput
                       style={styles.heightInputField}
@@ -723,7 +726,49 @@ export default function HomeScreen() {
                     />
                     <Text style={styles.heightUnit}>ft</Text>
                   </View>
-                  <Text style={styles.heightHint}>Standard semi: 13.5 ft | Box truck: 10-12 ft | RV: 12-14 ft</Text>
+                  
+                  {/* Quick Presets */}
+                  <View style={styles.presetsContainer}>
+                    <Text style={styles.presetsLabel}>Quick Presets:</Text>
+                    <View style={styles.presetsGrid}>
+                      <TouchableOpacity
+                        style={styles.presetBtn}
+                        onPress={() => setVehicleHeight('10')}
+                      >
+                        <Text style={styles.presetBtnText}>Box Truck</Text>
+                        <Text style={styles.presetBtnHeight}>10 ft</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.presetBtn}
+                        onPress={() => setVehicleHeight('12')}
+                      >
+                        <Text style={styles.presetBtnText}>RV/Motorhome</Text>
+                        <Text style={styles.presetBtnHeight}>12 ft</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.presetBtn}
+                        onPress={() => setVehicleHeight('13.5')}
+                      >
+                        <Text style={styles.presetBtnText}>Semi Truck</Text>
+                        <Text style={styles.presetBtnHeight}>13.5 ft</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={styles.presetBtn}
+                        onPress={() => setVehicleHeight('14')}
+                      >
+                        <Text style={styles.presetBtnText}>Double Deck</Text>
+                        <Text style={styles.presetBtnHeight}>14 ft</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                  
+                  {/* Height Status */}
+                  <View style={styles.heightStatus}>
+                    <Ionicons name="information-circle" size={18} color="#eab308" />
+                    <Text style={styles.heightStatusText}>
+                      Current: {vehicleHeight} ft • You'll get alerts for bridges shorter than this
+                    </Text>
+                  </View>
                 </View>
               )}
 
@@ -1714,6 +1759,26 @@ const styles = StyleSheet.create({
     borderLeftWidth: 3,
     borderLeftColor: '#f59e0b',
   },
+  heightSection: {
+    backgroundColor: '#422006',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#f59e0b',
+  },
+  heightSectionTitle: {
+    color: '#fbbf24',
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  heightSectionSubtitle: {
+    color: '#fde68a',
+    fontSize: 13,
+    marginBottom: 12,
+    lineHeight: 18,
+  },
   heightLabel: {
     color: '#e4e4e7',
     fontSize: 13,
@@ -1724,6 +1789,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    marginBottom: 16,
   },
   heightInputField: {
     flex: 1,
@@ -1734,12 +1800,63 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontSize: 16,
     borderWidth: 1,
-    borderColor: '#52525b',
+    borderColor: '#f59e0b',
   },
   heightUnit: {
-    color: '#a1a1aa',
+    color: '#fbbf24',
     fontSize: 14,
+    fontWeight: '700',
+  },
+  presetsContainer: {
+    marginBottom: 12,
+  },
+  presetsLabel: {
+    color: '#fde68a',
+    fontSize: 12,
     fontWeight: '600',
+    marginBottom: 8,
+  },
+  presetsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  presetBtn: {
+    flex: 1,
+    minWidth: '48%',
+    backgroundColor: '#1f2937',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#f59e0b',
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  presetBtnText: {
+    color: '#fde68a',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  presetBtnHeight: {
+    color: '#fbbf24',
+    fontSize: 13,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  heightStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1f2937',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    gap: 8,
+  },
+  heightStatusText: {
+    color: '#fde68a',
+    fontSize: 12,
+    flex: 1,
   },
   heightHint: {
     color: '#71717a',
