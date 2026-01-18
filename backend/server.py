@@ -258,6 +258,13 @@ class FavoriteRouteRequest(BaseModel):
     stops: Optional[List[StopPoint]] = []
     name: Optional[str] = None
 
+class PushTokenRequest(BaseModel):
+    push_token: str
+    enabled: bool = True
+
+class TestNotificationRequest(BaseModel):
+    push_token: str
+
 # ==================== Helper Functions ====================
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -1732,6 +1739,98 @@ Always prioritize safety in your recommendations."""
             response="I'm having trouble connecting right now. Please check your route conditions on the main screen or try again in a moment.",
             suggestions=["Check road conditions", "View weather alerts", "Contact support"]
         )
+
+# ==================== Push Notification Endpoints ====================
+
+async def send_expo_notification(push_token: str, title: str, body: str, data: Dict[str, Any] = None) -> bool:
+    """Send a push notification via Expo Push Service."""
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                'https://exp.host/--/api/v2/push/send',
+                json={
+                    'to': push_token,
+                    'sound': 'default',
+                    'title': title,
+                    'body': body,
+                    'data': data or {},
+                    'badge': 1,
+                    'priority': 'high',
+                },
+                headers={'Accept': 'application/json', 'Accept-Encoding': 'gzip, deflate'},
+            )
+            return response.status_code == 200
+    except Exception as e:
+        logger.error(f"Error sending Expo notification: {e}")
+        return False
+
+@api_router.post("/notifications/register")
+async def register_push_token(request: PushTokenRequest):
+    """Register or update user's push notification token."""
+    try:
+        # Save token to MongoDB
+        result = await db.push_tokens.update_one(
+            {'push_token': request.push_token},
+            {
+                '$set': {
+                    'push_token': request.push_token,
+                    'enabled': request.enabled,
+                    'created_at': datetime.utcnow(),
+                    'last_used': datetime.utcnow(),
+                }
+            },
+            upsert=True
+        )
+        
+        return {
+            'success': True,
+            'message': 'Push token registered successfully',
+            'token': request.push_token[:20] + '...',
+        }
+    except Exception as e:
+        logger.error(f"Error registering push token: {e}")
+        return {
+            'success': False,
+            'message': f'Error registering token: {str(e)}',
+        }
+
+@api_router.post("/notifications/test")
+async def send_test_notification(request: TestNotificationRequest):
+    """Send a test push notification to verify setup."""
+    try:
+        success = await send_expo_notification(
+            push_token=request.push_token,
+            title='🚛 Routecast Test Alert',
+            body='Push notifications are working! You\'ll receive weather alerts for your routes.',
+            data={
+                'type': 'test',
+                'timestamp': datetime.utcnow().isoformat(),
+            }
+        )
+        
+        if success:
+            # Update last_used timestamp
+            await db.push_tokens.update_one(
+                {'push_token': request.push_token},
+                {'$set': {'last_used': datetime.utcnow()}},
+                upsert=True
+            )
+            
+            return {
+                'success': True,
+                'message': 'Test notification sent successfully',
+            }
+        else:
+            return {
+                'success': False,
+                'message': 'Failed to send notification via Expo service',
+            }
+    except Exception as e:
+        logger.error(f"Error sending test notification: {e}")
+        return {
+            'success': False,
+            'message': f'Error sending test notification: {str(e)}',
+        }
 
 # Add CORS middleware first, before including router
 app.add_middleware(

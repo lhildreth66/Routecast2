@@ -58,6 +58,9 @@ export default function HomeScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [alertsEnabled, setAlertsEnabled] = useState(false);
+  const [pushToken, setPushToken] = useState<string | null>(null);
+  const [testNotificationLoading, setTestNotificationLoading] = useState(false);
+  const [testNotificationMessage, setTestNotificationMessage] = useState('');
   const [recentRoutes, setRecentRoutes] = useState<SavedRoute[]>([]);
   const [favoriteRoutes, setFavoriteRoutes] = useState<SavedRoute[]>([]);
   const [showFavorites, setShowFavorites] = useState(false);
@@ -108,7 +111,19 @@ export default function HomeScreen() {
     fetchRecentRoutes();
     fetchFavoriteRoutes();
     loadCachedRoute();
+    loadPushToken();
   }, []);
+
+  const loadPushToken = async () => {
+    try {
+      const token = await AsyncStorage.getItem('expoPushToken');
+      if (token) {
+        setPushToken(token);
+      }
+    } catch (err) {
+      console.log('Error loading push token:', err);
+    }
+  };
 
   const loadCachedRoute = async () => {
     try {
@@ -308,6 +323,66 @@ export default function HomeScreen() {
       setFavoriteRoutes(response.data);
     } catch (err) {
       console.log('Error fetching favorites:', err);
+    }
+  };
+
+  const handleAlertsToggle = async (enabled: boolean) => {
+    setAlertsEnabled(enabled);
+    
+    if (enabled && pushToken) {
+      try {
+        setTestNotificationLoading(true);
+        setTestNotificationMessage('Saving token...');
+        
+        // Save push token to backend
+        const response = await axios.post(`${API_BASE}/api/notifications/register`, {
+          push_token: pushToken,
+          enabled: true,
+        });
+        
+        setTestNotificationMessage('✅ Push alerts enabled!');
+        setTimeout(() => setTestNotificationMessage(''), 3000);
+      } catch (err) {
+        console.log('Error enabling alerts:', err);
+        setTestNotificationMessage('❌ Error enabling alerts');
+        setAlertsEnabled(false);
+        setTimeout(() => setTestNotificationMessage(''), 3000);
+      } finally {
+        setTestNotificationLoading(false);
+      }
+    } else if (!enabled) {
+      setTestNotificationMessage('Push alerts disabled');
+      setTimeout(() => setTestNotificationMessage(''), 2000);
+    } else if (!pushToken) {
+      setTestNotificationMessage('⚠️ Token not yet available');
+      setAlertsEnabled(false);
+      setTimeout(() => setTestNotificationMessage(''), 3000);
+    }
+  };
+
+  const handleTestNotification = async () => {
+    if (!pushToken) {
+      setTestNotificationMessage('⚠️ No push token available');
+      setTimeout(() => setTestNotificationMessage(''), 3000);
+      return;
+    }
+
+    try {
+      setTestNotificationLoading(true);
+      setTestNotificationMessage('Sending test notification...');
+      
+      const response = await axios.post(`${API_BASE}/api/notifications/test`, {
+        push_token: pushToken,
+      });
+      
+      setTestNotificationMessage('✅ Test notification sent!');
+      setTimeout(() => setTestNotificationMessage(''), 3000);
+    } catch (err) {
+      console.log('Error sending test notification:', err);
+      setTestNotificationMessage('❌ Failed to send test notification');
+      setTimeout(() => setTestNotificationMessage(''), 3000);
+    } finally {
+      setTestNotificationLoading(false);
     }
   };
 
@@ -660,11 +735,32 @@ export default function HomeScreen() {
                 </View>
                 <Switch
                   value={alertsEnabled}
-                  onValueChange={setAlertsEnabled}
+                  onValueChange={handleAlertsToggle}
                   trackColor={{ false: '#3f3f46', true: '#eab30880' }}
                   thumbColor={alertsEnabled ? '#eab308' : '#71717a'}
                 />
               </View>
+
+              {/* Test Notification Button */}
+              {alertsEnabled && (
+                <TouchableOpacity
+                  style={[styles.testButton, testNotificationLoading && styles.buttonDisabled]}
+                  onPress={handleTestNotification}
+                  disabled={testNotificationLoading}
+                >
+                  <Ionicons name="notifications" size={18} color="#eab308" />
+                  <Text style={styles.testButtonText}>
+                    {testNotificationLoading ? 'Sending...' : 'Send Test Alert'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+
+              {/* Notification Status Message */}
+              {testNotificationMessage && (
+                <View style={styles.notificationStatusContainer}>
+                  <Text style={styles.notificationStatusText}>{testNotificationMessage}</Text>
+                </View>
+              )}
 
               {/* Error Message */}
               {error ? (
@@ -1267,6 +1363,38 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#ffffff',
+  },
+  testButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#eab30820',
+    borderRadius: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginBottom: 12,
+    gap: 8,
+    borderWidth: 1,
+    borderColor: '#eab308',
+  },
+  testButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#eab308',
+  },
+  notificationStatusContainer: {
+    backgroundColor: '#27272a',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 12,
+    borderLeftWidth: 3,
+    borderLeftColor: '#eab308',
+  },
+  notificationStatusText: {
+    color: '#e4e4e7',
+    fontSize: 13,
+    fontWeight: '500',
   },
   errorContainer: {
     flexDirection: 'row',

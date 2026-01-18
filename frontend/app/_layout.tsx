@@ -3,6 +3,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Configure notifications
 Notifications.setNotificationHandler({
@@ -17,16 +18,28 @@ Notifications.setNotificationHandler({
 
 export default function RootLayout() {
   useEffect(() => {
-    // Request notification permissions
-    async function requestPermissions() {
+    // Request notification permissions and get token
+    async function setupNotifications() {
       if (Platform.OS !== 'web') {
-        const { status } = await Notifications.requestPermissionsAsync();
-        if (status !== 'granted') {
-          console.log('Notification permissions not granted');
+        try {
+          // Request permissions
+          const { status } = await Notifications.requestPermissionsAsync();
+          if (status === 'granted') {
+            // Get the Expo push token
+            const token = await Notifications.getExpoPushTokenAsync();
+            console.log('Expo push token:', token.data);
+            
+            // Save token to AsyncStorage for later use
+            await AsyncStorage.setItem('expoPushToken', token.data);
+          } else {
+            console.log('Notification permissions not granted');
+          }
+        } catch (err) {
+          console.log('Error setting up notifications:', err);
         }
       }
     }
-    requestPermissions();
+    setupNotifications();
   }, []);
 
   return (
