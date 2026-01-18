@@ -156,7 +156,7 @@ const generateRadarMapHtml = (centerLat: number, centerLon: number): string => {
         }
         #map { 
           width: 100%; 
-          height: calc(100% - 50px);
+          height: calc(100% - 130px);
           touch-action: none;
         }
         .leaflet-container {
@@ -173,8 +173,10 @@ const generateRadarMapHtml = (centerLat: number, centerLon: number): string => {
           font-family: -apple-system, BlinkMacSystemFont, sans-serif;
           display: flex;
           flex-direction: column;
+          justify-content: center;
           padding: 8px 16px;
           border-top: 1px solid #555;
+          box-shadow: 0 -2px 8px rgba(0,0,0,0.4);
         }
         .gradient-legend {
           display: flex;
@@ -207,8 +209,8 @@ const generateRadarMapHtml = (centerLat: number, centerLon: number): string => {
           font-weight: 600;
         }
         .controls-row {
-          position: absolute;
-          bottom: 60px;
+          position: fixed;
+          bottom: 50px;
           left: 50%;
           transform: translateX(-50%);
           display: flex;
@@ -217,7 +219,8 @@ const generateRadarMapHtml = (centerLat: number, centerLon: number): string => {
           background: rgba(24,24,27,0.9);
           padding: 6px 14px;
           border-radius: 20px;
-          z-index: 1000;
+          z-index: 999;
+          max-width: 90%;
         }
         .time-display {
           color: #eab308;
