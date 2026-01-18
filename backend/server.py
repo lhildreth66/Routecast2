@@ -18,9 +18,11 @@ import asyncio
 try:
     import google.generativeai as genai
     CHAT_AVAILABLE = True
-except ImportError:
+    logger.info("Google Gemini SDK imported successfully")
+except ImportError as e:
     CHAT_AVAILABLE = False
     genai = None
+    logger.warning(f"Google Gemini SDK not available: {e}")
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -37,6 +39,11 @@ GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY', '')
 # Configure Gemini if available
 if CHAT_AVAILABLE and GOOGLE_API_KEY:
     genai.configure(api_key=GOOGLE_API_KEY)
+    logger.info("Google Gemini configured successfully")
+elif CHAT_AVAILABLE and not GOOGLE_API_KEY:
+    logger.warning("Google Gemini SDK available but GOOGLE_API_KEY not set")
+else:
+    logger.info("Chat features disabled")
 
 # NOAA API Headers
 NOAA_USER_AGENT = os.environ.get('NOAA_USER_AGENT', 'Routecast/1.0 (contact@routecast.app)')
