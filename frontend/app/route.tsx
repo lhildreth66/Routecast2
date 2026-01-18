@@ -210,7 +210,7 @@ const generateRadarMapHtml = (centerLat: number, centerLon: number): string => {
         }
         .controls-row {
           position: fixed;
-          bottom: 70px;
+          bottom: 80px;
           left: 50%;
           transform: translateX(-50%);
           display: flex;
