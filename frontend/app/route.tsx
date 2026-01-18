@@ -223,11 +223,30 @@ const generateRadarMapHtml = (centerLat: number, centerLon: number): string => {
           z-index: 999;
           max-width: 90%;
           box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+          transition: opacity 0.3s ease, transform 0.3s ease;
+          opacity: 1;
+        }
+        .controls-row.collapsed {
+          padding: 8px;
+          gap: 0;
+        }
+        .controls-row.hidden {
+          opacity: 0;
+          pointer-events: none;
+          transform: translateX(-50%) translateY(20px);
         }
         .time-display {
           color: #eab308;
           font-size: 12px;
           font-weight: 600;
+          transition: max-width 0.3s ease, opacity 0.3s ease;
+          max-width: 200px;
+          overflow: hidden;
+          white-space: nowrap;
+        }
+        .controls-row.collapsed .time-display {
+          max-width: 0;
+          opacity: 0;
         }
         .control-btn {
           background: #3f3f46;
@@ -377,27 +396,68 @@ const generateRadarMapHtml = (centerLat: number, centerLon: number): string => {
         }
         
         // Play/pause animation
+        var controlsRow = document.querySelector('.controls-row');
+        var hideTimeout;
+        
+        // Auto-hide controls after inactivity
+        function resetHideTimer() {
+          clearTimeout(hideTimeout);
+          controlsRow.classList.remove('hidden');
+          
+          // If not playing, collapse and hide after 3 seconds
+          if (!isPlaying) {
+            hideTimeout = setTimeout(function() {
+              controlsRow.classList.add('collapsed');
+              setTimeout(function() {
+                if (!isPlaying) {
+                  controlsRow.classList.add('hidden');
+                }
+              }, 2000);
+            }, 3000);
+          }
+        }
+        
+        // Show controls on any map interaction
+        map.on('click drag zoom', resetHideTimer);
+        
+        // Show controls when hovering/touching control area
+        controlsRow.addEventListener('mouseenter', function() {
+          clearTimeout(hideTimeout);
+          controlsRow.classList.remove('hidden', 'collapsed');
+        });
+        
+        controlsRow.addEventListener('touchstart', function() {
+          clearTimeout(hideTimeout);
+          controlsRow.classList.remove('hidden', 'collapsed');
+        });
+        
         document.getElementById('playBtn').onclick = function() {
+          controlsRow.classList.remove('hidden', 'collapsed');
+          clearTimeout(hideTimeout);
+          
           if (isPlaying) {
             clearInterval(playInterval);
             isPlaying = false;
             this.textContent = '▶';
+            resetHideTimer(); // Auto-hide when stopped
           } else {
             isPlaying = true;
             this.textContent = '⏸';
-            playInterval = setInterval(function() {
-              currentFrame = (currentFrame + 1) % radarFrames.length;
-              showRadarFrame(currentFrame);
-            }, 500);
+            // Keep expanded while playing
           }
         };
+        
+        // Start hide timer on load
+        resetHideTimer();
         
         // Zoom button handlers
         document.getElementById('zoomInBtn').onclick = function() {
           map.zoomIn();
+          resetHideTimer();
         };
         document.getElementById('zoomOutBtn').onclick = function() {
           map.zoomOut();
+          resetHideTimer();
         };
       </script>
     </body>
