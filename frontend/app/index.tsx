@@ -746,8 +746,8 @@ export default function HomeScreen() {
       {/* Date Time Picker Modal */}
       {showDatePicker && (
         <Modal transparent animationType="slide">
-          <View style={styles.modalOverlay}>
-            <ScrollView style={styles.modalContent}>
+          <SafeAreaView style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Select Departure Time</Text>
                 <TouchableOpacity onPress={() => setShowDatePicker(false)}>
@@ -755,8 +755,7 @@ export default function HomeScreen() {
                 </TouchableOpacity>
               </View>
               
-              {/* Simple Date/Time Picker with Increment/Decrement */}
-              <View style={styles.customDatePicker}>
+              <ScrollView contentContainerStyle={{ gap: 20, paddingVertical: 16 }}>
                 {/* Date Section */}
                 <View>
                   <Text style={styles.datePickerLabel}>Date</Text>
@@ -785,8 +784,8 @@ export default function HomeScreen() {
                   </View>
                 </View>
 
-                {/* Time Section */}
-                <View style={{ marginTop: 20 }}>
+                {/* Hour Section */}
+                <View>
                   <Text style={styles.datePickerLabel}>Hour</Text>
                   <View style={styles.pickerRow}>
                     <TouchableOpacity 
@@ -814,7 +813,7 @@ export default function HomeScreen() {
                 </View>
 
                 {/* Minutes Section */}
-                <View style={{ marginTop: 20 }}>
+                <View>
                   <Text style={styles.datePickerLabel}>Minutes</Text>
                   <View style={styles.pickerRow}>
                     <TouchableOpacity 
@@ -841,21 +840,28 @@ export default function HomeScreen() {
                   </View>
                 </View>
                 
-                <View style={{ marginTop: 20, padding: 12, backgroundColor: '#3f3f46', borderRadius: 8 }}>
+                {/* Preview */}
+                <View style={{ padding: 12, backgroundColor: '#3f3f46', borderRadius: 8 }}>
                   <Text style={styles.selectedDateTime}>
                     Selected: {format(departureTime, 'MMM d, yyyy h:mm a')}
                   </Text>
                 </View>
-              </View>
+              </ScrollView>
               
               <TouchableOpacity 
                 style={styles.modalButton}
-                onPress={() => setShowDatePicker(false)}
+                onPress={() => {
+                  try {
+                    setShowDatePicker(false);
+                  } catch (e) {
+                    console.error('Error closing date picker:', e);
+                  }
+                }}
               >
                 <Text style={styles.modalButtonText}>Confirm</Text>
               </TouchableOpacity>
-            </ScrollView>
-          </View>
+            </View>
+          </SafeAreaView>
         </Modal>
       )}
 
@@ -1360,6 +1366,8 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 20,
     padding: 20,
     paddingBottom: Platform.OS === 'ios' ? 40 : 20,
+    flex: 1,
+    maxHeight: '90%',
   },
   modalHeader: {
     flexDirection: 'row',
