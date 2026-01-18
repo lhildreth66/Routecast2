@@ -16,13 +16,11 @@ import asyncio
 
 # Google Gemini for chat
 try:
-    import google.generativeai as genai
+    from google import genai
     CHAT_AVAILABLE = True
-    logger.info("Google Gemini SDK imported successfully")
-except ImportError as e:
+except ImportError:
     CHAT_AVAILABLE = False
     genai = None
-    logger.warning(f"Google Gemini SDK not available: {e}")
 
 ROOT_DIR = Path(__file__).parent
 load_dotenv(ROOT_DIR / '.env')
@@ -35,15 +33,6 @@ db = client[os.environ['DB_NAME']]
 # API Keys
 MAPBOX_ACCESS_TOKEN = os.environ.get('MAPBOX_ACCESS_TOKEN', '')
 GOOGLE_API_KEY = os.environ.get('GOOGLE_API_KEY', '')
-
-# Configure Gemini if available
-if CHAT_AVAILABLE and GOOGLE_API_KEY:
-    genai.configure(api_key=GOOGLE_API_KEY)
-    logger.info("Google Gemini configured successfully")
-elif CHAT_AVAILABLE and not GOOGLE_API_KEY:
-    logger.warning("Google Gemini SDK available but GOOGLE_API_KEY not set")
-else:
-    logger.info("Chat features disabled")
 
 # NOAA API Headers
 NOAA_USER_AGENT = os.environ.get('NOAA_USER_AGENT', 'Routecast/1.0 (contact@routecast.app)')
@@ -1316,11 +1305,14 @@ Be concise and practical."""
 
         # Use Gemini for summary if available
         if CHAT_AVAILABLE and GOOGLE_API_KEY:
-            model = genai.GenerativeModel(model_name='gemini-1.5-flash')
+            client = genai.Client(api_key=GOOGLE_API_KEY)
             loop = asyncio.get_event_loop()
             response_obj = await loop.run_in_executor(
                 None,
-                lambda: model.generate_content(prompt)
+                lambda: client.models.generate_content(
+                    model='gemini-2.0-flash-exp',
+                    contents=prompt
+                )
             )
             return response_obj.text
         else:
@@ -1685,17 +1677,17 @@ Always prioritize safety in your recommendations."""
         if request.route_context:
             message_text = f"[Route context: {request.route_context}]\n\nUser question: {request.message}"
         
-        # Use Gemini Flash for fast responses
-        model = genai.GenerativeModel(
-            model_name='gemini-1.5-flash',
-            system_instruction=system_message
-        )
+        # Use Gemini Flash for fast responses with new API
+        client = genai.Client(api_key=GOOGLE_API_KEY)
         
-        # Get response (run in thread pool since Gemini SDK is synchronous)
+        # Get response
         loop = asyncio.get_event_loop()
         response_obj = await loop.run_in_executor(
             None,
-            lambda: model.generate_content(message_text)
+            lambda: client.models.generate_content(
+                model='gemini-2.0-flash-exp',
+                contents=system_message + "\n\n" + message_text
+            )
         )
         response = response_obj.text
         
