@@ -15,6 +15,7 @@ import polyline
 import asyncio
 from bridge_database import get_bridge_warnings
 from road_passability_service import RoadPassabilityService
+from solar_forecast_service import SolarForecastService
 
 # Google Gemini for chat
 try:
@@ -294,6 +295,26 @@ class RoadPassabilityResponse(BaseModel):
     recommended_vehicle_type: str  # sedan, suv, 4x4
     needs_four_x_four: bool
     risks: Dict[str, bool]  # mud_risk, ice_risk, deep_rut_risk, high_clearance_recommended, four_x_four_recommended
+    is_premium_locked: bool = False
+    premium_message: Optional[str] = None
+
+class SolarForecastRequest(BaseModel):
+    """Request for solar energy forecast (Premium feature)"""
+    lat: float  # Latitude (-90 to 90)
+    lon: float  # Longitude (-180 to 180)
+    date_range: List[str]  # ISO format dates (e.g., ["2026-01-20", "2026-01-21"])
+    panel_watts: float  # Solar panel capacity in watts (>0)
+    shade_pct: float  # Average shade percentage (0-100)
+    cloud_cover: List[float]  # Cloud cover percentages per date (0-100)
+    subscription_id: Optional[str] = None  # For premium gating
+
+class SolarForecastResponse(BaseModel):
+    """Response for solar energy forecast"""
+    daily_wh: Optional[List[float]] = None  # Wh/day for each date
+    dates: Optional[List[str]] = None
+    panel_watts: Optional[float] = None
+    shade_pct: Optional[float] = None
+    advisory: Optional[str] = None
     is_premium_locked: bool = False
     premium_message: Optional[str] = None
 
@@ -2059,6 +2080,89 @@ async def assess_road_passability(request: RoadPassabilityRequest):
         raise HTTPException(
             status_code=500,
             detail="Unable to assess road passability at this time"
+        )
+
+@api_router.post("/pro/solar-forecast", response_model=SolarForecastResponse)
+async def forecast_solar_energy(request: SolarForecastRequest):
+    """
+    Forecast daily solar energy generation for a boondocking location.
+    
+    PREMIUM FEATURE - Requires active Boondocking Pro subscription.
+    
+    Args:
+        lat: Latitude (-90 to 90)
+        lon: Longitude (-180 to 180)
+        date_range: List of ISO format dates
+        panel_watts: Solar panel capacity in watts (>0)
+        shade_pct: Average shade percentage (0-100)
+        cloud_cover: List of cloud cover percentages (0-100) per date
+        subscription_id: Optional subscription ID for premium access validation
+    
+    Returns:
+        - If premium locked: paywall message
+        - If authorized: daily Wh/day list with advisory
+    
+    Logging: All premium feature access logged with [PREMIUM] prefix
+    """
+    logger.info(f"[PREMIUM] Solar forecast requested")
+    
+    # Check premium entitlement
+    is_premium = False
+    if request.subscription_id:
+        # Verify subscription is active
+        try:
+            sub = await db.subscriptions.find_one(
+                {'subscription_id': request.subscription_id, 'status': 'active'}
+            )
+            is_premium = sub is not None
+            
+            if is_premium:
+                logger.info(f"[PREMIUM] Solar forecast accessed by: {request.subscription_id}")
+        except Exception as e:
+            logger.error(f"[PREMIUM] Error checking subscription: {e}")
+            is_premium = False
+    
+    # Return premium-locked response if not authorized
+    if not is_premium:
+        logger.info(f"[PREMIUM] Solar forecast access denied - premium required")
+        return SolarForecastResponse(
+            is_premium_locked=True,
+            premium_message="Upgrade to Routecast Pro to forecast solar energy generation and plan your boondocking power needs."
+        )
+    
+    # Call pure domain service
+    try:
+        result = SolarForecastService.forecast_daily_wh(
+            lat=request.lat,
+            lon=request.lon,
+            date_range=request.date_range,
+            panel_watts=request.panel_watts,
+            shade_pct=request.shade_pct,
+            cloud_cover=request.cloud_cover,
+        )
+        
+        logger.info(f"[PREMIUM] Solar forecast completed successfully")
+        
+        # Convert domain result to API response
+        return SolarForecastResponse(
+            daily_wh=result.daily_wh,
+            dates=result.dates,
+            panel_watts=result.panel_watts,
+            shade_pct=result.shade_pct,
+            advisory=result.advisory,
+            is_premium_locked=False,
+        )
+    except ValueError as e:
+        logger.error(f"[PREMIUM] Invalid parameters for solar forecast: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid parameters: {str(e)}"
+        )
+    except Exception as e:
+        logger.error(f"[PREMIUM] Error forecasting solar energy: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to forecast solar energy at this time"
         )
 
 # Add CORS middleware first, before including router

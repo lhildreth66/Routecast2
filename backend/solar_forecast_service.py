@@ -1,306 +1,289 @@
 """
-Solar Forecast Service - Pure Deterministic Domain Logic
+Solar Forecast Service - Pure Deterministic Daily Energy Generation Estimation
 
-This module provides pure, side-effect-free functions for solar forecasting
-along a route. All functions are deterministic and testable.
+This module provides pure, side-effect-free functions for estimating daily solar
+energy generation at a boondocking location.
 
 Following gold-standard principles:
 - Pure functions with no side effects
-- No external API calls (those belong in repository layer)
+- No external API calls
 - Clear input/output contracts
 - Comprehensive error handling
+- Fully deterministic and testable
 """
 
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
-from datetime import datetime, timedelta
+from typing import List
+from datetime import datetime
 import math
 
 
 @dataclass(frozen=True)
-class SolarCondition:
-    """Immutable solar condition data point."""
-    timestamp: str  # ISO format
-    latitude: float
-    longitude: float
-    cloud_cover_percent: int  # 0-100
-    uv_index: float  # 0-11+
-    solar_irradiance_watts_m2: float  # W/m²
-    visibility_km: float  # Affects solar potential
-
-
-@dataclass(frozen=True)
-class SolarForecast:
-    """Result of solar forecasting calculation."""
-    waypoint_lat: float
-    waypoint_lon: float
-    timestamp: str
-    peak_solar_potential: float  # 0-100 (percentage)
-    best_time_window: Optional[Tuple[str, str]]  # (start_time, end_time) ISO format
+class SolarForecastResult:
+    """Immutable result from solar forecast calculation."""
+    daily_wh: List[float]
+    dates: List[str]
+    panel_watts: float
+    shade_pct: float
+    cloud_cover: List[float]
     advisory: str
-    is_favorable_for_solar: bool
 
 
 class SolarForecastService:
     """
-    Pure domain service for solar forecasting.
+    Pure deterministic solar energy forecasting service.
+    
+    Estimates daily solar energy generation (Wh/day) based on:
+    - Geographic location (latitude affects sun angle)
+    - Date (day of year affects sun height)
+    - Solar panel capacity (watts)
+    - Cloud cover forecast
+    - Shade percentage
     
     All methods are pure functions - same inputs always produce same outputs.
     No I/O, no external calls, no mutable state.
     """
 
-    # Solar constant and atmospheric factors (constants)
-    SOLAR_CONSTANT_W_M2 = 1361  # W/m² at top of atmosphere
-    MIN_USABLE_IRRADIANCE = 100  # W/m² minimum for meaningful solar capture
-    
+    # Solar constants
+    PEAK_SUN_HOURS_EQUATOR = 5.5  # Average peak sun hours at equator on equinox
+    DECLINATION_RANGE = 23.44  # Earth's axial tilt (degrees)
+    CLOUD_MULTIPLIER_MIN = 0.2  # Minimum on fully overcast day
+    CLOUD_MULTIPLIER_MAX = 1.0  # Maximum on clear day
+
     @staticmethod
-    def calculate_solar_potential(
-        conditions: SolarCondition,
-    ) -> float:
+    def calculate_clear_sky_baseline(lat: float, doy: int) -> float:
         """
-        Pure function: Calculate solar potential (0-100%) from weather conditions.
-        
+        Calculate clear-sky baseline Wh/day for 1000W panel at location.
+
+        Uses simplified solar irradiance model based on:
+        - Latitude (affects sun elevation angle)
+        - Day of year (affects declination and day length)
+
         Args:
-            conditions: Solar condition data point
-            
+            lat: Latitude in degrees (-90 to 90)
+            doy: Day of year (1-366)
+
         Returns:
-            Solar potential percentage (0-100)
-            
+            Baseline Wh/day assuming 1000W panels with no losses
+
         Raises:
-            ValueError: If input values are out of valid ranges
+            ValueError: If latitude or doy out of range
         """
-        # Validate inputs
-        if not (-90 <= conditions.latitude <= 90):
-            raise ValueError(f"Invalid latitude: {conditions.latitude}")
-        if not (-180 <= conditions.longitude <= 180):
-            raise ValueError(f"Invalid longitude: {conditions.longitude}")
-        if not (0 <= conditions.cloud_cover_percent <= 100):
-            raise ValueError(f"Invalid cloud cover: {conditions.cloud_cover_percent}")
-        if not (0 <= conditions.uv_index <= 20):
-            raise ValueError(f"Invalid UV index: {conditions.uv_index}")
-        if conditions.solar_irradiance_watts_m2 < 0:
-            raise ValueError(f"Invalid irradiance: {conditions.solar_irradiance_watts_m2}")
-        if conditions.visibility_km < 0:
-            raise ValueError(f"Invalid visibility: {conditions.visibility_km}")
-        
-        # Cloud cover impact (most significant)
-        cloud_factor = (100 - conditions.cloud_cover_percent) / 100.0
-        
-        # Irradiance impact (normalized to solar constant)
-        irradiance_factor = min(
-            conditions.solar_irradiance_watts_m2 / SolarForecastService.SOLAR_CONSTANT_W_M2,
-            1.0
+        if lat < -90 or lat > 90:
+            raise ValueError(f"Latitude must be -90 to 90, got {lat}")
+        if doy < 1 or doy > 366:
+            raise ValueError(f"Day of year must be 1-366, got {doy}")
+
+        # Solar declination (varies ±23.44° throughout year)
+        declination = (
+            SolarForecastService.DECLINATION_RANGE
+            * math.sin(2 * math.pi * (doy - 81) / 365.0)
         )
-        
-        # UV index impact (higher UV = better conditions)
-        uv_factor = min(conditions.uv_index / 11.0, 1.0)
-        
-        # Visibility impact (aerosols and haze reduce solar capture)
-        visibility_factor = min(conditions.visibility_km / 20.0, 1.0)
-        
-        # Weighted combination
-        potential = (
-            cloud_factor * 0.50 +  # Cloud cover is primary driver
-            irradiance_factor * 0.25 +
-            uv_factor * 0.15 +
-            visibility_factor * 0.10
-        ) * 100
-        
-        return max(0.0, min(100.0, potential))  # Clamp to 0-100
-    
-    @staticmethod
-    def evaluate_solar_favorability(
-        potential: float,
-        irradiance: float,
-    ) -> bool:
-        """
-        Pure function: Determine if conditions are favorable for solar capture.
-        
-        Args:
-            potential: Solar potential percentage (0-100)
-            irradiance: Solar irradiance (W/m²)
-            
-        Returns:
-            True if conditions are favorable for solar energy capture
-        """
-        return (
-            potential >= 60 and
-            irradiance >= SolarForecastService.MIN_USABLE_IRRADIANCE
+
+        # Convert to radians
+        lat_rad = math.radians(lat)
+        decl_rad = math.radians(declination)
+
+        # Solar elevation at noon: sin(elev) = sin(lat)×sin(decl) + cos(lat)×cos(decl)
+        sin_elevation = (
+            math.sin(lat_rad) * math.sin(decl_rad)
+            + math.cos(lat_rad) * math.cos(decl_rad)
         )
-    
-    @staticmethod
-    def find_best_solar_window(
-        hourly_conditions: List[SolarCondition],
-    ) -> Optional[Tuple[str, str]]:
-        """
-        Pure function: Find the best consecutive 3-hour window for solar capture.
-        
-        Args:
-            hourly_conditions: List of hourly condition readings
-            
-        Returns:
-            Tuple of (start_time, end_time) for best window, or None if no good window
-            
-        Raises:
-            ValueError: If list is empty or has fewer than 3 elements
-        """
-        if len(hourly_conditions) < 3:
-            raise ValueError("Need at least 3 hourly conditions to find window")
-        
-        best_window = None
-        best_score = 0.0
-        
-        # Slide a 3-hour window through the data
-        for i in range(len(hourly_conditions) - 2):
-            window = hourly_conditions[i:i+3]
-            
-            # Calculate average potential for this window
-            avg_potential = sum(
-                SolarForecastService.calculate_solar_potential(c) for c in window
-            ) / len(window)
-            
-            if avg_potential > best_score:
-                best_score = avg_potential
-                best_window = (window[0].timestamp, window[2].timestamp)
-        
-        # Only return window if it's good enough
-        if best_score >= 50:
-            return best_window
-        return None
-    
-    @staticmethod
-    def generate_solar_advisory(
-        potential: float,
-        is_favorable: bool,
-        cloud_cover: int,
-    ) -> str:
-        """
-        Pure function: Generate human-readable solar advisory.
-        
-        Args:
-            potential: Solar potential percentage
-            is_favorable: Whether conditions are favorable
-            cloud_cover: Cloud cover percentage
-            
-        Returns:
-            Advisory text for the user
-        """
-        if potential < 20:
-            return "☁️ Heavy cloud cover. Poor solar conditions."
-        elif potential < 40:
-            return "🌥️ Moderate clouds. Mediocre solar capture."
-        elif potential < 60:
-            return "⛅ Partly cloudy. Fair solar conditions."
-        elif is_favorable:
-            return "☀️ Excellent solar conditions! Optimal for capture."
+
+        # Clamp to valid range
+        sin_elevation = max(-1.0, min(1.0, sin_elevation))
+        elevation_rad = math.asin(sin_elevation)
+        elevation_deg = math.degrees(elevation_rad)
+
+        # Elevation below horizon means no solar generation
+        if elevation_deg <= 0:
+            return 0.0
+
+        # Day length (simplified): cos_hour = -tan(lat)×tan(decl)
+        cos_hour = -math.tan(lat_rad) * math.tan(decl_rad)
+        cos_hour = max(-1.0, min(1.0, cos_hour))
+
+        if abs(cos_hour) >= 1.0:
+            day_length = 0.0 if cos_hour >= 1.0 else 24.0
         else:
-            return "🌤️ Good solar potential."
-    
+            hour_angle = math.acos(cos_hour)
+            day_length = 2.0 * 24.0 * hour_angle / (2 * math.pi)
+
+        # Peak sun hours based on elevation angle
+        # Scale baseline by (elevation/90)^0.75 to account for atmosphere
+        peak_sun_factor = (elevation_deg / 90.0) ** 0.75
+        peak_sun_hours = (
+            SolarForecastService.PEAK_SUN_HOURS_EQUATOR
+            * peak_sun_factor
+            * (day_length / 12.0)  # Normalized to 12-hour reference
+        )
+
+        # Baseline Wh for 1000W panel
+        baseline_wh = peak_sun_hours * 1000.0
+
+        return max(0.0, baseline_wh)
+
     @staticmethod
-    def forecast_for_waypoint(
-        conditions: SolarCondition,
-    ) -> SolarForecast:
+    def calculate_cloud_multiplier(cloud_cover: float) -> float:
         """
-        Pure function: Generate complete solar forecast for a waypoint.
-        
+        Calculate cloud cover multiplier (0.2-1.0).
+
+        Maps cloud cover % to output multiplier:
+        - 0% cloud → 1.0 (clear, full sun)
+        - 50% cloud → 0.6 (partly cloudy)
+        - 100% cloud → 0.2 (fully overcast)
+
         Args:
-            conditions: Solar condition at waypoint
-            
+            cloud_cover: Cloud cover percentage (0-100)
+
         Returns:
-            Complete solar forecast with advisory
-        """
-        potential = SolarForecastService.calculate_solar_potential(conditions)
-        is_favorable = SolarForecastService.evaluate_solar_favorability(
-            potential,
-            conditions.solar_irradiance_watts_m2
-        )
-        advisory = SolarForecastService.generate_solar_advisory(
-            potential,
-            is_favorable,
-            conditions.cloud_cover_percent
-        )
-        
-        return SolarForecast(
-            waypoint_lat=conditions.latitude,
-            waypoint_lon=conditions.longitude,
-            timestamp=conditions.timestamp,
-            peak_solar_potential=round(potential, 1),
-            best_time_window=None,  # Single point, not a window
-            advisory=advisory,
-            is_favorable_for_solar=is_favorable
-        )
-    
-    @staticmethod
-    def forecast_for_waypoints(
-        conditions_list: List[SolarCondition],
-    ) -> List[SolarForecast]:
-        """
-        Pure function: Generate solar forecasts for multiple waypoints.
-        
-        Args:
-            conditions_list: List of solar conditions
-            
-        Returns:
-            List of solar forecasts
-            
+            Multiplier clamped to [0.2, 1.0]
+
         Raises:
-            ValueError: If list is empty
+            ValueError: If cloud_cover outside [0, 100]
         """
-        if not conditions_list:
-            raise ValueError("Cannot forecast for empty conditions list")
-        
-        return [
-            SolarForecastService.forecast_for_waypoint(c)
-            for c in conditions_list
-        ]
+        if cloud_cover < 0 or cloud_cover > 100:
+            raise ValueError(
+                f"Cloud cover must be 0-100%, got {cloud_cover}"
+            )
 
+        # Linear: 0% → 1.0, 100% → 0.2
+        multiplier = 1.0 - (cloud_cover / 100.0) * 0.8
 
-def calculate_sunrise_sunset_impact(
-    latitude: float,
-    longitude: float,
-    timestamp: str,
-) -> float:
-    """
-    Pure function: Calculate impact of time of day on solar potential (0-1).
-    
-    Uses simplified solar position calculation (not astronomical precision).
-    
-    Args:
-        latitude: Location latitude
-        longitude: Location longitude
-        timestamp: ISO format timestamp
-        
-    Returns:
-        Factor 0-1 indicating position in solar day
-    """
-    try:
-        dt = datetime.fromisoformat(timestamp)
-    except (ValueError, TypeError):
-        return 0.0  # Invalid timestamp
-    
-    # Day of year (1-365)
-    day_of_year = dt.timetuple().tm_yday
-    
-    # Hour of day (0-23)
-    hour = dt.hour + dt.minute / 60.0
-    
-    # Simplified: Solar noon occurs around hour 12 + longitude correction
-    solar_noon_hour = 12 + (longitude / 15.0)  # 15 degrees per hour
-    
-    # Peak solar potential around solar noon
-    hours_from_noon = abs(hour - solar_noon_hour)
-    
-    # Gaussian-like curve: peak at noon, declining by afternoon
-    if hours_from_noon > 12:
-        hours_from_noon = 24 - hours_from_noon
-    
-    solar_potential = max(0.0, 1.0 - (hours_from_noon / 12.0) ** 2)
-    
-    # Seasonal variation (more hours of daylight in summer)
-    # Simplified using day of year
-    if 80 <= day_of_year <= 265:  # Approximate spring/summer/fall
-        seasonal_factor = 1.0
-    else:  # Winter
-        seasonal_factor = 0.7
-    
-    return solar_potential * seasonal_factor
+        return max(0.2, min(1.0, multiplier))
+
+    @staticmethod
+    def calculate_shade_loss(shade_pct: float) -> float:
+        """
+        Calculate shade loss factor.
+
+        Shade blocks direct sunlight from panels.
+
+        Args:
+            shade_pct: Average shade percentage (0-100)
+
+        Returns:
+            Usable sunlight factor (0.0-1.0)
+
+        Raises:
+            ValueError: If shade_pct outside [0, 100]
+        """
+        if shade_pct < 0 or shade_pct > 100:
+            raise ValueError(f"Shade must be 0-100%, got {shade_pct}")
+
+        return (100.0 - shade_pct) / 100.0
+
+    @staticmethod
+    def date_to_day_of_year(date_str: str) -> int:
+        """
+        Convert ISO date string to day of year.
+
+        Args:
+            date_str: ISO format (e.g., "2026-01-20")
+
+        Returns:
+            Day of year (1-366)
+
+        Raises:
+            ValueError: If date format invalid
+        """
+        try:
+            dt = datetime.strptime(date_str, "%Y-%m-%d")
+            return dt.timetuple().tm_yday
+        except ValueError as e:
+            raise ValueError(f"Invalid date '{date_str}': {e}")
+
+    @staticmethod
+    def forecast_daily_wh(
+        lat: float,
+        lon: float,
+        date_range: List[str],
+        panel_watts: float,
+        shade_pct: float,
+        cloud_cover: List[float],
+    ) -> SolarForecastResult:
+        """
+        Forecast daily solar energy generation.
+
+        Args:
+            lat: Latitude (-90 to 90)
+            lon: Longitude (-180 to 180)
+            date_range: List of ISO dates (e.g., ["2026-01-20", "2026-01-21"])
+            panel_watts: Panel capacity in watts (>0)
+            shade_pct: Average shade percentage (0-100)
+            cloud_cover: List of cloud cover % per date (0-100), same length as date_range
+
+        Returns:
+            SolarForecastResult with daily_wh list
+
+        Raises:
+            ValueError: If any input invalid or inconsistent
+        """
+        # Input validation
+        if lat < -90 or lat > 90:
+            raise ValueError(f"Latitude must be -90 to 90, got {lat}")
+        if lon < -180 or lon > 180:
+            raise ValueError(f"Longitude must be -180 to 180, got {lon}")
+        if panel_watts <= 0:
+            raise ValueError(f"Panel watts must be >0, got {panel_watts}")
+        if not date_range:
+            raise ValueError("Date range cannot be empty")
+        if len(date_range) != len(cloud_cover):
+            raise ValueError(
+                f"Cloud cover array length ({len(cloud_cover)}) must match "
+                f"date range ({len(date_range)})"
+            )
+
+        # Validate shade
+        if shade_pct < 0 or shade_pct > 100:
+            raise ValueError(f"Shade must be 0-100%, got {shade_pct}")
+
+        # Validate cloud cover array
+        for i, cc in enumerate(cloud_cover):
+            if cc < 0 or cc > 100:
+                raise ValueError(
+                    f"Cloud cover[{i}]={cc} must be 0-100%"
+                )
+
+        # Calculate fixed factors
+        shade_loss = SolarForecastService.calculate_shade_loss(shade_pct)
+
+        # Calculate daily values
+        daily_wh = []
+        for date_str, cloud_pct in zip(date_range, cloud_cover):
+            doy = SolarForecastService.date_to_day_of_year(date_str)
+            
+            baseline = SolarForecastService.calculate_clear_sky_baseline(
+                lat, doy
+            )
+            cloud_mult = SolarForecastService.calculate_cloud_multiplier(
+                cloud_pct
+            )
+
+            # Final: baseline × cloud_mult × shade_loss × (panel_watts / 1000)
+            wh = (
+                baseline
+                * cloud_mult
+                * shade_loss
+                * (panel_watts / 1000.0)
+            )
+
+            daily_wh.append(max(0.0, wh))
+
+        # Generate advisory
+        avg_cloud = sum(cloud_cover) / len(cloud_cover)
+        if avg_cloud > 80:
+            advisory = "☁️ Heavy cloud cover expected. Minimal solar generation."
+        elif avg_cloud > 50:
+            advisory = "🌥️ Partly cloudy forecast. Moderate solar generation."
+        else:
+            advisory = "☀️ Clear skies expected. Good solar conditions."
+
+        return SolarForecastResult(
+            daily_wh=daily_wh,
+            dates=date_range,
+            panel_watts=panel_watts,
+            shade_pct=shade_pct,
+            cloud_cover=cloud_cover,
+            advisory=advisory,
+        )
