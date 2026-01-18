@@ -265,6 +265,17 @@ class PushTokenRequest(BaseModel):
 class TestNotificationRequest(BaseModel):
     push_token: str
 
+class SubscriptionRequest(BaseModel):
+    """Stub request for subscription validation"""
+    subscription_id: str
+    purchase_token: Optional[str] = None
+
+class SubscriptionResponse(BaseModel):
+    """Response for subscription validation"""
+    is_valid: bool
+    subscription_id: str
+    message: str
+
 # ==================== Helper Functions ====================
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -1831,6 +1842,109 @@ async def send_test_notification(request: TestNotificationRequest):
             'success': False,
             'message': f'Error sending test notification: {str(e)}',
         }
+
+# ==================== Subscription/Billing Endpoints ====================
+
+@api_router.post("/billing/validate-subscription", response_model=SubscriptionResponse)
+async def validate_subscription(request: SubscriptionRequest):
+    """
+    Validate a subscription ID (stubbed for Google Play Billing integration).
+    
+    Currently returns success for all valid subscription IDs.
+    In production, this would validate against Google Play API.
+    
+    Logging: Premium feature access tracked here
+    """
+    logger.info(f"[PREMIUM] Validating subscription: {request.subscription_id}")
+    
+    try:
+        # TODO: Integrate with Google Play Billing API
+        # For now, accept test subscription IDs
+        test_subscriptions = [
+            'routecast_pro_monthly',
+            'routecast_pro_annual',
+            'test_subscription',
+        ]
+        
+        is_valid = request.subscription_id in test_subscriptions
+        
+        if is_valid:
+            logger.info(f"[PREMIUM] Subscription validated: {request.subscription_id}")
+            
+            # Save subscription to database
+            await db.subscriptions.update_one(
+                {'subscription_id': request.subscription_id},
+                {
+                    '$set': {
+                        'subscription_id': request.subscription_id,
+                        'status': 'active',
+                        'created_at': datetime.utcnow(),
+                        'last_validated': datetime.utcnow(),
+                    }
+                },
+                upsert=True
+            )
+        
+        return SubscriptionResponse(
+            is_valid=is_valid,
+            subscription_id=request.subscription_id,
+            message='Subscription validated' if is_valid else 'Invalid subscription'
+        )
+    except Exception as e:
+        logger.error(f"[BILLING] Error validating subscription: {e}")
+        # Graceful fallback - don't hard block
+        return SubscriptionResponse(
+            is_valid=False,
+            subscription_id=request.subscription_id,
+            message='Unable to validate subscription at this time'
+        )
+
+@api_router.get("/billing/features")
+async def get_feature_gating_info():
+    """
+    Get information about which features are free vs. premium.
+    
+    Used by frontend to show accurate "Upgrade to unlock" messaging.
+    """
+    logger.info("[PREMIUM] Feature gating info requested")
+    
+    return {
+        'free_features': [
+            'weather_warnings',
+            'road_surface_warnings',
+            'bridge_height_alerts',
+            'live_radar',
+            'time_departure_changes',
+            'basic_ai_chat',
+            'major_weather_alerts',
+            'google_maps',
+            'recent_favorites',
+            'basic_push_alerts',
+        ],
+        'premium_features': [
+            'future_weather_forecast',
+            'radar_playback_history',
+            'advanced_push_alerts',
+            'predictive_storm_alerts',
+        ],
+        'tiers': [
+            {
+                'id': 'routecast_pro_monthly',
+                'name': 'Routecast Pro',
+                'price': 4.99,
+                'billing_period': 'monthly',
+                'currency': 'USD',
+            },
+            {
+                'id': 'routecast_pro_annual',
+                'name': 'Routecast Pro',
+                'price': 29.99,
+                'billing_period': 'annual',
+                'currency': 'USD',
+                'savings': '40%',
+            },
+        ]
+    }
 
 # Add CORS middleware first, before including router
 app.add_middleware(
