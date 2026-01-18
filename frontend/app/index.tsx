@@ -747,7 +747,7 @@ export default function HomeScreen() {
       {showDatePicker && (
         <Modal transparent animationType="slide">
           <View style={styles.modalOverlay}>
-            <View style={styles.modalContent}>
+            <ScrollView style={styles.modalContent}>
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Select Departure Time</Text>
                 <TouchableOpacity onPress={() => setShowDatePicker(false)}>
@@ -755,51 +755,97 @@ export default function HomeScreen() {
                 </TouchableOpacity>
               </View>
               
-              {/* Custom Date/Time Picker */}
+              {/* Simple Date/Time Picker with Increment/Decrement */}
               <View style={styles.customDatePicker}>
-                <Text style={styles.datePickerLabel}>Date</Text>
-                <TextInput
-                  style={styles.dateInput}
-                  value={departureTime.toISOString().split('T')[0]}
-                  placeholder="YYYY-MM-DD"
-                  placeholderTextColor="#6b7280"
-                  onChangeText={(text) => {
-                    try {
-                      const [year, month, day] = text.split('-');
-                      if (year && month && day) {
+                {/* Date Section */}
+                <View>
+                  <Text style={styles.datePickerLabel}>Date</Text>
+                  <View style={styles.pickerRow}>
+                    <TouchableOpacity 
+                      style={styles.pickerButton}
+                      onPress={() => {
                         const newDate = new Date(departureTime);
-                        newDate.setFullYear(parseInt(year), parseInt(month) - 1, parseInt(day));
+                        newDate.setDate(newDate.getDate() - 1);
                         setDepartureTime(newDate);
-                      }
-                    } catch (e) {
-                      console.log('Date parse error:', e);
-                    }
-                  }}
-                />
-                
-                <Text style={[styles.datePickerLabel, { marginTop: 12 }]}>Time</Text>
-                <TextInput
-                  style={styles.dateInput}
-                  value={`${String(departureTime.getHours()).padStart(2, '0')}:${String(departureTime.getMinutes()).padStart(2, '0')}`}
-                  placeholder="HH:MM"
-                  placeholderTextColor="#6b7280"
-                  onChangeText={(text) => {
-                    try {
-                      const [hours, minutes] = text.split(':');
-                      if (hours && minutes) {
+                      }}
+                    >
+                      <Text style={styles.pickerButtonText}>−</Text>
+                    </TouchableOpacity>
+                    <Text style={styles.pickerValue}>{format(departureTime, 'MMM d, yyyy')}</Text>
+                    <TouchableOpacity 
+                      style={styles.pickerButton}
+                      onPress={() => {
                         const newDate = new Date(departureTime);
-                        newDate.setHours(parseInt(hours), parseInt(minutes));
+                        newDate.setDate(newDate.getDate() + 1);
                         setDepartureTime(newDate);
-                      }
-                    } catch (e) {
-                      console.log('Time parse error:', e);
-                    }
-                  }}
-                />
+                      }}
+                    >
+                      <Text style={styles.pickerButtonText}>+</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {/* Time Section */}
+                <View style={{ marginTop: 20 }}>
+                  <Text style={styles.datePickerLabel}>Hour</Text>
+                  <View style={styles.pickerRow}>
+                    <TouchableOpacity 
+                      style={styles.pickerButton}
+                      onPress={() => {
+                        const newDate = new Date(departureTime);
+                        newDate.setHours(newDate.getHours() - 1);
+                        setDepartureTime(newDate);
+                      }}
+                    >
+                      <Text style={styles.pickerButtonText}>−</Text>
+                    </TouchableOpacity>
+                    <Text style={styles.pickerValue}>{String(departureTime.getHours()).padStart(2, '0')}</Text>
+                    <TouchableOpacity 
+                      style={styles.pickerButton}
+                      onPress={() => {
+                        const newDate = new Date(departureTime);
+                        newDate.setHours(newDate.getHours() + 1);
+                        setDepartureTime(newDate);
+                      }}
+                    >
+                      <Text style={styles.pickerButtonText}>+</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+
+                {/* Minutes Section */}
+                <View style={{ marginTop: 20 }}>
+                  <Text style={styles.datePickerLabel}>Minutes</Text>
+                  <View style={styles.pickerRow}>
+                    <TouchableOpacity 
+                      style={styles.pickerButton}
+                      onPress={() => {
+                        const newDate = new Date(departureTime);
+                        newDate.setMinutes(newDate.getMinutes() - 15);
+                        setDepartureTime(newDate);
+                      }}
+                    >
+                      <Text style={styles.pickerButtonText}>−15</Text>
+                    </TouchableOpacity>
+                    <Text style={styles.pickerValue}>{String(departureTime.getMinutes()).padStart(2, '0')}</Text>
+                    <TouchableOpacity 
+                      style={styles.pickerButton}
+                      onPress={() => {
+                        const newDate = new Date(departureTime);
+                        newDate.setMinutes(newDate.getMinutes() + 15);
+                        setDepartureTime(newDate);
+                      }}
+                    >
+                      <Text style={styles.pickerButtonText}>+15</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
                 
-                <Text style={[styles.datePickerLabel, { marginTop: 16, fontWeight: '600' }]}>
-                  Selected: {format(departureTime, 'MMM d, yyyy h:mm a')}
-                </Text>
+                <View style={{ marginTop: 20, padding: 12, backgroundColor: '#3f3f46', borderRadius: 8 }}>
+                  <Text style={styles.selectedDateTime}>
+                    Selected: {format(departureTime, 'MMM d, yyyy h:mm a')}
+                  </Text>
+                </View>
               </View>
               
               <TouchableOpacity 
@@ -808,7 +854,7 @@ export default function HomeScreen() {
               >
                 <Text style={styles.modalButtonText}>Confirm</Text>
               </TouchableOpacity>
-            </View>
+            </ScrollView>
           </View>
         </Modal>
       )}
@@ -1387,6 +1433,33 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     letterSpacing: 0.5,
+  },
+  pickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+    marginTop: 8,
+  },
+  pickerButton: {
+    backgroundColor: '#3f3f46',
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    minWidth: 50,
+    alignItems: 'center',
+  },
+  pickerButtonText: {
+    color: '#eab308',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  pickerValue: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    minWidth: 100,
+    textAlign: 'center',
   },
   dateInput: {
     backgroundColor: '#3f3f46',
