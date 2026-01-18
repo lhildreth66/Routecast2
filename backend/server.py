@@ -1497,9 +1497,14 @@ async def get_route_weather(request: RouteRequest):
     
     # Save to database
     try:
-        await db.routes.insert_one(response.model_dump())
+        route_doc = response.model_dump()
+        # Ensure created_at is serializable
+        if 'created_at' in route_doc and isinstance(route_doc['created_at'], datetime):
+            route_doc['created_at'] = route_doc['created_at']
+        await db.routes.insert_one(route_doc)
+        logger.info(f"Saved route {response.id} to database")
     except Exception as e:
-        logger.error(f"Error saving route: {e}")
+        logger.error(f"Error saving route: {e}", exc_info=True)
     
     return response
 
