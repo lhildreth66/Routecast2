@@ -1608,7 +1608,6 @@ async def geocode(location: str):
 @geocode_router.get("/autocomplete")
 async def autocomplete_location(query: str, limit: int = 5):
     """Get autocomplete suggestions for a location query using Mapbox."""
-    print("AUTOCOMPLETE ROUTE HIT")
     logger.info(f"Autocomplete request: query={query}, limit={limit}")
     if not query or len(query) < 2:
         return []
