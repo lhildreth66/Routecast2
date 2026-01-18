@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 import httpx
 import polyline
 import asyncio
+from bridge_database import get_bridge_warnings
 
 # Google Gemini for chat
 try:
@@ -935,6 +936,11 @@ def generate_trucker_warnings(waypoints_weather: List[WaypointWeather], vehicle_
         distance = wp.waypoint.distance_from_start or 0
         location = wp.waypoint.name or f"Mile {int(distance)}"
         
+        # CHECK FOR BRIDGE CLEARANCE ISSUES FIRST (CRITICAL)
+        bridge_warnings = get_bridge_warnings(location, vehicle_height_ft)
+        if bridge_warnings:
+            warnings.extend(bridge_warnings)
+        
         # WIND WARNINGS for high-profile vehicles
         wind_str = wp.weather.wind_speed or "0 mph"
         try:
@@ -966,21 +972,17 @@ def generate_trucker_warnings(waypoints_weather: List[WaypointWeather], vehicle_
         
         if "rain" in conditions and temp <= 40:
             warnings.append(f"🌧️ Cold rain at {location} - Roads may be slick; bridges freeze first")
-            
-        # BRIDGE CLEARANCE INFORMATION (generic since we don't have real bridge data)
-        if vehicle_height_ft and vehicle_height_ft > 12:
-            warnings.append(f"📏 Vehicle height {vehicle_height_ft} ft - Standard overpasses are 14-16 ft; avoid low-clearance bridges")
     
     # Deduplicate similar warnings and limit
     unique_warnings = []
     seen = set()
     for w in warnings:
-        key = w.split(" - ")[0][:20]  # Use first 20 chars as key
+        key = w.split(" - ")[0][:30]  # Use first 30 chars as key
         if key not in seen:
             unique_warnings.append(w)
             seen.add(key)
             
-    return unique_warnings[:10]  # Return top 10 warnings
+    return unique_warnings[:15]  # Return top 15 warnings to accommodate bridge data
 
 def calculate_optimal_departure(origin: str, destination: str, waypoints_weather: List[WaypointWeather], base_departure: datetime) -> Optional[DepartureWindow]:
     """Calculate optimal departure window based on weather patterns."""
