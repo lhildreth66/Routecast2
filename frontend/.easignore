@@ -8,6 +8,10 @@ dist/
 build/
 .expo/
 web-build/
+
+# Ignore native folders since we're using Prebuild
+/android
+/ios
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*

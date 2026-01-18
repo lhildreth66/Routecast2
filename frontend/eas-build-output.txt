@@ -1,0 +1,8 @@
+The field "cli.appVersionSource" is not set, but it will be required in the future. Learn more: https://docs.expo.dev/build-reference/app-versions/
+Resolved "production" environment for the build. Learn more: https://docs.expo.dev/eas/environment-variables/#setting-the-environment-for-your-builds
+No environment variables with visibility "Plain text" and "Sensitive" found for the "production" environment on EAS.
+Environment variables loaded from the "production" build profile "env" configuration: EXPO_PUBLIC_BACKEND_URL.
+
+📝  Android application id Learn more: https://expo.fyi/android-package
+[2K[1G[36m?[39m [1mWhat would you like your Android application id to be?[22m [90m›[39m [90mcom.promedtrans01.routecast2[39m78[2K[1G[2K[1G[31m✖[39m [1mWhat would you like your Android application id to be?[22m [90m…[39m com.promedtrans01.routecast278
+[?25h

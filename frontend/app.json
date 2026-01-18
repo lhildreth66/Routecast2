@@ -2,8 +2,12 @@
   "expo": {
     "name": "Routecast2",
     "slug": "routecast2",
-    "version": "1.0.0",
+    "version": "1.0.6",
     "description": "Plan your road trip with real-time weather forecasts along your route. Get alerts for bad weather and AI-powered driving recommendations.",
+    "android": {
+      "package": "com.routecast.app",
+      "versionCode": 9
+    },
     "web": {
       "bundler": "metro",
       "output": "static",
