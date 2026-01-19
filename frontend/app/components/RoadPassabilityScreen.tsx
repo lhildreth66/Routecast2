@@ -20,9 +20,9 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
-import { useRoadPassability } from './hooks/useRoadPassability';
-import { usePremium } from './hooks/usePremium';
-import { PaywallModal } from './components/PaywallModal';
+import { useRoadPassability } from '../hooks/useRoadPassability';
+import { usePremium } from '../hooks/usePremium';
+import PaywallModal from './PaywallModal';
 
 const RoadPassabilityScreen: React.FC = () => {
   const { assess, loading, error, result, clearResult } =
