@@ -341,7 +341,7 @@ const styles = StyleSheet.create({
   buttonGroup: {
     flexDirection: 'row',
     marginHorizontal: 12,
-    marginBottom: 16,
+    marginBottom: 40,
     gap: 8,
   },
   button: {

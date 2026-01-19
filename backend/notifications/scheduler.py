@@ -16,11 +16,11 @@ import logging
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
-from backend.notifications.smart_delay import SmartDelayOptimizer
-from backend.notifications.service import NotificationService
-from backend.notifications.expo_push import ExpoPushClient
-from backend.providers.weather_provider import WeatherProvider
-from backend.billing.premium_service import PremiumService
+from .smart_delay import SmartDelayOptimizer
+from .service import NotificationService
+from .expo_push import ExpoPushClient
+from ..providers.weather_provider import WeatherProvider
+from ..billing.premium_service import PremiumService
 
 logger = logging.getLogger(__name__)
 

@@ -18,14 +18,14 @@ from pymongo import MongoClient
 from pymongo.database import Database
 from pymongo.errors import DuplicateKeyError
 
-from backend.notifications.models import (
+from .models import (
     PlannedTrip,
     PushToken,
     RouteWaypoint,
     SmartDelayNotification,
     AlertType,
 )
-from backend.notifications.expo_push import ExpoPushClient
+from .expo_push import ExpoPushClient
 
 logger = logging.getLogger(__name__)
 

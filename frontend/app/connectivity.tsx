@@ -11,7 +11,7 @@ type ConnectivityTab = 'cell' | 'starlink';
 export default function ConnectivityScreen() {
   // Cell inputs
   const [carrier, setCarrier] = useState<'verizon' | 'att' | 'tmobile'>('att');
-  const [towerDistance, setTowerDistance] = useState('5');
+  const [towerDistance, setTowerDistance] = useState('3');
   const [terrainObstruction, setTerrainObstruction] = useState('30');
 
   // Starlink inputs
@@ -39,7 +39,7 @@ export default function ConnectivityScreen() {
 
       const payload = {
         carrier,
-        towerDistanceKm: parseFloat(towerDistance || '0'),
+        towerDistanceKm: parseFloat(towerDistance || '0') * 1.60934, // Convert miles to km
         terrainObstructionPct: parseInt(terrainObstruction || '0', 10),
       };
 
@@ -102,7 +102,7 @@ export default function ConnectivityScreen() {
 
   const fillCellDemo = () => {
     setCarrier('att');
-    setTowerDistance('5');
+    setTowerDistance('3');
     setTerrainObstruction('30');
   };
 
@@ -154,13 +154,13 @@ export default function ConnectivityScreen() {
               </View>
 
               <View style={styles.inputRow}>
-                <Text style={styles.label}>Tower Distance (km)</Text>
+                <Text style={styles.label}>Tower Distance (mi)</Text>
                 <TextInput
                   value={towerDistance}
                   onChangeText={setTowerDistance}
                   keyboardType={Platform.OS === 'ios' ? 'numbers-and-punctuation' : 'numeric'}
                   style={styles.input}
-                  placeholder="e.g., 5"
+                  placeholder="e.g., 3"
                   placeholderTextColor="#9ca3af"
                 />
               </View>
