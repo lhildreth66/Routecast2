@@ -17,7 +17,7 @@ import {
 } from 'react-native';
 import { useSolarForecast } from '../hooks/useSolarForecast';
 import { usePremium } from '../hooks/usePremium';
-import { PaywallModal } from './PaywallModal';
+import PaywallModal from './PaywallModal';
 
 const SolarForecastScreen: React.FC = () => {
   const { forecast, loading, error, result, clearResult } = useSolarForecast();
