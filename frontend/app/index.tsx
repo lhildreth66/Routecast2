@@ -1257,7 +1257,7 @@ export default function HomeScreen() {
       
       {/* Camp Prep FAB */}
       <TouchableOpacity 
-        style={[styles.chatFab, { bottom: 90 }]} 
+        style={[styles.chatFab, { bottom: 30, left: 20, right: undefined }]} 
         onPress={() => setShowCampPrep(true)}
       >
         <Text style={{ fontSize: 24 }}>🏕️</Text>
