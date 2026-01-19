@@ -66,6 +66,7 @@ export default function HomeScreen() {
   const [recentRoutes, setRecentRoutes] = useState<SavedRoute[]>([]);
   const [favoriteRoutes, setFavoriteRoutes] = useState<SavedRoute[]>([]);
   const [showFavorites, setShowFavorites] = useState(false);
+  const [favoriteAdded, setFavoriteAdded] = useState(false);
   const [saveMessage, setSaveMessage] = useState('');
   
   // Autocomplete state
@@ -123,6 +124,11 @@ export default function HomeScreen() {
     loadCachedRoute();
     loadPushToken();
   }, []);
+
+  // Reset favorite indicator when route changes
+  useEffect(() => {
+    setFavoriteAdded(false);
+  }, [origin, destination, stops]);
 
   const loadPushToken = async () => {
     try {
@@ -467,6 +473,7 @@ export default function HomeScreen() {
         destination: destination.trim(),
         stops: stops,
       });
+      setFavoriteAdded(true);
       fetchFavoriteRoutes();
     } catch (err) {
       console.error('Error saving favorite:', err);
@@ -555,7 +562,11 @@ export default function HomeScreen() {
                   style={styles.favoriteButton}
                   onPress={addToFavorites}
                 >
-                  <Ionicons name="heart-outline" size={24} color="#eab308" />
+                  <Ionicons 
+                    name={favoriteAdded ? "heart" : "heart-outline"} 
+                    size={24} 
+                    color={favoriteAdded ? "#ef4444" : "#eab308"} 
+                  />
                 </TouchableOpacity>
               </View>
 
