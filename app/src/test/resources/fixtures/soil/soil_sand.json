@@ -1,0 +1,12 @@
+{
+  "version": "1.0",
+  "soil_type": "sand",
+  "drainage_coefficient": 0.9,
+  "compaction_coefficient": 0.3,
+  "base_passability": 60,
+  "wet_penalty_multiplier": 0.8,
+  "recovery_hours": 2,
+  "texture": "coarse",
+  "organic_content": 5,
+  "description": "Sandy soil with excellent drainage but low compaction"
+}

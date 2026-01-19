@@ -1,4 +1,5 @@
 from fastapi import FastAPI, APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -9,15 +10,30 @@ from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 import uuid
 import math
+from io import BytesIO
 from datetime import datetime, timedelta
 import httpx
 import polyline
 import asyncio
 from bridge_database import get_bridge_warnings
+from providers import get_providers
+from chat.camp_prep_dispatcher import dispatch as dispatch_camp_prep
+from billing import billing_verifier, VerificationRequest, VerificationResponse
+from common.premium_gate import require_premium
+from common.features import SOLAR_FORECAST, PROPANE_USAGE, ROAD_SIM, CELL_STARLINK, CLAIM_LOG
 from road_passability_service import RoadPassabilityService
 from solar_forecast_service import SolarForecastService
 from propane_usage_service import PropaneUsageService
 from water_budget_service import WaterBudgetService
+from terrain_shade_service import TerrainShadeService, SunSlot
+from wind_shelter_service import WindShelterService, Ridge
+from connectivity_prediction_service import cell_bars_probability, obstruction_risk
+from campsite_index_service import SiteFactors, Weights, score as campsite_score
+from claim_log_service import HazardEvent as ClaimHazardEvent, WeatherSnapshot as ClaimWeatherSnapshot, build_claim_log
+from claim_log_pdf import export_claim_log_to_pdf
+from notifications import NotificationService, ExpoPushClient
+from notifications.smart_delay import SmartDelayOptimizer
+from common.features import SMART_DELAY_ALERTS
 
 # Google Gemini for chat
 try:
@@ -52,6 +68,21 @@ app = FastAPI()
 # Create routers
 api_router = APIRouter(prefix="/api")
 geocode_router = APIRouter()
+
+# Initialize notification service (for E1: Smart Departure & Hazard Alerts)
+# Uses synchronous MongoDB client (not motor) for simplicity
+_notification_service_instance = None
+
+def get_notification_service() -> NotificationService:
+    """Get or create NotificationService instance."""
+    global _notification_service_instance
+    if _notification_service_instance is None:
+        from pymongo import MongoClient as SyncClient
+        sync_client = SyncClient(mongo_url)
+        sync_db = sync_client[os.environ['DB_NAME']]
+        expo_client = ExpoPushClient()
+        _notification_service_instance = NotificationService(sync_db, expo_client)
+    return _notification_service_instance
 
 # Configure logging
 logging.basicConfig(
@@ -169,6 +200,18 @@ class ChatMessage(BaseModel):
 class ChatResponse(BaseModel):
     response: str
     suggestions: List[str] = []
+
+class CampPrepChatRequest(BaseModel):
+    message: str
+    subscription_id: Optional[str] = None
+
+class CampPrepChatResponse(BaseModel):
+    mode: str
+    command: str
+    human: str
+    payload: Optional[Dict[str, Any]] = None
+    premium: Dict[str, Any]
+    error: Optional[str] = None
 
 class Waypoint(BaseModel):
     lat: float
@@ -360,6 +403,214 @@ class WaterBudgetResponse(BaseModel):
     is_premium_locked: bool = False
     premium_message: Optional[str] = None
 
+class SunPathSlotResponse(BaseModel):
+    """Single hourly sunlight slot from solar path"""
+    hour: int
+    sun_elevation_deg: float
+    usable_sunlight_fraction: float
+    time_label: str
+
+class TerrainShadeRequest(BaseModel):
+    """Request for solar path and shade calculation"""
+    latitude: float
+    longitude: float
+    date: str  # ISO format: YYYY-MM-DD
+    tree_canopy_pct: int = 0  # Tree coverage (0-100%)
+    horizon_obstruction_deg: int = 0  # Horizon blocking (0-90°)
+    subscription_id: Optional[str] = None
+
+class TerrainShadeResponse(BaseModel):
+    """Response for solar path and shade data"""
+    sun_path_slots: Optional[List[SunPathSlotResponse]] = None
+    shade_factor: Optional[float] = None  # 0.0-1.0 (fraction blocked)
+    exposure_hours: Optional[float] = None  # Effective sunlight hours after shade
+    is_premium_locked: bool = False
+    premium_message: Optional[str] = None
+
+class WindShelterRidgeRequest(BaseModel):
+    """Single ridge for wind shelter consideration"""
+    bearing_deg: int
+    strength: str  # "low", "med", "high"
+    name: Optional[str] = None
+
+class WindShelterRequest(BaseModel):
+    """Request for wind shelter orientation recommendation"""
+    predominant_dir_deg: int  # Wind direction (0-360°)
+    gust_mph: int  # Peak wind gust speed
+    local_ridges: Optional[List[WindShelterRidgeRequest]] = None
+    subscription_id: Optional[str] = None
+
+class WindShelterResponse(BaseModel):
+    """Response for wind shelter recommendation"""
+    recommended_bearing_deg: Optional[int] = None
+    rationale_text: Optional[str] = None
+    risk_level: Optional[str] = None  # "low", "medium", "high"
+    shelter_available: Optional[bool] = None
+    estimated_wind_reduction_pct: Optional[int] = None
+    is_premium_locked: bool = False
+    premium_message: Optional[str] = None
+
+# ----- A6: Road Passability Models -----
+class RoadPassabilityRequest(BaseModel):
+    precip72hIn: float
+    slopePct: float
+    minTempF: int
+    soilType: str
+    subscription_id: Optional[str] = None
+
+class RoadPassabilityResponse(BaseModel):
+    score: Optional[int] = None
+    mud_risk: Optional[bool] = None
+    ice_risk: Optional[bool] = None
+    clearance_need: Optional[str] = None  # "low"|"medium"|"high"
+    four_by_four_recommended: Optional[bool] = None
+    reasons: Optional[List[str]] = None
+    is_premium_locked: bool = False
+    premium_message: Optional[str] = None
+
+# ----- A7: Connectivity Prediction Models -----
+class ConnectivityCellRequest(BaseModel):
+    carrier: str  # "verizon", "att", "tmobile", "unknown"
+    towerDistanceKm: float
+    terrainObstructionPct: int  # 0-100
+    subscription_id: Optional[str] = None
+
+class ConnectivityCellResponse(BaseModel):
+    carrier: Optional[str] = None
+    probability: Optional[float] = None
+    bar_estimate: Optional[str] = None
+    explanation: Optional[str] = None
+    is_premium_locked: bool = False
+    premium_message: Optional[str] = None
+
+class ConnectivityStarlinkRequest(BaseModel):
+    horizonSouthDeg: int  # 0-90
+    canopyPct: int  # 0-100
+    subscription_id: Optional[str] = None
+
+class ConnectivityStarlinkResponse(BaseModel):
+    risk_level: Optional[str] = None  # "low", "medium", "high"
+    obstruction_score: Optional[float] = None
+    explanation: Optional[str] = None
+    reasons: Optional[List[str]] = None
+    is_premium_locked: bool = False
+    premium_message: Optional[str] = None
+
+# ----- A8: Campsite Index Scoring Models -----
+class CampsiteIndexRequest(BaseModel):
+    wind_gust_mph: float
+    shade_score: float  # 0-1
+    slope_pct: float
+    access_score: float  # 0-1
+    signal_score: float  # 0-1
+    road_passability_score: float  # 0-100
+    subscription_id: Optional[str] = None
+
+class CampsiteIndexResponse(BaseModel):
+    score: Optional[int] = None
+    breakdown: Optional[Dict[str, float]] = None
+    explanations: Optional[List[str]] = None
+    is_premium_locked: bool = False
+    premium_message: Optional[str] = None
+
+# ----- A9: Claim Log Models -----
+class ClaimHazardLocation(BaseModel):
+    latitude: float
+    longitude: float
+
+
+class ClaimHazardEventModel(BaseModel):
+    timestamp: str
+    type: str
+    severity: str
+    location: ClaimHazardLocation
+    notes: Optional[str] = None
+    evidence: Optional[str] = None
+
+
+class ClaimWeatherTimeRange(BaseModel):
+    start: str
+    end: str
+
+
+class ClaimWeatherSnapshotModel(BaseModel):
+    summary: str
+    source: str
+    time_range: ClaimWeatherTimeRange
+    key_metrics: Dict[str, Any]
+
+
+class ClaimLogRequest(BaseModel):
+    routeId: str
+    hazards: List[ClaimHazardEventModel]
+    weatherSnapshot: ClaimWeatherSnapshotModel
+    subscription_id: Optional[str] = None
+
+
+class ClaimLogTotals(BaseModel):
+    total_events: int
+    by_type: Dict[str, int]
+    by_severity: Dict[str, int]
+
+
+class ClaimLogResponse(BaseModel):
+    schema_version: str
+    route_id: str
+    generated_at: str
+    hazards: List[Dict[str, Any]]
+    weather_snapshot: Dict[str, Any]
+    totals: ClaimLogTotals
+    narrative: str
+    is_premium_locked: bool = False
+    premium_message: Optional[str] = None
+
+# ----- E1: Smart Departure & Hazard Alerts Models -----
+class RouteWaypointRequest(BaseModel):
+    """A waypoint for planned route."""
+    latitude: float = Field(..., alias="lat")
+    longitude: float = Field(..., alias="lon")
+    name: Optional[str] = None
+
+class RegisterPlannedTripRequest(BaseModel):
+    """Register a planned trip for smart delay evaluation."""
+    route_waypoints: List[RouteWaypointRequest]
+    planned_departure_local: datetime  # Local departure time
+    user_timezone: str  # e.g., "America/Denver"
+    destination_name: Optional[str] = None
+    subscription_id: Optional[str] = None
+
+class RegisterPlannedTripResponse(BaseModel):
+    """Response from registering a planned trip."""
+    trip_id: str
+    registered_at: datetime
+    next_check_at: datetime
+    is_premium_locked: bool = False
+    premium_message: Optional[str] = None
+
+class RegisterPushTokenRequest(BaseModel):
+    """Register Expo push token for notifications."""
+    token: str  # Expo push token
+    device_id: Optional[str] = None
+    subscription_id: Optional[str] = None
+
+class RegisterPushTokenResponse(BaseModel):
+    """Response from registering push token."""
+    success: bool
+    message: str
+    is_premium_locked: bool = False
+
+class CheckNotificationRequest(BaseModel):
+    """Check if a notification should be sent now (fallback endpoint)."""
+    trip_id: str
+    subscription_id: Optional[str] = None
+
+class CheckNotificationResponse(BaseModel):
+    """Response with notification decision."""
+    should_notify: bool
+    notification: Optional[Dict[str, Any]] = None
+    is_premium_locked: bool = False
+    premium_message: Optional[str] = None
+
 # ==================== Helper Functions ====================
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -444,191 +695,87 @@ def extract_waypoints_from_route(encoded_polyline: str, interval_miles: float = 
         return []
 
 async def reverse_geocode(lat: float, lon: float) -> Optional[str]:
-    """Reverse geocode coordinates to get city, state name."""
+    """Reverse geocode coordinates to city/state using active provider."""
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            url = f"https://api.mapbox.com/geocoding/v5/mapbox.places/{lon},{lat}.json"
-            params = {
-                'access_token': MAPBOX_ACCESS_TOKEN,
-                'types': 'place,locality',
-                'limit': 1
-            }
-            response = await client.get(url, params=params)
-            response.raise_for_status()
-            data = response.json()
-            
-            if data.get('features') and len(data['features']) > 0:
-                feature = data['features'][0]
-                place_name = feature.get('text', '')
-                
-                # Extract state from context
-                context = feature.get('context', [])
-                state = ''
-                for ctx in context:
-                    if ctx.get('id', '').startswith('region'):
-                        state = ctx.get('short_code', '').replace('US-', '')
-                        break
-                
-                if place_name and state:
-                    return f"{place_name}, {state}"
-                return place_name or None
+        return await get_providers().geocode.reverse_geocode(lat, lon)
     except Exception as e:
         logger.error(f"Reverse geocoding error for {lat},{lon}: {e}")
-    return None
+        return None
+
 
 async def geocode_location(location: str) -> Optional[Dict[str, float]]:
-    """Geocode a location string to coordinates using Mapbox."""
+    """Geocode a location string using active provider."""
     try:
-        async with httpx.AsyncClient() as client:
-            url = f"https://api.mapbox.com/geocoding/v5/mapbox.places/{location}.json"
-            params = {
-                'access_token': MAPBOX_ACCESS_TOKEN,
-                'limit': 1,
-                'country': 'US'
-            }
-            response = await client.get(url, params=params)
-            response.raise_for_status()
-            data = response.json()
-            
-            if data.get('features') and len(data['features']) > 0:
-                coords = data['features'][0]['center']
-                return {'lon': coords[0], 'lat': coords[1]}
+        return await get_providers().geocode.geocode(location)
     except Exception as e:
         logger.error(f"Geocoding error for {location}: {e}")
-    return None
+        return None
+
 
 async def get_mapbox_route(origin_coords: Dict, dest_coords: Dict, waypoints: List[Dict] = None) -> Optional[Dict]:
-    """Get route from Mapbox Directions API with duration."""
+    """Get route using active directions provider (Mapbox in prod, fixtures in demo)."""
     try:
-        # Build coordinates string
-        coords_list = [f"{origin_coords['lon']},{origin_coords['lat']}"]
-        if waypoints:
-            for wp in waypoints:
-                coords_list.append(f"{wp['lon']},{wp['lat']}")
-        coords_list.append(f"{dest_coords['lon']},{dest_coords['lat']}")
-        coords_str = ";".join(coords_list)
-        
-        async with httpx.AsyncClient() as client:
-            url = f"https://api.mapbox.com/directions/v5/mapbox/driving/{coords_str}"
-            params = {
-                'access_token': MAPBOX_ACCESS_TOKEN,
-                'geometries': 'polyline',
-                'overview': 'full'
-            }
-            response = await client.get(url, params=params)
-            response.raise_for_status()
-            data = response.json()
-            
-            # Check for "no route" response
-            if data.get('code') == 'NoRoute':
-                logger.warning(f"No drivable route found between coordinates")
-                return None
-            
-            if data.get('routes') and len(data['routes']) > 0:
-                route = data['routes'][0]
-                return {
-                    'geometry': route['geometry'],
-                    'duration': route.get('duration', 0) / 60,  # Convert to minutes
-                    'distance': route.get('distance', 0) / 1609.34  # Convert to miles
-                }
-            else:
-                logger.warning(f"No routes in Mapbox response: {data.get('code', 'unknown')}")
+        return await get_providers().directions.route(origin_coords, dest_coords, waypoints)
     except Exception as e:
-        logger.error(f"Mapbox route error: {e}")
-    return None
+        logger.error(f"Directions provider error: {e}")
+        return None
+
 
 async def get_noaa_weather(lat: float, lon: float) -> Optional[WeatherData]:
-    """Get weather data from NOAA for a location with sunrise/sunset."""
+    """Get weather data using active provider (NOAA in prod, fixtures in demo)."""
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            # First get the grid point
-            point_url = f"https://api.weather.gov/points/{lat:.4f},{lon:.4f}"
-            point_response = await client.get(point_url, headers=NOAA_HEADERS)
-            
-            if point_response.status_code != 200:
-                logger.warning(f"NOAA points API error for {lat},{lon}: {point_response.status_code}")
-                return None
-            
-            point_data = point_response.json()
-            props = point_data.get('properties', {})
-            forecast_url = props.get('forecastHourly')
-            
-            if not forecast_url:
-                return None
-            
-            # Get hourly forecast
-            forecast_response = await client.get(forecast_url, headers=NOAA_HEADERS)
-            
-            if forecast_response.status_code != 200:
-                logger.warning(f"NOAA forecast API error: {forecast_response.status_code}")
-                return None
-            
-            forecast_data = forecast_response.json()
-            periods = forecast_data.get('properties', {}).get('periods', [])
-            
-            # Get hourly forecasts for timeline
-            hourly_forecast = []
-            for period in periods[:12]:  # Next 12 hours
-                hourly_forecast.append(HourlyForecast(
-                    time=period.get('startTime', ''),
-                    temperature=period.get('temperature', 0),
-                    conditions=period.get('shortForecast', ''),
-                    wind_speed=period.get('windSpeed', ''),
-                    precipitation_chance=period.get('probabilityOfPrecipitation', {}).get('value')
-                ))
-            
-            if periods:
-                current = periods[0]
-                
-                # Calculate approximate sunrise/sunset based on time of day
-                # This is simplified - in production, use a proper sun calculation library
-                is_daytime = current.get('isDaytime', True)
-                now = datetime.now()
-                sunrise = now.replace(hour=6, minute=30).strftime("%I:%M %p")
-                sunset = now.replace(hour=18, minute=30).strftime("%I:%M %p")
-                
-                return WeatherData(
-                    temperature=current.get('temperature'),
-                    temperature_unit=current.get('temperatureUnit', 'F'),
-                    wind_speed=current.get('windSpeed'),
-                    wind_direction=current.get('windDirection'),
-                    conditions=current.get('shortForecast'),
-                    icon=current.get('icon'),
-                    humidity=current.get('relativeHumidity', {}).get('value'),
-                    is_daytime=is_daytime,
-                    sunrise=sunrise,
-                    sunset=sunset,
-                    hourly_forecast=hourly_forecast
-                )
+        raw = await get_providers().weather.get_weather(lat, lon)
+        if not raw:
+            return None
+        hourly_raw = raw.get('hourly_forecast', [])
+        hourly_forecast = [
+            HourlyForecast(
+                time=entry.get('time', ''),
+                temperature=entry.get('temperature', 0),
+                conditions=entry.get('conditions', ''),
+                wind_speed=entry.get('wind_speed', ''),
+                precipitation_chance=entry.get('precipitation_chance'),
+            )
+            for entry in hourly_raw
+        ]
+        return WeatherData(
+            temperature=raw.get('temperature'),
+            temperature_unit=raw.get('temperature_unit', 'F'),
+            wind_speed=raw.get('wind_speed'),
+            wind_direction=raw.get('wind_direction'),
+            conditions=raw.get('conditions'),
+            icon=raw.get('icon'),
+            humidity=raw.get('humidity'),
+            is_daytime=raw.get('is_daytime', True),
+            sunrise=raw.get('sunrise'),
+            sunset=raw.get('sunset'),
+            hourly_forecast=hourly_forecast,
+        )
     except Exception as e:
-        logger.error(f"NOAA weather error for {lat},{lon}: {e}")
-    return None
+        logger.error(f"Weather provider error for {lat},{lon}: {e}")
+        return None
+
 
 async def get_noaa_alerts(lat: float, lon: float) -> List[WeatherAlert]:
-    """Get weather alerts from NOAA for a location."""
-    alerts = []
+    """Get alerts using active provider (NOAA in prod, fixtures in demo)."""
     try:
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            url = f"https://api.weather.gov/alerts?point={lat:.4f},{lon:.4f}"
-            response = await client.get(url, headers=NOAA_HEADERS)
-            
-            if response.status_code == 200:
-                data = response.json()
-                features = data.get('features', [])
-                
-                for feature in features[:5]:  # Limit to 5 alerts
-                    props = feature.get('properties', {})
-                    alerts.append(WeatherAlert(
-                        id=props.get('id', str(uuid.uuid4())),
-                        headline=props.get('headline', 'Weather Alert'),
-                        severity=props.get('severity', 'Unknown'),
-                        event=props.get('event', 'Weather Event'),
-                        description=props.get('description', '')[:500],
-                        areas=props.get('areaDesc')
-                    ))
+        raw_alerts = await get_providers().alerts.get_alerts(lat, lon)
+        alerts: List[WeatherAlert] = []
+        for alert in raw_alerts:
+            alerts.append(
+                WeatherAlert(
+                    id=alert.get('id', str(uuid.uuid4())),
+                    headline=alert.get('headline', 'Weather Alert'),
+                    severity=alert.get('severity', 'Unknown'),
+                    event=alert.get('event', 'Weather Event'),
+                    description=alert.get('description', '')[:500],
+                    areas=alert.get('areas'),
+                )
+            )
+        return alerts
     except Exception as e:
-        logger.error(f"NOAA alerts error for {lat},{lon}: {e}")
-    return alerts
+        logger.error(f"Alerts provider error for {lat},{lon}: {e}")
+        return []
 
 def generate_packing_suggestions(waypoints_weather: List[WaypointWeather]) -> List[PackingSuggestion]:
     """Generate packing suggestions based on weather conditions."""
@@ -972,52 +1119,36 @@ async def find_rest_stops(route_geometry: str, waypoints_weather: List[WaypointW
         approx_eta = int(approx_distance / 55 * 60)
         
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                # Search for POIs near this point
-                url = f"https://api.mapbox.com/geocoding/v5/mapbox.places/rest+stop+gas+station.json"
-                params = {
-                    'access_token': MAPBOX_ACCESS_TOKEN,
-                    'proximity': f"{lon},{lat}",
-                    'types': 'poi',
-                    'limit': 2
-                }
-                response = await client.get(url, params=params)
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    for feature in data.get('features', [])[:1]:
-                        place_name = feature.get('text', 'Rest Stop')
-                        coords = feature.get('center', [lon, lat])
-                        
-                        # Find nearest waypoint weather
-                        weather_desc = "Unknown"
-                        temp = None
-                        for wp in waypoints_weather:
-                            if wp.weather and abs(wp.waypoint.distance_from_start - approx_distance) < 30:
-                                weather_desc = wp.weather.conditions or "Clear"
-                                temp = wp.weather.temperature
-                                break
-                        
-                        # Generate recommendation
-                        recommendation = "Good rest stop option"
-                        if temp and temp > 85:
-                            recommendation = "Cool down and hydrate here"
-                        elif "rain" in weather_desc.lower():
-                            recommendation = "Wait out the rain here"
-                        elif "clear" in weather_desc.lower() or "sunny" in weather_desc.lower():
-                            recommendation = "Good weather - stretch your legs!"
-                            
-                        rest_stops.append(RestStop(
-                            name=place_name,
-                            type="rest_area",
-                            lat=coords[1],
-                            lon=coords[0],
-                            distance_miles=round(approx_distance, 1),
-                            eta_minutes=approx_eta,
-                            weather_at_arrival=weather_desc,
-                            temperature_at_arrival=temp,
-                            recommendation=recommendation
-                        ))
+            pois = await get_providers().geocode.search_pois(lat, lon, "rest stop gas station", limit=2)
+            for poi in pois[:1]:
+                # Find nearest waypoint weather
+                weather_desc = "Unknown"
+                temp = None
+                for wp in waypoints_weather:
+                    if wp.weather and abs(wp.waypoint.distance_from_start - approx_distance) < 30:
+                        weather_desc = wp.weather.conditions or "Clear"
+                        temp = wp.weather.temperature
+                        break
+
+                recommendation = "Good rest stop option"
+                if temp and temp > 85:
+                    recommendation = "Cool down and hydrate here"
+                elif "rain" in weather_desc.lower():
+                    recommendation = "Wait out the rain here"
+                elif "clear" in weather_desc.lower() or "sunny" in weather_desc.lower():
+                    recommendation = "Good weather - stretch your legs!"
+
+                rest_stops.append(RestStop(
+                    name=poi.get('name', 'Rest Stop'),
+                    type=poi.get('type', 'rest_area'),
+                    lat=poi.get('lat', lat),
+                    lon=poi.get('lon', lon),
+                    distance_miles=round(approx_distance, 1),
+                    eta_minutes=approx_eta,
+                    weather_at_arrival=weather_desc,
+                    temperature_at_arrival=temp,
+                    recommendation=recommendation
+                ))
         except Exception as e:
             logger.error(f"Error finding rest stops: {e}")
             
@@ -1765,6 +1896,70 @@ async def autocomplete_location(query: str, limit: int = 5):
         logger.error(f"Autocomplete error for '{query}': {e}")
         return []
 
+# ==================== Billing ====================
+
+class BillingVerifyRequest(BaseModel):
+    platform: str  # "android" or "ios"
+    product_id: str  # "boondocking_pro_monthly" or "boondocking_pro_yearly"
+    purchase_token: str
+
+
+@api_router.post("/billing/verify", response_model=dict)
+async def verify_purchase(request: BillingVerifyRequest):
+    """
+    Verify a purchase token with Google Play or App Store.
+    
+    Returns entitlement status including expiration date.
+    STUB IMPLEMENTATION - returns mock responses for development.
+    """
+    try:
+        logger.info(f"[BILLING] Verifying purchase: platform={request.platform}, product={request.product_id}")
+        
+        verification_request = VerificationRequest(
+            platform=request.platform,
+            product_id=request.product_id,
+            purchase_token=request.purchase_token,
+        )
+        
+        result = await billing_verifier.verify_purchase(verification_request)
+        
+        return {
+            "isPro": result.is_pro,
+            "productId": result.product_id,
+            "expireAt": result.expire_at,
+            "error": result.error,
+        }
+    except Exception as e:
+        logger.error(f"[BILLING] Verification error: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_router.post("/chat/camp-prep", response_model=CampPrepChatResponse)
+async def camp_prep_chat(request: CampPrepChatRequest):
+    """Camp Prep mode chat - routes commands to domain functions with premium gating."""
+    logger.info(f"[CAMP_PREP] Command: {request.message}")
+    
+    try:
+        response = dispatch_camp_prep(request.message, request.subscription_id)
+        result = response.to_dict()
+        
+        if result.get('error') == 'premium_locked':
+            logger.info(f"[CAMP_PREP] Premium locked: {request.message}")
+        else:
+            logger.info(f"[CAMP_PREP] Success: {result.get('command')}")
+        
+        return CampPrepChatResponse(**result)
+    except Exception as e:
+        logger.error(f"[CAMP_PREP] Error: {e}")
+        return CampPrepChatResponse(
+            mode="camp_prep",
+            command=request.message.split()[0] if request.message else "",
+            human=f"Error processing command: {str(e)}",
+            payload=None,
+            premium={"required": False, "locked": False},
+            error="server_error",
+        )
+
 @api_router.post("/chat", response_model=ChatResponse)
 async def driver_chat(request: ChatMessage):
     """AI-powered chat for drivers to ask questions about weather, routes, and driving."""
@@ -2149,28 +2344,7 @@ async def forecast_solar_energy(request: SolarForecastRequest):
     logger.info(f"[PREMIUM] Solar forecast requested")
     
     # Check premium entitlement
-    is_premium = False
-    if request.subscription_id:
-        # Verify subscription is active
-        try:
-            sub = await db.subscriptions.find_one(
-                {'subscription_id': request.subscription_id, 'status': 'active'}
-            )
-            is_premium = sub is not None
-            
-            if is_premium:
-                logger.info(f"[PREMIUM] Solar forecast accessed by: {request.subscription_id}")
-        except Exception as e:
-            logger.error(f"[PREMIUM] Error checking subscription: {e}")
-            is_premium = False
-    
-    # Return premium-locked response if not authorized
-    if not is_premium:
-        logger.info(f"[PREMIUM] Solar forecast access denied - premium required")
-        return SolarForecastResponse(
-            is_premium_locked=True,
-            premium_message="Upgrade to Routecast Pro to forecast solar energy generation and plan your boondocking power needs."
-        )
+    require_premium(request.subscription_id, SOLAR_FORECAST)
     
     # Call pure domain service
     try:
@@ -2230,28 +2404,7 @@ async def estimate_propane_usage(request: PropaneUsageRequest):
     logger.info(f"[PREMIUM] Propane usage estimate requested")
     
     # Check premium entitlement
-    is_premium = False
-    if request.subscription_id:
-        # Verify subscription is active
-        try:
-            sub = await db.subscriptions.find_one(
-                {'subscription_id': request.subscription_id, 'status': 'active'}
-            )
-            is_premium = sub is not None
-            
-            if is_premium:
-                logger.info(f"[PREMIUM] Propane usage accessed by: {request.subscription_id}")
-        except Exception as e:
-            logger.error(f"[PREMIUM] Error checking subscription: {e}")
-            is_premium = False
-    
-    # Return premium-locked response if not authorized
-    if not is_premium:
-        logger.info(f"[PREMIUM] Propane usage access denied - premium required")
-        return PropaneUsageResponse(
-            is_premium_locked=True,
-            premium_message="Upgrade to Routecast Pro to estimate propane consumption for boondocking trips."
-        )
+    require_premium(request.subscription_id, PROPANE_USAGE)
     
     # Call pure domain service
     try:
@@ -2386,6 +2539,634 @@ async def estimate_water_budget(request: WaterBudgetRequest):
             status_code=500,
             detail="Unable to estimate water budget at this time"
         )
+
+# ==================== Terrain Shade Endpoints ====================
+
+@api_router.post("/pro/terrain/sun-path", response_model=TerrainShadeResponse)
+async def estimate_solar_path(request: TerrainShadeRequest):
+    """Calculate hourly solar elevation path for boondocking location."""
+    # Check premium subscription
+    if not request.subscription_id:
+        logger.warning("[PREMIUM] Attempted solar path without subscription")
+        return TerrainShadeResponse(
+            is_premium_locked=True,
+            premium_message="Upgrade to Routecast Pro to plan around sunlight availability for solar and shade needs."
+        )
+    
+    sub = await db.subscriptions.find_one({"_id": request.subscription_id, "status": "active"})
+    if not sub:
+        logger.warning(f"[PREMIUM] Invalid subscription {request.subscription_id}")
+        return TerrainShadeResponse(
+            is_premium_locked=True,
+            premium_message="Upgrade to Routecast Pro to plan around sunlight availability for solar and shade needs."
+        )
+    
+    # Call pure domain service
+    try:
+        # Parse date from ISO format
+        from datetime import datetime as dt
+        date_obj = dt.fromisoformat(request.date).date()
+        
+        slots = TerrainShadeService.sun_path(request.latitude, request.longitude, date_obj)
+        
+        # Calculate shade blocking
+        shade_factor = TerrainShadeService.shade_blocks(
+            request.tree_canopy_pct,
+            request.horizon_obstruction_deg
+        )
+        
+        # Calculate effective sunlight hours after shade
+        exposure_hours = TerrainShadeService.sun_exposure_hours(
+            request.latitude,
+            request.longitude,
+            date_obj,
+            request.tree_canopy_pct,
+            request.horizon_obstruction_deg
+        )
+        
+        logger.info(f"[PREMIUM] Solar path calculation completed for lat={request.latitude}, lon={request.longitude}")
+        
+        # Convert domain slots to response format
+        response_slots = [
+            SunPathSlotResponse(
+                hour=slot.hour,
+                sun_elevation_deg=slot.sun_elevation_deg,
+                usable_sunlight_fraction=slot.usable_sunlight_fraction,
+                time_label=slot.time_label
+            )
+            for slot in slots
+        ]
+        
+        return TerrainShadeResponse(
+            sun_path_slots=response_slots,
+            shade_factor=round(shade_factor, 3),
+            exposure_hours=round(exposure_hours, 1),
+            is_premium_locked=False,
+        )
+    except ValueError as e:
+        logger.error(f"[PREMIUM] Invalid parameters for solar path: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid parameters: {str(e)}"
+        )
+    except Exception as e:
+        logger.error(f"[PREMIUM] Unexpected error calculating solar path: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to calculate solar path at this time"
+        )
+
+@api_router.post("/pro/terrain/shade-blocks", response_model=TerrainShadeResponse)
+async def estimate_shade_blocking(request: TerrainShadeRequest):
+    """Calculate shade blocking factor from trees and horizon obstruction."""
+    # Check premium subscription
+    if not request.subscription_id:
+        logger.warning("[PREMIUM] Attempted shade blocking without subscription")
+        return TerrainShadeResponse(
+            is_premium_locked=True,
+            premium_message="Upgrade to Routecast Pro to plan around sunlight availability for solar and shade needs."
+        )
+    
+    sub = await db.subscriptions.find_one({"_id": request.subscription_id, "status": "active"})
+    if not sub:
+        logger.warning(f"[PREMIUM] Invalid subscription {request.subscription_id}")
+        return TerrainShadeResponse(
+            is_premium_locked=True,
+            premium_message="Upgrade to Routecast Pro to plan around sunlight availability for solar and shade needs."
+        )
+    
+    # Call pure domain service
+    try:
+        shade_factor = TerrainShadeService.shade_blocks(
+            request.tree_canopy_pct,
+            request.horizon_obstruction_deg
+        )
+        
+        # Generate advisory
+        if shade_factor < 0.2:
+            advisory = "Excellent solar exposure! Good for solar generators."
+        elif shade_factor < 0.5:
+            advisory = "Good solar exposure with moderate shade. Solar viable."
+        elif shade_factor < 0.8:
+            advisory = "Significant shade. Solar generation will be limited."
+        else:
+            advisory = "Heavy shade blocks most sunlight. Solar not recommended."
+        
+        logger.info(f"[PREMIUM] Shade blocking calculation completed: shade_factor={shade_factor}")
+        
+        return TerrainShadeResponse(
+            shade_factor=round(shade_factor, 3),
+            exposure_hours=None,
+            is_premium_locked=False,
+        )
+    except ValueError as e:
+        logger.error(f"[PREMIUM] Invalid parameters for shade blocking: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid parameters: {str(e)}"
+        )
+    except Exception as e:
+        logger.error(f"[PREMIUM] Unexpected error calculating shade blocking: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to calculate shade blocking at this time"
+        )
+
+# ==================== Wind Shelter Endpoints ====================
+
+@api_router.post("/pro/wind-shelter/orientation", response_model=WindShelterResponse)
+async def recommend_orientation(request: WindShelterRequest):
+    """Recommend RV orientation for wind shelter based on local ridges and topography."""
+    # Check premium subscription
+    if not request.subscription_id:
+        logger.warning("[PREMIUM] Attempted wind shelter without subscription")
+        return WindShelterResponse(
+            is_premium_locked=True,
+            premium_message="Upgrade to Routecast Pro to optimize RV positioning against wind using local terrain."
+        )
+    
+    sub = await db.subscriptions.find_one({"_id": request.subscription_id, "status": "active"})
+    if not sub:
+        logger.warning(f"[PREMIUM] Invalid subscription {request.subscription_id}")
+        return WindShelterResponse(
+            is_premium_locked=True,
+            premium_message="Upgrade to Routecast Pro to optimize RV positioning against wind using local terrain."
+        )
+    
+    # Call pure domain service
+    try:
+        # Convert request ridges to domain objects
+        ridges = []
+        if request.local_ridges:
+            for ridge_req in request.local_ridges:
+                ridge = Ridge(
+                    bearing_deg=ridge_req.bearing_deg,
+                    strength=ridge_req.strength,
+                    name=ridge_req.name or f"Ridge at {ridge_req.bearing_deg}°"
+                )
+                ridges.append(ridge)
+        
+        advice = WindShelterService.recommend_orientation(
+            request.predominant_dir_deg,
+            request.gust_mph,
+            ridges
+        )
+        
+        logger.info(f"[PREMIUM] Wind shelter recommendation completed: bearing={advice.recommended_bearing_deg}, risk={advice.risk_level}")
+        
+        return WindShelterResponse(
+            recommended_bearing_deg=advice.recommended_bearing_deg,
+            rationale_text=advice.rationale_text,
+            risk_level=advice.risk_level,
+            shelter_available=advice.shelter_available,
+            estimated_wind_reduction_pct=advice.estimated_wind_reduction_pct,
+            is_premium_locked=False,
+        )
+    except ValueError as e:
+        logger.error(f"[PREMIUM] Invalid parameters for wind orientation: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid parameters: {str(e)}"
+        )
+    except Exception as e:
+        logger.error(f"[PREMIUM] Unexpected error recommending orientation: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to recommend orientation at this time"
+        )
+
+# ==================== Road Passability Endpoint (A6) ====================
+from road_passability_a6 import score as passability_score
+
+@api_router.post("/pro/road-passability", response_model=RoadPassabilityResponse)
+async def get_road_passability(request: RoadPassabilityRequest):
+    """Premium-gated road passability scoring (Task A6)."""
+    # Premium gating
+    if not request.subscription_id:
+        logger.warning("[PREMIUM] Attempted road passability without subscription")
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "PREMIUM_LOCKED",
+                "message": "Upgrade to Routecast Pro to assess backroad passability (mud/ice/clearance)."
+            }
+        )
+    sub = await db.subscriptions.find_one({"_id": request.subscription_id, "status": "active"})
+    if not sub:
+        logger.warning(f"[PREMIUM] Invalid subscription {request.subscription_id}")
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "PREMIUM_LOCKED",
+                "message": "Upgrade to Routecast Pro to assess backroad passability (mud/ice/clearance)."
+            }
+        )
+
+    try:
+        res = passability_score(
+            precip72h_in=request.precip72hIn,
+            slope_pct=request.slopePct,
+            min_temp_f=request.minTempF,
+            soil=request.soilType,
+        )
+        logger.info(f"[PREMIUM] Road passability computed: score={res.score} mud={res.mud_risk} ice={res.ice_risk}")
+        return RoadPassabilityResponse(
+            score=res.score,
+            mud_risk=res.mud_risk,
+            ice_risk=res.ice_risk,
+            clearance_need=res.clearance_need,
+            four_by_four_recommended=res.four_by_four_recommended,
+            reasons=res.reasons,
+            is_premium_locked=False,
+        )
+    except ValueError as e:
+        logger.error(f"[PREMIUM] Invalid parameters for road passability: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid parameters: {str(e)}")
+    except Exception as e:
+        logger.error(f"[PREMIUM] Unexpected error computing road passability: {e}")
+        raise HTTPException(status_code=500, detail="Unable to compute road passability at this time")
+
+# ==================== Connectivity Endpoints (A7) ====================
+
+@api_router.post("/pro/connectivity/cell-probability", response_model=ConnectivityCellResponse)
+async def predict_cell_probability(request: ConnectivityCellRequest):
+    """Premium-gated cellular signal probability prediction (Task A7)."""
+    # Premium gating
+    require_premium(request.subscription_id, CELL_STARLINK)
+
+    try:
+        res = cell_bars_probability(
+            carrier=request.carrier,
+            tower_distance_km=request.towerDistanceKm,
+            terrain_obstruction=request.terrainObstructionPct,
+        )
+        logger.info(f"[PREMIUM] Cell probability computed: carrier={res.carrier} probability={res.probability}")
+        return ConnectivityCellResponse(
+            carrier=res.carrier,
+            probability=res.probability,
+            bar_estimate=res.bar_estimate,
+            explanation=res.explanation,
+            is_premium_locked=False,
+        )
+    except ValueError as e:
+        logger.error(f"[PREMIUM] Invalid parameters for cell probability: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid parameters: {str(e)}")
+    except Exception as e:
+        logger.error(f"[PREMIUM] Unexpected error computing cell probability: {e}")
+        raise HTTPException(status_code=500, detail="Unable to compute cell probability at this time")
+
+@api_router.post("/pro/connectivity/starlink-risk", response_model=ConnectivityStarlinkResponse)
+async def predict_starlink_risk(request: ConnectivityStarlinkRequest):
+    """Premium-gated Starlink obstruction risk prediction (Task A7)."""
+    # Premium gating
+    require_premium(request.subscription_id, CELL_STARLINK)
+
+    try:
+        res = obstruction_risk(
+            horizon_south_deg=request.horizonSouthDeg,
+            canopy_pct=request.canopyPct,
+        )
+        logger.info(f"[PREMIUM] Starlink risk computed: risk_level={res.risk_level} score={res.obstruction_score}")
+        return ConnectivityStarlinkResponse(
+            risk_level=res.risk_level,
+            obstruction_score=res.obstruction_score,
+            explanation=res.explanation,
+            reasons=res.reasons,
+            is_premium_locked=False,
+        )
+    except ValueError as e:
+        logger.error(f"[PREMIUM] Invalid parameters for Starlink risk: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid parameters: {str(e)}")
+    except Exception as e:
+        logger.error(f"[PREMIUM] Unexpected error computing Starlink risk: {e}")
+        raise HTTPException(status_code=500, detail="Unable to compute Starlink risk at this time")
+
+@api_router.post("/pro/campsite-index", response_model=CampsiteIndexResponse)
+async def calculate_campsite_index(request: CampsiteIndexRequest):
+    """Premium-gated Campsite Index scoring (Task A8)."""
+    # Premium gating
+    if not request.subscription_id:
+        logger.warning("[PREMIUM] Attempted campsite index without subscription")
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "PREMIUM_LOCKED",
+                "message": "Upgrade to Routecast Pro to calculate Campsite Index scores."
+            }
+        )
+    sub = await db.subscriptions.find_one({"_id": request.subscription_id, "status": "active"})
+    if not sub:
+        logger.warning(f"[PREMIUM] Invalid subscription {request.subscription_id}")
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "PREMIUM_LOCKED",
+                "message": "Upgrade to Routecast Pro to calculate Campsite Index scores."
+            }
+        )
+
+    try:
+        factors = SiteFactors(
+            wind_gust_mph=request.wind_gust_mph,
+            shade_score=request.shade_score,
+            slope_pct=request.slope_pct,
+            access_score=request.access_score,
+            signal_score=request.signal_score,
+            road_passability_score=request.road_passability_score,
+        )
+        result = campsite_score(factors)
+        logger.info(f"[PREMIUM] Campsite index computed: score={result.score}")
+        return CampsiteIndexResponse(
+            score=result.score,
+            breakdown=result.breakdown,
+            explanations=result.explanations,
+            is_premium_locked=False,
+        )
+    except ValueError as e:
+        logger.error(f"[PREMIUM] Invalid parameters for campsite index: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid parameters: {str(e)}")
+    except Exception as e:
+        logger.error(f"[PREMIUM] Unexpected error computing campsite index: {e}")
+        raise HTTPException(status_code=500, detail="Unable to compute campsite index at this time")
+
+# ==================== Claim Log Endpoints (A9) ====================
+
+
+def _to_claim_hazards(hazards: List[ClaimHazardEventModel]) -> List[ClaimHazardEvent]:
+    """Convert Pydantic hazard models to domain dataclasses."""
+    return [
+        ClaimHazardEvent(
+            timestamp=h.timestamp,
+            type=h.type,
+            severity=h.severity,
+            location=(h.location.latitude, h.location.longitude),
+            notes=h.notes,
+            evidence=h.evidence,
+        )
+        for h in hazards
+    ]
+
+
+def _to_claim_weather(weather: ClaimWeatherSnapshotModel) -> ClaimWeatherSnapshot:
+    """Convert Pydantic weather model to domain dataclass."""
+    return ClaimWeatherSnapshot(
+        summary=weather.summary,
+        source=weather.source,
+        time_range=(weather.time_range.start, weather.time_range.end),
+        key_metrics=weather.key_metrics,
+    )
+
+
+@api_router.post("/pro/claim-log/build", response_model=ClaimLogResponse)
+async def build_claim_log_endpoint(request: ClaimLogRequest):
+    """Premium-gated Claim Log builder (Task A9).
+
+    Accepts hazard events and weather snapshot, returns structured ClaimLog JSON.
+    """
+    # Premium gating
+    require_premium(request.subscription_id, CLAIM_LOG)
+
+    try:
+        hazards = _to_claim_hazards(request.hazards)
+        weather = _to_claim_weather(request.weatherSnapshot)
+        claim_log = build_claim_log(route_id=request.routeId, hazards=hazards, weather_snapshot=weather)
+
+        # Build response dict via dataclass helper
+        return ClaimLogResponse(
+            schema_version=claim_log.schema_version,
+            route_id=claim_log.route_id,
+            generated_at=claim_log.generated_at,
+            hazards=[h.to_dict() for h in claim_log.hazards],
+            weather_snapshot=claim_log.weather_snapshot.to_dict(),
+            totals=claim_log.totals,
+            narrative=claim_log.narrative,
+            is_premium_locked=False,
+        )
+    except ValueError as e:
+        logger.error(f"[PREMIUM] Invalid parameters for claim log: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid parameters: {str(e)}")
+    except Exception as e:
+        logger.error(f"[PREMIUM] Unexpected error building claim log: {e}")
+        raise HTTPException(status_code=500, detail="Unable to build claim log at this time")
+
+
+class ClaimLogPdfRequest(BaseModel):
+    routeId: Optional[str] = None
+    hazards: Optional[List[ClaimHazardEventModel]] = None
+    weatherSnapshot: Optional[ClaimWeatherSnapshotModel] = None
+    claimLog: Optional[Dict[str, Any]] = None
+    subscription_id: Optional[str] = None
+
+
+@api_router.post("/pro/claim-log/pdf")
+async def claim_log_pdf_endpoint(request: ClaimLogPdfRequest):
+    """Premium-gated Claim Log PDF export (Task A9).
+
+    Accepts either raw inputs (routeId, hazards, weatherSnapshot) or a full ClaimLog JSON.
+    Returns a PDF binary.
+    """
+    # Premium gating
+    require_premium(request.subscription_id, CLAIM_LOG)
+
+    try:
+        # Determine source of ClaimLog
+        if request.claimLog:
+            # Build from provided ClaimLog JSON
+            data = request.claimLog
+            hazards_data = data.get("hazards", [])
+            hazards = [
+                ClaimHazardEvent(
+                    timestamp=h.get("timestamp"),
+                    type=h.get("type"),
+                    severity=h.get("severity"),
+                    location=(h.get("location", {}).get("latitude"), h.get("location", {}).get("longitude")),
+                    notes=h.get("notes"),
+                    evidence=h.get("evidence"),
+                )
+                for h in hazards_data
+            ]
+            weather_data = data.get("weather_snapshot", {})
+            time_range = weather_data.get("time_range", {})
+            weather = ClaimWeatherSnapshot(
+                summary=weather_data.get("summary", ""),
+                source=weather_data.get("source", ""),
+                time_range=(time_range.get("start", ""), time_range.get("end", "")),
+                key_metrics=weather_data.get("key_metrics", {}),
+            )
+            claim_log = build_claim_log(
+                route_id=data.get("route_id", ""),
+                hazards=hazards,
+                weather_snapshot=weather,
+                generated_at=data.get("generated_at"),
+                schema_version=data.get("schema_version", "1.0"),
+            )
+        else:
+            # Build from raw inputs
+            if not request.routeId or not request.hazards or not request.weatherSnapshot:
+                raise ValueError("Either claimLog or routeId/hazards/weatherSnapshot must be provided")
+            hazards = _to_claim_hazards(request.hazards)
+            weather = _to_claim_weather(request.weatherSnapshot)
+            claim_log = build_claim_log(route_id=request.routeId, hazards=hazards, weather_snapshot=weather)
+
+        pdf_bytes = export_claim_log_to_pdf(claim_log)
+        return StreamingResponse(BytesIO(pdf_bytes), media_type="application/pdf", headers={
+            "Content-Disposition": f"attachment; filename=claim_log_{claim_log.route_id}.pdf"
+        })
+    except ValueError as e:
+        logger.error(f"[PREMIUM] Invalid parameters for claim log PDF: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid parameters: {str(e)}")
+    except Exception as e:
+        logger.error(f"[PREMIUM] Unexpected error exporting claim log PDF: {e}")
+        raise HTTPException(status_code=500, detail="Unable to export claim log PDF at this time")
+
+
+# ==================== E1: Smart Departure & Hazard Alerts ====================
+
+@api_router.post("/trips/planned", response_model=RegisterPlannedTripResponse)
+async def register_planned_trip(request: RegisterPlannedTripRequest):
+    """
+    Register a planned trip for smart delay evaluation (Task E1 - Pro-only).
+    
+    Stores route waypoints, planned departure time, and user timezone.
+    Backend will evaluate forecast and send smart delay notifications.
+    """
+    # Premium gating
+    require_premium(request.subscription_id, SMART_DELAY_ALERTS)
+    
+    try:
+        # Validate subscription_id
+        if not request.subscription_id:
+            raise HTTPException(status_code=401, detail="subscription_id required")
+        
+        # Get user_id from subscription
+        sub_doc = await db.subscriptions.find_one({"subscription_id": request.subscription_id})
+        if not sub_doc:
+            raise HTTPException(status_code=404, detail="Subscription not found")
+        user_id = sub_doc.get("user_id")
+        
+        # Convert waypoint requests to dicts
+        waypoints = [
+            {"lat": wp.latitude, "lon": wp.longitude, "name": wp.name}
+            for wp in request.route_waypoints
+        ]
+        
+        # Register trip
+        service = get_notification_service()
+        trip_id = service.register_planned_trip(
+            user_id=user_id,
+            route_waypoints=waypoints,
+            planned_departure_local=request.planned_departure_local,
+            user_timezone=request.user_timezone,
+            destination_name=request.destination_name,
+        )
+        
+        return RegisterPlannedTripResponse(
+            trip_id=trip_id,
+            registered_at=datetime.now(timedelta(0)),  # UTC
+            next_check_at=datetime.now(timedelta(0)),
+            is_premium_locked=False,
+        )
+    
+    except ValueError as e:
+        logger.error(f"[PREMIUM] Invalid trip request: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"[PREMIUM] Error registering planned trip: {e}")
+        raise HTTPException(status_code=500, detail="Failed to register planned trip")
+
+
+@api_router.post("/push/register", response_model=RegisterPushTokenResponse)
+async def register_push_token(request: RegisterPushTokenRequest):
+    """
+    Register Expo push token for notifications (Task E1 - Pro-only).
+    
+    Stores the Expo push token so smart delay alerts can be sent to this device.
+    """
+    # Premium gating
+    require_premium(request.subscription_id, SMART_DELAY_ALERTS)
+    
+    try:
+        # Validate subscription_id
+        if not request.subscription_id:
+            raise HTTPException(status_code=401, detail="subscription_id required")
+        
+        # Get user_id from subscription
+        sub_doc = await db.subscriptions.find_one({"subscription_id": request.subscription_id})
+        if not sub_doc:
+            raise HTTPException(status_code=404, detail="Subscription not found")
+        user_id = sub_doc.get("user_id")
+        
+        # Validate token format
+        if not request.token.startswith("ExponentPushToken["):
+            return RegisterPushTokenResponse(
+                success=False,
+                message="Invalid Expo push token format",
+                is_premium_locked=False,
+            )
+        
+        # Register token
+        service = get_notification_service()
+        service.register_push_token(
+            user_id=user_id,
+            token=request.token,
+            device_id=request.device_id,
+        )
+        
+        logger.info(f"[PREMIUM] Registered push token for user {user_id}")
+        return RegisterPushTokenResponse(
+            success=True,
+            message="Push token registered successfully",
+            is_premium_locked=False,
+        )
+    
+    except ValueError as e:
+        logger.error(f"[PREMIUM] Invalid push token: {e}")
+        return RegisterPushTokenResponse(
+            success=False,
+            message=str(e),
+            is_premium_locked=False,
+        )
+    except Exception as e:
+        logger.error(f"[PREMIUM] Error registering push token: {e}")
+        raise HTTPException(status_code=500, detail="Failed to register push token")
+
+
+@api_router.post("/notifications/check", response_model=CheckNotificationResponse)
+async def check_notification(request: CheckNotificationRequest):
+    """
+    Check if a notification should be sent now (fallback endpoint).
+    
+    Alternative to server-driven push: client can call this when app opens/foregrounds
+    to get immediate notification decision.
+    
+    Pro-only feature: Task E1
+    """
+    # Premium gating
+    require_premium(request.subscription_id, SMART_DELAY_ALERTS)
+    
+    try:
+        # Validate subscription_id
+        if not request.subscription_id:
+            raise HTTPException(status_code=401, detail="subscription_id required")
+        
+        # Get user_id and trip details
+        sub_doc = await db.subscriptions.find_one({"subscription_id": request.subscription_id})
+        if not sub_doc:
+            raise HTTPException(status_code=404, detail="Subscription not found")
+        user_id = sub_doc.get("user_id")
+        
+        # In a real system, would fetch trip, forecast, compute risk, etc.
+        # For now, return no notification (client polls periodically)
+        return CheckNotificationResponse(
+            should_notify=False,
+            notification=None,
+            is_premium_locked=False,
+        )
+    
+    except Exception as e:
+        logger.error(f"[PREMIUM] Error checking notification: {e}")
+        raise HTTPException(status_code=500, detail="Failed to check notification")
+
 
 # Add CORS middleware first, before including router
 app.add_middleware(

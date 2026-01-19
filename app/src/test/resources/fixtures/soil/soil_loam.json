@@ -1,0 +1,12 @@
+{
+  "version": "1.0",
+  "soil_type": "loam",
+  "drainage_coefficient": 0.6,
+  "compaction_coefficient": 0.7,
+  "base_passability": 85,
+  "wet_penalty_multiplier": 0.5,
+  "recovery_hours": 8,
+  "texture": "medium",
+  "organic_content": 15,
+  "description": "Balanced loam with good passability when dry"
+}

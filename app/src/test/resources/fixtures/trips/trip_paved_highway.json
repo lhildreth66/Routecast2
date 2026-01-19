@@ -1,0 +1,34 @@
+{
+  "version": "1.0",
+  "route_name": "paved_highway",
+  "surface_type": "paved",
+  "total_length_km": 150,
+  "estimated_duration_minutes": 90,
+  "waypoints": [
+    {
+      "latitude": 39.7392,
+      "longitude": -104.9903,
+      "elevation": 1609,
+      "distance_from_start_km": 0,
+      "name": "Denver, CO"
+    },
+    {
+      "latitude": 39.5501,
+      "longitude": -105.7821,
+      "elevation": 2134,
+      "distance_from_start_km": 75,
+      "name": "I-70 Mountain Pass"
+    },
+    {
+      "latitude": 39.6433,
+      "longitude": -106.3781,
+      "elevation": 2438,
+      "distance_from_start_km": 150,
+      "name": "Vail, CO"
+    }
+  ],
+  "surface_quality": "excellent",
+  "terrain_difficulty": "easy",
+  "average_speed_kmh": 100,
+  "road_conditions": "well_maintained"
+}

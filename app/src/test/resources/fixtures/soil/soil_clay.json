@@ -1,0 +1,12 @@
+{
+  "version": "1.0",
+  "soil_type": "clay",
+  "drainage_coefficient": 0.2,
+  "compaction_coefficient": 0.9,
+  "base_passability": 90,
+  "wet_penalty_multiplier": 0.1,
+  "recovery_hours": 24,
+  "texture": "fine",
+  "organic_content": 10,
+  "description": "Clay soil with poor drainage, excellent when dry, impassable when wet"
+}

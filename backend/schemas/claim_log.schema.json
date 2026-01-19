@@ -1,0 +1,83 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://routecast.app/schemas/claim_log.schema.json",
+  "title": "ClaimLog",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "route_id",
+    "generated_at",
+    "hazards",
+    "weather_snapshot",
+    "totals",
+    "narrative"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "description": "Version of the claim log schema"
+    },
+    "route_id": {
+      "type": "string",
+      "description": "Route identifier"
+    },
+    "generated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Timestamp when the claim log was generated"
+    },
+    "hazards": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["timestamp", "type", "severity", "location"],
+        "properties": {
+          "timestamp": { "type": "string", "format": "date-time" },
+          "type": { "type": "string" },
+          "severity": { "type": "string" },
+          "location": {
+            "type": "object",
+            "required": ["latitude", "longitude"],
+            "properties": {
+              "latitude": { "type": "number" },
+              "longitude": { "type": "number" }
+            }
+          },
+          "notes": { "type": ["string", "null"] },
+          "evidence": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "weather_snapshot": {
+      "type": "object",
+      "required": ["summary", "source", "time_range", "key_metrics"],
+      "properties": {
+        "summary": { "type": "string" },
+        "source": { "type": "string" },
+        "time_range": {
+          "type": "object",
+          "required": ["start", "end"],
+          "properties": {
+            "start": { "type": "string", "format": "date-time" },
+            "end": { "type": "string", "format": "date-time" }
+          }
+        },
+        "key_metrics": { "type": "object" }
+      }
+    },
+    "totals": {
+      "type": "object",
+      "required": ["total_events", "by_type", "by_severity"],
+      "properties": {
+        "total_events": { "type": "integer" },
+        "by_type": { "type": "object", "additionalProperties": { "type": "integer" } },
+        "by_severity": { "type": "object", "additionalProperties": { "type": "integer" } }
+      }
+    },
+    "narrative": {
+      "type": "string",
+      "description": "Insurance-ready narrative summary"
+    }
+  },
+  "additionalProperties": false
+}

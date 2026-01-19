@@ -21,6 +21,7 @@ import { format, parseISO } from 'date-fns';
 import axios from 'axios';
 import { WebView } from 'react-native-webview';
 import { API_BASE } from './apiConfig';
+import PremiumFeaturesPanel from './components/PremiumFeaturesPanel';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -833,6 +834,9 @@ export default function RouteScreen() {
           )}
         </TouchableOpacity>
       </View>
+
+      {/* Premium Features Panel */}
+      <PremiumFeaturesPanel />
 
       {/* Content */}
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>

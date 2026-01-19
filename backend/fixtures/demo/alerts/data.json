@@ -1,0 +1,32 @@
+{
+  "points": [
+    {
+      "lat": 47.6062,
+      "lon": -122.3321,
+      "alerts": [
+        {
+          "id": "demo-wind",
+          "headline": "High Wind Watch",
+          "severity": "Severe",
+          "event": "Wind",
+          "description": "Gusts up to 45 mph expected along the route.",
+          "areas": "Seattle Metro"
+        }
+      ]
+    },
+    {
+      "lat": 45.5152,
+      "lon": -122.6784,
+      "alerts": [
+        {
+          "id": "demo-rain",
+          "headline": "Heavy Rain Advisory",
+          "severity": "Moderate",
+          "event": "Rain",
+          "description": "Steady rain; ponding possible in low spots.",
+          "areas": "Portland"
+        }
+      ]
+    }
+  ]
+}

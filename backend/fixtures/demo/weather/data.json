@@ -1,0 +1,44 @@
+{
+  "points": [
+    {
+      "lat": 47.6062,
+      "lon": -122.3321,
+      "weather": {
+        "temperature": 55,
+        "temperature_unit": "F",
+        "wind_speed": "12 mph",
+        "wind_direction": "SW",
+        "conditions": "Cloudy",
+        "icon": "cloudy",
+        "humidity": 72,
+        "is_daytime": true,
+        "sunrise": "06:45 AM",
+        "sunset": "04:55 PM",
+        "hourly_forecast": [
+          {"time": "2026-01-18T10:00:00Z", "temperature": 55, "conditions": "Cloudy", "wind_speed": "12 mph", "precipitation_chance": 10},
+          {"time": "2026-01-18T11:00:00Z", "temperature": 56, "conditions": "Mostly Cloudy", "wind_speed": "11 mph", "precipitation_chance": 10}
+        ]
+      }
+    },
+    {
+      "lat": 45.5152,
+      "lon": -122.6784,
+      "weather": {
+        "temperature": 58,
+        "temperature_unit": "F",
+        "wind_speed": "9 mph",
+        "wind_direction": "S",
+        "conditions": "Partly Cloudy",
+        "icon": "partly-cloudy",
+        "humidity": 68,
+        "is_daytime": true,
+        "sunrise": "07:10 AM",
+        "sunset": "05:05 PM",
+        "hourly_forecast": [
+          {"time": "2026-01-18T10:00:00Z", "temperature": 58, "conditions": "Partly Cloudy", "wind_speed": "9 mph", "precipitation_chance": 5},
+          {"time": "2026-01-18T11:00:00Z", "temperature": 60, "conditions": "Partly Cloudy", "wind_speed": "8 mph", "precipitation_chance": 5}
+        ]
+      }
+    }
+  ]
+}

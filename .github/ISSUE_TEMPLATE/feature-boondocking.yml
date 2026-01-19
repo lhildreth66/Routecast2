@@ -1,0 +1,26 @@
+name: "Feature: Boondocking Pro"
+description: Implement a Boondocking Pro capability behind paywall
+labels: ["feature", "boondocking-pro", "premium"]
+
+body:
+  - type: input
+    id: feature
+    attributes:
+      label: Feature
+      placeholder: "Solar forecast / Road passability / Paywall UI…"
+    validations:
+      required: true
+
+  - type: textarea
+    id: spec
+    attributes:
+      label: Spec
+      description: "What to build. Include inputs/outputs & acceptance criteria."
+    validations:
+      required: true
+
+  - type: textarea
+    id: tests
+    attributes:
+      label: Tests
+      description: "Unit/UI tests and fixtures"

@@ -1,0 +1,6 @@
+{
+  "points": [
+    {"lat": 47.6062, "lon": -122.3321, "wildfire": {"risk": "low", "advisory": "No active wildfires in area."}},
+    {"lat": 45.5152, "lon": -122.6784, "wildfire": {"risk": "low", "advisory": "No active wildfires in area."}}
+  ]
+}

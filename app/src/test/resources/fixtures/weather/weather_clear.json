@@ -1,0 +1,655 @@
+{
+  "version": "1.0",
+  "scenario": "clear",
+  "description": "Clear weather with minimal precipitation",
+  "entries": [
+    {
+      "timestamp": "2026-01-20T00:00:00Z",
+      "temperature": 72.5,
+      "precipitation": 0.0,
+      "wind_speed": 8.0,
+      "cloud_cover": 10.0,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-20T01:00:00Z",
+      "temperature": 71.3,
+      "precipitation": 0.0,
+      "wind_speed": 8.522104768880206,
+      "cloud_cover": 10.9,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-20T02:00:00Z",
+      "temperature": 70.0,
+      "precipitation": 0.0,
+      "wind_speed": 9.035276180410083,
+      "cloud_cover": 11.7,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-20T03:00:00Z",
+      "temperature": 68.7,
+      "precipitation": 0.0,
+      "wind_speed": 9.530733729460358,
+      "cloud_cover": 12.6,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-20T04:00:00Z",
+      "temperature": 67.5,
+      "precipitation": 0.0,
+      "wind_speed": 10.0,
+      "cloud_cover": 13.4,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-20T05:00:00Z",
+      "temperature": 66.5,
+      "precipitation": 0.0,
+      "wind_speed": 10.435045716034882,
+      "cloud_cover": 14.2,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-20T06:00:00Z",
+      "temperature": 65.7,
+      "precipitation": 0.0,
+      "wind_speed": 10.82842712474619,
+      "cloud_cover": 15.0,
+      "visibility": 10.0,
+      "conditions": "partly_cloudy"
+    },
+    {
+      "timestamp": "2026-01-20T07:00:00Z",
+      "temperature": 65.2,
+      "precipitation": 0.0,
+      "wind_speed": 11.17341336116494,
+      "cloud_cover": 15.7,
+      "visibility": 10.0,
+      "conditions": "partly_cloudy"
+    },
+    {
+      "timestamp": "2026-01-20T08:00:00Z",
+      "temperature": 65.0,
+      "precipitation": 0.0,
+      "wind_speed": 11.464101615137753,
+      "cloud_cover": 16.4,
+      "visibility": 10.0,
+      "conditions": "partly_cloudy"
+    },
+    {
+      "timestamp": "2026-01-20T09:00:00Z",
+      "temperature": 65.2,
+      "precipitation": 0.0,
+      "wind_speed": 11.695518130045148,
+      "cloud_cover": 17.1,
+      "visibility": 10.0,
+      "conditions": "partly_cloudy"
+    },
+    {
+      "timestamp": "2026-01-20T10:00:00Z",
+      "temperature": 65.7,
+      "precipitation": 0.0,
+      "wind_speed": 11.863703305156273,
+      "cloud_cover": 17.7,
+      "visibility": 10.0,
+      "conditions": "partly_cloudy"
+    },
+    {
+      "timestamp": "2026-01-20T11:00:00Z",
+      "temperature": 66.5,
+      "precipitation": 0.0,
+      "wind_speed": 11.965779445495242,
+      "cloud_cover": 18.2,
+      "visibility": 10.0,
+      "conditions": "partly_cloudy"
+    },
+    {
+      "timestamp": "2026-01-20T12:00:00Z",
+      "temperature": 67.5,
+      "precipitation": 0.0,
+      "wind_speed": 12.0,
+      "cloud_cover": 18.7,
+      "visibility": 10.0,
+      "conditions": "partly_cloudy"
+    },
+    {
+      "timestamp": "2026-01-20T13:00:00Z",
+      "temperature": 68.7,
+      "precipitation": 0.0,
+      "wind_speed": 11.965779445495242,
+      "cloud_cover": 19.1,
+      "visibility": 10.0,
+      "conditions": "partly_cloudy"
+    },
+    {
+      "timestamp": "2026-01-20T14:00:00Z",
+      "temperature": 70.0,
+      "precipitation": 0.0,
+      "wind_speed": 11.863703305156273,
+      "cloud_cover": 19.4,
+      "visibility": 10.0,
+      "conditions": "partly_cloudy"
+    },
+    {
+      "timestamp": "2026-01-20T15:00:00Z",
+      "temperature": 71.3,
+      "precipitation": 0.0,
+      "wind_speed": 11.695518130045148,
+      "cloud_cover": 19.7,
+      "visibility": 10.0,
+      "conditions": "partly_cloudy"
+    },
+    {
+      "timestamp": "2026-01-20T16:00:00Z",
+      "temperature": 72.5,
+      "precipitation": 0.0,
+      "wind_speed": 11.464101615137755,
+      "cloud_cover": 19.8,
+      "visibility": 10.0,
+      "conditions": "partly_cloudy"
+    },
+    {
+      "timestamp": "2026-01-20T17:00:00Z",
+      "temperature": 73.5,
+      "precipitation": 0.0,
+      "wind_speed": 11.17341336116494,
+      "cloud_cover": 20,
+      "visibility": 10.0,
+      "conditions": "partly_cloudy"
+    },
+    {
+      "timestamp": "2026-01-20T18:00:00Z",
+      "temperature": 74.3,
+      "precipitation": 0.0,
+      "wind_speed": 10.82842712474619,
+      "cloud_cover": 20,
+      "visibility": 10.0,
+      "conditions": "partly_cloudy"
+    },
+    {
+      "timestamp": "2026-01-20T19:00:00Z",
+      "temperature": 74.8,
+      "precipitation": 0.0,
+      "wind_speed": 10.435045716034884,
+      "cloud_cover": 20,
+      "visibility": 10.0,
+      "conditions": "partly_cloudy"
+    },
+    {
+      "timestamp": "2026-01-20T20:00:00Z",
+      "temperature": 75.0,
+      "precipitation": 0.0,
+      "wind_speed": 10.0,
+      "cloud_cover": 19.8,
+      "visibility": 10.0,
+      "conditions": "partly_cloudy"
+    },
+    {
+      "timestamp": "2026-01-20T21:00:00Z",
+      "temperature": 74.8,
+      "precipitation": 0.0,
+      "wind_speed": 9.53073372946036,
+      "cloud_cover": 19.7,
+      "visibility": 10.0,
+      "conditions": "partly_cloudy"
+    },
+    {
+      "timestamp": "2026-01-20T22:00:00Z",
+      "temperature": 74.3,
+      "precipitation": 0.0,
+      "wind_speed": 9.035276180410085,
+      "cloud_cover": 19.4,
+      "visibility": 10.0,
+      "conditions": "partly_cloudy"
+    },
+    {
+      "timestamp": "2026-01-20T23:00:00Z",
+      "temperature": 73.5,
+      "precipitation": 0.0,
+      "wind_speed": 8.522104768880208,
+      "cloud_cover": 19.1,
+      "visibility": 10.0,
+      "conditions": "partly_cloudy"
+    },
+    {
+      "timestamp": "2026-01-21T00:00:00Z",
+      "temperature": 72.5,
+      "precipitation": 0.0,
+      "wind_speed": 8.0,
+      "cloud_cover": 18.7,
+      "visibility": 10.0,
+      "conditions": "partly_cloudy"
+    },
+    {
+      "timestamp": "2026-01-21T01:00:00Z",
+      "temperature": 71.3,
+      "precipitation": 0.0,
+      "wind_speed": 7.477895231119793,
+      "cloud_cover": 18.2,
+      "visibility": 10.0,
+      "conditions": "partly_cloudy"
+    },
+    {
+      "timestamp": "2026-01-21T02:00:00Z",
+      "temperature": 70.0,
+      "precipitation": 0.0,
+      "wind_speed": 6.964723819589917,
+      "cloud_cover": 17.7,
+      "visibility": 10.0,
+      "conditions": "partly_cloudy"
+    },
+    {
+      "timestamp": "2026-01-21T03:00:00Z",
+      "temperature": 68.7,
+      "precipitation": 0.0,
+      "wind_speed": 6.4692662705396415,
+      "cloud_cover": 17.1,
+      "visibility": 10.0,
+      "conditions": "partly_cloudy"
+    },
+    {
+      "timestamp": "2026-01-21T04:00:00Z",
+      "temperature": 67.5,
+      "precipitation": 0.0,
+      "wind_speed": 6.000000000000001,
+      "cloud_cover": 16.4,
+      "visibility": 10.0,
+      "conditions": "partly_cloudy"
+    },
+    {
+      "timestamp": "2026-01-21T05:00:00Z",
+      "temperature": 66.5,
+      "precipitation": 0.0,
+      "wind_speed": 5.564954283965117,
+      "cloud_cover": 15.7,
+      "visibility": 10.0,
+      "conditions": "partly_cloudy"
+    },
+    {
+      "timestamp": "2026-01-21T06:00:00Z",
+      "temperature": 65.7,
+      "precipitation": 0.0,
+      "wind_speed": 5.171572875253812,
+      "cloud_cover": 15.0,
+      "visibility": 10.0,
+      "conditions": "partly_cloudy"
+    },
+    {
+      "timestamp": "2026-01-21T07:00:00Z",
+      "temperature": 65.2,
+      "precipitation": 0.0,
+      "wind_speed": 4.82658663883506,
+      "cloud_cover": 14.2,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-21T08:00:00Z",
+      "temperature": 65.0,
+      "precipitation": 0.0,
+      "wind_speed": 4.5358983848622465,
+      "cloud_cover": 13.4,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-21T09:00:00Z",
+      "temperature": 65.2,
+      "precipitation": 0.0,
+      "wind_speed": 4.304481869954852,
+      "cloud_cover": 12.6,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-21T10:00:00Z",
+      "temperature": 65.7,
+      "precipitation": 0.0,
+      "wind_speed": 4.136296694843727,
+      "cloud_cover": 11.7,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-21T11:00:00Z",
+      "temperature": 66.5,
+      "precipitation": 0.0,
+      "wind_speed": 4.034220554504758,
+      "cloud_cover": 10.9,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-21T12:00:00Z",
+      "temperature": 67.5,
+      "precipitation": 0.0,
+      "wind_speed": 4.0,
+      "cloud_cover": 10.0,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-21T13:00:00Z",
+      "temperature": 68.7,
+      "precipitation": 0.0,
+      "wind_speed": 4.034220554504758,
+      "cloud_cover": 9.1,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-21T14:00:00Z",
+      "temperature": 70.0,
+      "precipitation": 0.0,
+      "wind_speed": 4.136296694843726,
+      "cloud_cover": 8.3,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-21T15:00:00Z",
+      "temperature": 71.3,
+      "precipitation": 0.0,
+      "wind_speed": 4.304481869954852,
+      "cloud_cover": 7.4,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-21T16:00:00Z",
+      "temperature": 72.5,
+      "precipitation": 0.0,
+      "wind_speed": 4.535898384862246,
+      "cloud_cover": 6.6,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-21T17:00:00Z",
+      "temperature": 73.5,
+      "precipitation": 0.0,
+      "wind_speed": 4.826586638835057,
+      "cloud_cover": 5.8,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-21T18:00:00Z",
+      "temperature": 74.3,
+      "precipitation": 0.0,
+      "wind_speed": 5.171572875253809,
+      "cloud_cover": 5.0,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-21T19:00:00Z",
+      "temperature": 74.8,
+      "precipitation": 0.0,
+      "wind_speed": 5.5649542839651165,
+      "cloud_cover": 4.3,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-21T20:00:00Z",
+      "temperature": 75.0,
+      "precipitation": 0.0,
+      "wind_speed": 5.999999999999998,
+      "cloud_cover": 3.6,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-21T21:00:00Z",
+      "temperature": 74.8,
+      "precipitation": 0.0,
+      "wind_speed": 6.4692662705396415,
+      "cloud_cover": 2.9,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-21T22:00:00Z",
+      "temperature": 74.3,
+      "precipitation": 0.0,
+      "wind_speed": 6.9647238195899135,
+      "cloud_cover": 2.3,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-21T23:00:00Z",
+      "temperature": 73.5,
+      "precipitation": 0.0,
+      "wind_speed": 7.477895231119794,
+      "cloud_cover": 1.8,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-22T00:00:00Z",
+      "temperature": 72.5,
+      "precipitation": 0.0,
+      "wind_speed": 7.999999999999999,
+      "cloud_cover": 1.3,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-22T01:00:00Z",
+      "temperature": 71.3,
+      "precipitation": 0.0,
+      "wind_speed": 8.522104768880205,
+      "cloud_cover": 0.9,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-22T02:00:00Z",
+      "temperature": 70.0,
+      "precipitation": 0.0,
+      "wind_speed": 9.035276180410085,
+      "cloud_cover": 0.6,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-22T03:00:00Z",
+      "temperature": 68.7,
+      "precipitation": 0.0,
+      "wind_speed": 9.530733729460357,
+      "cloud_cover": 0.3,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-22T04:00:00Z",
+      "temperature": 67.5,
+      "precipitation": 0.0,
+      "wind_speed": 10.0,
+      "cloud_cover": 0.2,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-22T05:00:00Z",
+      "temperature": 66.5,
+      "precipitation": 0.0,
+      "wind_speed": 10.435045716034882,
+      "cloud_cover": 0,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-22T06:00:00Z",
+      "temperature": 65.7,
+      "precipitation": 0.0,
+      "wind_speed": 10.82842712474619,
+      "cloud_cover": 0,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-22T07:00:00Z",
+      "temperature": 65.2,
+      "precipitation": 0.0,
+      "wind_speed": 11.173413361164942,
+      "cloud_cover": 0,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-22T08:00:00Z",
+      "temperature": 65.0,
+      "precipitation": 0.0,
+      "wind_speed": 11.464101615137753,
+      "cloud_cover": 0.2,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-22T09:00:00Z",
+      "temperature": 65.2,
+      "precipitation": 0.0,
+      "wind_speed": 11.695518130045146,
+      "cloud_cover": 0.3,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-22T10:00:00Z",
+      "temperature": 65.7,
+      "precipitation": 0.0,
+      "wind_speed": 11.863703305156273,
+      "cloud_cover": 0.6,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-22T11:00:00Z",
+      "temperature": 66.5,
+      "precipitation": 0.0,
+      "wind_speed": 11.965779445495242,
+      "cloud_cover": 0.9,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-22T12:00:00Z",
+      "temperature": 67.5,
+      "precipitation": 0.0,
+      "wind_speed": 12.0,
+      "cloud_cover": 1.3,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-22T13:00:00Z",
+      "temperature": 68.7,
+      "precipitation": 0.0,
+      "wind_speed": 11.965779445495242,
+      "cloud_cover": 1.8,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-22T14:00:00Z",
+      "temperature": 70.0,
+      "precipitation": 0.0,
+      "wind_speed": 11.863703305156275,
+      "cloud_cover": 2.3,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-22T15:00:00Z",
+      "temperature": 71.3,
+      "precipitation": 0.0,
+      "wind_speed": 11.695518130045148,
+      "cloud_cover": 2.9,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-22T16:00:00Z",
+      "temperature": 72.5,
+      "precipitation": 0.0,
+      "wind_speed": 11.464101615137757,
+      "cloud_cover": 3.6,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-22T17:00:00Z",
+      "temperature": 73.5,
+      "precipitation": 0.0,
+      "wind_speed": 11.173413361164942,
+      "cloud_cover": 4.3,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-22T18:00:00Z",
+      "temperature": 74.3,
+      "precipitation": 0.0,
+      "wind_speed": 10.828427124746188,
+      "cloud_cover": 5.0,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-22T19:00:00Z",
+      "temperature": 74.8,
+      "precipitation": 0.0,
+      "wind_speed": 10.435045716034884,
+      "cloud_cover": 5.8,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-22T20:00:00Z",
+      "temperature": 75.0,
+      "precipitation": 0.0,
+      "wind_speed": 10.0,
+      "cloud_cover": 6.6,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-22T21:00:00Z",
+      "temperature": 74.8,
+      "precipitation": 0.0,
+      "wind_speed": 9.530733729460362,
+      "cloud_cover": 7.4,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-22T22:00:00Z",
+      "temperature": 74.3,
+      "precipitation": 0.0,
+      "wind_speed": 9.035276180410083,
+      "cloud_cover": 8.3,
+      "visibility": 10.0,
+      "conditions": "clear"
+    },
+    {
+      "timestamp": "2026-01-22T23:00:00Z",
+      "temperature": 73.5,
+      "precipitation": 0.0,
+      "wind_speed": 8.522104768880205,
+      "cloud_cover": 9.1,
+      "visibility": 10.0,
+      "conditions": "clear"
+    }
+  ]
+}

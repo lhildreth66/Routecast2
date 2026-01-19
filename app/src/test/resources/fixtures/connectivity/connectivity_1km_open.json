@@ -1,0 +1,10 @@
+{
+  "version": "1.0",
+  "scenario_name": "tower_1km_canopy_0",
+  "tower_distance_km": 1.0,
+  "canopy_cover_percent": 0,
+  "expected_signal_strength_dbm": -65,
+  "expected_quality": "excellent",
+  "starlink_obstruction_percent": 0,
+  "expected_download_mbps": 50
+}

@@ -564,29 +564,6 @@ export default function HomeScreen() {
                 <Text style={styles.descriptionText}>
                   Plan your road trip with confidence. See real-time weather conditions, alerts, and AI-powered recommendations for every mile of your drive.
                 </Text>
-                {/* A6: Navigate to Road Passability (Pro) */}
-                <View style={{ marginTop: 12, gap: 8 }}>
-                  <TouchableOpacity
-                    onPress={goToRoadPassability}
-                    style={{ backgroundColor: '#eab308', paddingVertical: 10, borderRadius: 8, alignItems: 'center' }}
-                  >
-                    <Text style={{ color: '#1a1a1a', fontWeight: '700' }}>Assess Road Passability (Pro)</Text>
-                  </TouchableOpacity>
-                  {/* A7: Navigate to Connectivity (Pro) */}
-                  <TouchableOpacity
-                    onPress={goToConnectivity}
-                    style={{ backgroundColor: '#eab308', paddingVertical: 10, borderRadius: 8, alignItems: 'center' }}
-                  >
-                    <Text style={{ color: '#1a1a1a', fontWeight: '700' }}>Predict Connectivity (Pro)</Text>
-                  </TouchableOpacity>
-                  {/* A8: Navigate to Campsite Index (Pro) */}
-                  <TouchableOpacity
-                    onPress={() => router.push('/campsite-index')}
-                    style={{ backgroundColor: '#eab308', paddingVertical: 10, borderRadius: 8, alignItems: 'center' }}
-                  >
-                    <Text style={{ color: '#1a1a1a', fontWeight: '700' }}>Calculate Campsite Index (Pro)</Text>
-                  </TouchableOpacity>
-                </View>
               </View>
 
               {/* Origin Input */}

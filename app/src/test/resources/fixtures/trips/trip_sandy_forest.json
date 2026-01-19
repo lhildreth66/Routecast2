@@ -1,0 +1,36 @@
+{
+  "version": "1.0",
+  "route_name": "sandy_forest_road",
+  "surface_type": "sand",
+  "total_length_km": 25,
+  "estimated_duration_minutes": 90,
+  "waypoints": [
+    {
+      "latitude": 34.5199,
+      "longitude": -117.3,
+      "elevation": 900,
+      "distance_from_start_km": 0,
+      "name": "Mojave Preserve Entrance"
+    },
+    {
+      "latitude": 34.535,
+      "longitude": -117.22,
+      "elevation": 1100,
+      "distance_from_start_km": 12.5,
+      "name": "Sandy Wash Crossing"
+    },
+    {
+      "latitude": 34.55,
+      "longitude": -117.15,
+      "elevation": 950,
+      "distance_from_start_km": 25,
+      "name": "Remote Campsite"
+    }
+  ],
+  "surface_quality": "poor",
+  "terrain_difficulty": "difficult",
+  "average_speed_kmh": 16.7,
+  "road_conditions": "unmaintained",
+  "soil_type": "sand",
+  "requires_4wd": true
+}

@@ -1,0 +1,16 @@
+{
+  "locations": {
+    "seattle, wa": {"lat": 47.6062, "lon": -122.3321},
+    "portland, or": {"lat": 45.5152, "lon": -122.6784},
+    "san francisco, ca": {"lat": 37.7749, "lon": -122.4194}
+  },
+  "reverse": {
+    "47.6062,-122.3321": "Seattle, WA",
+    "45.5152,-122.6784": "Portland, OR",
+    "37.7749,-122.4194": "San Francisco, CA"
+  },
+  "pois": [
+    {"name": "Rest Stop Cascades", "lat": 46.5000, "lon": -122.9000, "type": "rest_area"},
+    {"name": "Fuel Up North", "lat": 46.2000, "lon": -122.7000, "type": "gas"}
+  ]
+}

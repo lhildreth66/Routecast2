@@ -1,0 +1,6 @@
+{
+  "points": [
+    {"lat": 47.6062, "lon": -122.3321, "public_land": {"designation": "National Forest", "name": "Demo Cascades"}},
+    {"lat": 45.5152, "lon": -122.6784, "public_land": {"designation": "State Park", "name": "Demo Columbia"}}
+  ]
+}

@@ -1,0 +1,6 @@
+{
+  "points": [
+    {"lat": 47.6062, "lon": -122.3321, "coverage": {"bars": 4, "network": "demo-lte"}},
+    {"lat": 45.5152, "lon": -122.6784, "coverage": {"bars": 3, "network": "demo-lte"}}
+  ]
+}

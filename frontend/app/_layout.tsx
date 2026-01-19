@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { EntitlementsProvider } from './billing/EntitlementsProvider';
 
 // Configure notifications
 Notifications.setNotificationHandler({
@@ -43,7 +44,7 @@ export default function RootLayout() {
   }, []);
 
   return (
-    <>
+    <EntitlementsProvider>
       <StatusBar style="light" />
       <Stack
         screenOptions={{
@@ -54,7 +55,11 @@ export default function RootLayout() {
       >
         <Stack.Screen name="index" />
         <Stack.Screen name="route" />
+        <Stack.Screen name="road-passability" />
+        <Stack.Screen name="connectivity" />
+        <Stack.Screen name="campsite-index" />
+        <Stack.Screen name="claim-log" />
       </Stack>
-    </>
+    </EntitlementsProvider>
   );
 }
