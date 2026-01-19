@@ -1,21 +1,21 @@
-"""
-WaterBudgetScreen - React Native Component for Water Budget Estimation
-
-Complete UI for water tank duration estimation with inputs, results visualization,
-and premium paywall integration.
-
-Water tanks track fresh/gray/black water capacity and estimates how many days
-the trip can be sustained before the limiting tank runs out.
-
-Usage in navigation:
-```typescript
-<Stack.Screen
-  name="water-budget"
-  component={WaterBudgetScreen}
-  options={{ title: '💧 Water Budget' }}
-/>
-```
-"""
+/**
+ * WaterBudgetScreen - React Native Component for Water Budget Estimation
+ *
+ * Complete UI for water tank duration estimation with inputs, results visualization,
+ * and premium paywall integration.
+ *
+ * Water tanks track fresh/gray/black water capacity and estimates how many days
+ * the trip can be sustained before the limiting tank runs out.
+ *
+ * Usage in navigation:
+ * ```typescript
+ * <Stack.Screen
+ *   name="water-budget"
+ *   component={WaterBudgetScreen}
+ *   options={{ title: '💧 Water Budget' }}
+ * />
+ * ```
+ */
 
 import React, { useState } from 'react';
 import {

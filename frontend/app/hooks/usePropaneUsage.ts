@@ -1,9 +1,9 @@
-"""
-usePropaneUsage - React Hook for Propane Consumption Estimation
-
-Custom hook for calling the propane usage API endpoint and managing state.
-Follows the same pattern as useSolarForecast.
-"""
+/**
+ * usePropaneUsage - React Hook for Propane Consumption Estimation
+ *
+ * Custom hook for calling the propane usage API endpoint and managing state.
+ * Follows the same pattern as useSolarForecast.
+ */
 
 import { useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';

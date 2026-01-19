@@ -1,9 +1,9 @@
-"""
-useWaterBudget - React Hook for Water Budget Estimation
-
-Custom hook for calling the water budget API endpoint and managing state.
-Follows the same pattern as usePropaneUsage.
-"""
+/**
+ * useWaterBudget - React Hook for Water Budget Estimation
+ *
+ * Custom hook for calling the water budget API endpoint and managing state.
+ * Follows the same pattern as usePropaneUsage.
+ */
 
 import { useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
