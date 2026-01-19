@@ -8,10 +8,10 @@ Submodules:
 - service: Notification service with database integration
 """
 
-from backend.notifications.smart_delay import SmartDelayOptimizer, BestDelayResult
-from backend.notifications.models import PlannedTrip, PushToken, SmartDelayNotification
-from backend.notifications.expo_push import ExpoPushClient
-from backend.notifications.service import NotificationService
+from .smart_delay import SmartDelayOptimizer, BestDelayResult
+from .models import PlannedTrip, PushToken, SmartDelayNotification
+from .expo_push import ExpoPushClient
+from .service import NotificationService
 
 __all__ = [
     "SmartDelayOptimizer",
