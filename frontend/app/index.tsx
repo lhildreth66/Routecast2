@@ -20,6 +20,8 @@ import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { format } from 'date-fns';
 import { API_BASE } from './apiConfig';
+import { devToggleProEntitlement } from './utils/entitlements';
+import CampPrepChat from './components/CampPrepChat';
 
 // Vehicle types for safety scoring
 const VEHICLE_TYPES = [
@@ -93,11 +95,19 @@ export default function HomeScreen() {
   const [isListening, setIsListening] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(false);
   
+  // Camp Prep Chat
+  const [showCampPrep, setShowCampPrep] = useState(false);
+
+  // Navigation to dedicated Road Passability screen (Pro)
+  
   // Multi-stop
   const [stops, setStops] = useState<StopPoint[]>([]);
   const [showAddStop, setShowAddStop] = useState(false);
   const [newStopLocation, setNewStopLocation] = useState('');
   const [newStopType, setNewStopType] = useState('stop');
+
+  // Dev-only: long-press gesture counter for Pro entitlement toggle (5 taps)
+  const [devTapCount, setDevTapCount] = useState(0);
 
   // Check for speech recognition support on web
   useEffect(() => {
@@ -235,6 +245,9 @@ export default function HomeScreen() {
       setChatLoading(false);
     }
   };
+
+  const goToRoadPassability = () => router.push('/road-passability');
+  const goToConnectivity = () => router.push('/connectivity');
 
   // Voice-to-text function
   const startVoiceRecognition = () => {
@@ -481,6 +494,21 @@ export default function HomeScreen() {
     setStops(stops.filter((_, i) => i !== index));
   };
 
+  // Dev-only: handle 5 rapid taps on subtitle to toggle Pro entitlement
+  const handleDevTap = () => {
+    if (!__DEV__) return;
+    const newCount = devTapCount + 1;
+    setDevTapCount(newCount);
+    if (newCount >= 5) {
+      setDevTapCount(0);
+      devToggleProEntitlement();
+    }
+    // Reset counter after 2 seconds of inactivity
+    setTimeout(() => {
+      setDevTapCount(0);
+    }, 2000);
+  };
+
   const swapLocations = () => {
     const temp = origin;
     setOrigin(destination);
@@ -519,7 +547,9 @@ export default function HomeScreen() {
                 </View>
                 <View style={styles.headerText}>
                   <Text style={styles.title}>Routecast</Text>
-                  <Text style={styles.subtitle}>Weather forecasts for your journey</Text>
+                  <TouchableOpacity onPress={handleDevTap} delayPressIn={0}>
+                    <Text style={styles.subtitle}>Weather forecasts for your journey</Text>
+                  </TouchableOpacity>
                 </View>
                 <TouchableOpacity 
                   style={styles.favoriteButton}
@@ -534,6 +564,29 @@ export default function HomeScreen() {
                 <Text style={styles.descriptionText}>
                   Plan your road trip with confidence. See real-time weather conditions, alerts, and AI-powered recommendations for every mile of your drive.
                 </Text>
+                {/* A6: Navigate to Road Passability (Pro) */}
+                <View style={{ marginTop: 12, gap: 8 }}>
+                  <TouchableOpacity
+                    onPress={goToRoadPassability}
+                    style={{ backgroundColor: '#eab308', paddingVertical: 10, borderRadius: 8, alignItems: 'center' }}
+                  >
+                    <Text style={{ color: '#1a1a1a', fontWeight: '700' }}>Assess Road Passability (Pro)</Text>
+                  </TouchableOpacity>
+                  {/* A7: Navigate to Connectivity (Pro) */}
+                  <TouchableOpacity
+                    onPress={goToConnectivity}
+                    style={{ backgroundColor: '#eab308', paddingVertical: 10, borderRadius: 8, alignItems: 'center' }}
+                  >
+                    <Text style={{ color: '#1a1a1a', fontWeight: '700' }}>Predict Connectivity (Pro)</Text>
+                  </TouchableOpacity>
+                  {/* A8: Navigate to Campsite Index (Pro) */}
+                  <TouchableOpacity
+                    onPress={() => router.push('/campsite-index')}
+                    style={{ backgroundColor: '#eab308', paddingVertical: 10, borderRadius: 8, alignItems: 'center' }}
+                  >
+                    <Text style={{ color: '#1a1a1a', fontWeight: '700' }}>Calculate Campsite Index (Pro)</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
 
               {/* Origin Input */}
@@ -907,6 +960,8 @@ export default function HomeScreen() {
               )}
             </View>
           </ScrollView>
+
+          {/* Premium modal handled in RoadPassability screen */}
         </KeyboardAvoidingView>
       </SafeAreaView>
 
@@ -1222,6 +1277,25 @@ export default function HomeScreen() {
       <TouchableOpacity style={styles.chatFab} onPress={() => setShowChat(true)}>
         <Ionicons name="chatbubble-ellipses" size={24} color="#fff" />
       </TouchableOpacity>
+      
+      {/* Camp Prep FAB */}
+      <TouchableOpacity 
+        style={[styles.chatFab, { bottom: 90 }]} 
+        onPress={() => setShowCampPrep(true)}
+      >
+        <Text style={{ fontSize: 24 }}>🏕️</Text>
+      </TouchableOpacity>
+      
+      {/* Camp Prep Modal */}
+      {showCampPrep && (
+        <Modal
+          visible={showCampPrep}
+          animationType="slide"
+          onRequestClose={() => setShowCampPrep(false)}
+        >
+          <CampPrepChat onClose={() => setShowCampPrep(false)} />
+        </Modal>
+      )}
     </View>
   );
 }
