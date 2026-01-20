@@ -85,7 +85,9 @@ export default function ConnectivityScreen() {
           setPremiumModalVisible(true);
           return;
         }
-        setCellResult('Unable to predict cell signal right now.');
+        // Show actual error details for debugging
+        const errorDetail = err?.response?.data?.detail || err?.message || 'Unknown error';
+        setCellResult(`Error: ${errorDetail}`);
       }
     } finally {
       setLoading(false);
@@ -127,7 +129,9 @@ export default function ConnectivityScreen() {
           setPremiumModalVisible(true);
           return;
         }
-        setStarlinkResult('Unable to predict Starlink risk right now.');
+        // Show actual error details for debugging
+        const errorDetail = err?.response?.data?.detail || err?.message || 'Unknown error';
+        setStarlinkResult(`Error: ${errorDetail}`);
       }
     } finally {
       setLoading(false);
