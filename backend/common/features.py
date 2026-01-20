@@ -11,6 +11,7 @@ BATTERY_SOC = "battery_soc"
 PROPANE_USAGE = "propane_usage"
 WATER_BUDGET = "water_budget"
 ROAD_SIM = "road_sim"
+CAMPSITE_INDEX = "campsite_index"
 CELL_STARLINK = "cell_starlink"
 EVAC_OPTIMIZER = "evac_optimizer"
 CLAIM_LOG = "claim_log"
@@ -23,6 +24,7 @@ PREMIUM_FEATURES = {
     PROPANE_USAGE,
     WATER_BUDGET,
     ROAD_SIM,
+    CAMPSITE_INDEX,
     CELL_STARLINK,
     EVAC_OPTIMIZER,
     CLAIM_LOG,

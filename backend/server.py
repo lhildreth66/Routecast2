@@ -20,7 +20,7 @@ from providers import get_providers
 from chat.camp_prep_dispatcher import dispatch as dispatch_camp_prep
 from billing import billing_verifier, VerificationRequest, VerificationResponse
 from common.premium_gate import require_premium
-from common.features import SOLAR_FORECAST, PROPANE_USAGE, WATER_BUDGET, ROAD_SIM, CELL_STARLINK, CLAIM_LOG
+from common.features import SOLAR_FORECAST, PROPANE_USAGE, WATER_BUDGET, ROAD_SIM, CAMPSITE_INDEX, CELL_STARLINK, CLAIM_LOG
 from road_passability_service import RoadPassabilityService
 from solar_forecast_service import SolarForecastService
 from propane_usage_service import PropaneUsageService
@@ -2878,31 +2878,10 @@ async def predict_starlink_risk(request: ConnectivityStarlinkRequest):
 @api_router.post("/pro/campsite-index", response_model=CampsiteIndexResponse)
 async def calculate_campsite_index(request: CampsiteIndexRequest):
     """Premium-gated Campsite Index scoring (Task A8)."""
-    # Premium gating
-    if not request.subscription_id:
-        logger.warning("[PREMIUM] Attempted campsite index without subscription")
-        raise HTTPException(
-            status_code=402,
-            detail={
-                "code": "PREMIUM_LOCKED",
-                "message": "Upgrade to Routecast Pro to calculate Campsite Index scores."
-            }
-        )
+    logger.info(f"[PREMIUM] Campsite index calculation requested")
     
-    # Only check subscription if database is available
-    if db is not None:
-        sub = await db.subscriptions.find_one({"_id": request.subscription_id, "status": "active"})
-        if not sub:
-            logger.warning(f"[PREMIUM] Invalid subscription {request.subscription_id}")
-            raise HTTPException(
-                status_code=402,
-                detail={
-                    "code": "PREMIUM_LOCKED",
-                    "message": "Upgrade to Routecast Pro to calculate Campsite Index scores."
-                }
-            )
-    else:
-        logger.warning("[PREMIUM] Database not available, skipping subscription check")
+    # Check premium entitlement
+    require_premium(request.subscription_id, CAMPSITE_INDEX)
 
     try:
         factors = SiteFactors(
