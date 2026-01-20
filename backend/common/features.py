@@ -9,6 +9,7 @@ These must match the frontend definitions exactly.
 SOLAR_FORECAST = "solar_forecast"
 BATTERY_SOC = "battery_soc"
 PROPANE_USAGE = "propane_usage"
+WATER_BUDGET = "water_budget"
 ROAD_SIM = "road_sim"
 CELL_STARLINK = "cell_starlink"
 EVAC_OPTIMIZER = "evac_optimizer"
@@ -20,6 +21,7 @@ PREMIUM_FEATURES = {
     SOLAR_FORECAST,
     BATTERY_SOC,
     PROPANE_USAGE,
+    WATER_BUDGET,
     ROAD_SIM,
     CELL_STARLINK,
     EVAC_OPTIMIZER,

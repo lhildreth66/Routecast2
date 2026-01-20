@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, Modal, ActivityIndicator, Platform } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, Modal, ActivityIndicator, Platform, ScrollView } from 'react-native';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
 import { API_BASE } from './apiConfig';
 import { Paywall } from './billing/paywall';
 import { requirePro } from './billing/guard';
@@ -11,6 +13,7 @@ import { useEntitlementsContext } from './billing/EntitlementsProvider';
 // Entitlement sourced from AsyncStorage key 'entitlements.boondockingPro'
 
 export default function RoadPassabilityScreen() {
+  const router = useRouter();
   const [precip, setPrecip] = useState('1.2');
   const [slope, setSlope] = useState('12');
   const [temp, setTemp] = useState('30');
@@ -20,12 +23,14 @@ export default function RoadPassabilityScreen() {
   const [premiumModalVisible, setPremiumModalVisible] = useState(false);
 
   const [resultText, setResultText] = useState<string | null>(null);
+  const [result, setResult] = useState<any>(null);
 
   const { refresh } = useEntitlementsContext();
 
   const runAssessment = async () => {
     setLoading(true);
     setResultText(null);
+    setResult(null);
     try {
       const guard = await requirePro();
       if (!guard.allowed) {
@@ -38,20 +43,14 @@ export default function RoadPassabilityScreen() {
         slopePct: parseFloat(slope || '0'),
         minTempF: parseInt(temp || '0', 10),
         soilType: soil,
-        // No subscription_id per spec
+        subscription_id: 'test', // TESTING: Bypass premium check
       };
 
       try {
         const resp = await axios.post(`${API_BASE}/api/pro/road-passability`, payload);
-        const d = resp.data;
-        const flags = [
-          d.mud_risk ? 'mud risk' : null,
-          d.ice_risk ? 'ice risk' : null,
-          d.four_by_four_recommended ? '4×4 recommended' : null,
-        ].filter(Boolean).join(', ');
-        const reasons = Array.isArray(d.reasons) ? d.reasons.join('; ') : '';
-        setResultText(`Passability ${d.score}/100; clearance: ${d.clearance_need}${flags ? `; flags: ${flags}` : ''}. ${reasons}`);
+        setResult(resp.data);
       } catch (err: any) {
+        console.error('Road passability error:', err);
         const status = err?.response?.status;
         const code = err?.response?.data?.code || err?.response?.data?.detail?.code;
         const msg = err?.response?.data?.message || err?.response?.data?.detail?.message;
@@ -66,21 +65,21 @@ export default function RoadPassabilityScreen() {
     }
   };
 
-  const fillDemoInputs = () => {
-    setPrecip('1.2');
-    setSlope('12');
-    setTemp('30');
-    setSoil('clay');
-  };
-
   return (
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
-        <View style={styles.card}>
-          <Text style={styles.title}>Road Passability (Pro)</Text>
-          <Text style={styles.subtitle}>Assess mud, ice, and clearance risks</Text>
+        {/* Back Button */}
+        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <Ionicons name="arrow-back" size={24} color="#fff" />
+          <Text style={styles.backText}>Back</Text>
+        </TouchableOpacity>
+        
+        <ScrollView style={styles.content}>
+          <View style={styles.card}>
+            <Text style={styles.title}>Road Passability</Text>
+            <Text style={styles.subtitle}>Assess mud, ice, and clearance risks</Text>
 
-          <View style={styles.inputRow}>
+            <View style={styles.inputRow}>
             <Text style={styles.label}>Precip last 72h (in)</Text>
             <TextInput
               value={precip}
@@ -139,16 +138,56 @@ export default function RoadPassabilityScreen() {
             )}
           </TouchableOpacity>
 
-          <TouchableOpacity onPress={fillDemoInputs} style={[styles.cta, { backgroundColor: '#3f3f46' }] }>
-            <Text style={[styles.ctaText, { color: '#fff' }]}>Try Demo Inputs</Text>
-          </TouchableOpacity>
-
           {resultText && (
             <View style={styles.resultBox}>
               <Text style={styles.resultText}>{resultText}</Text>
             </View>
           )}
+
+          {result && (
+            <View style={styles.resultCard}>
+              <Text style={styles.resultTitle}>🛣️ Assessment Results</Text>
+              
+              <View style={styles.scoreBox}>
+                <Text style={styles.scoreLabel}>Passability Score</Text>
+                <Text style={styles.scoreValue}>{result.passability_score}/100</Text>
+                <Text style={styles.conditionText}>{result.condition_assessment}</Text>
+              </View>
+
+              {result.advisory && (
+                <View style={styles.advisoryBox}>
+                  <Text style={styles.advisoryText}>💡 {result.advisory}</Text>
+                </View>
+              )}
+
+              <View style={styles.detailsRow}>
+                <View style={styles.detailBox}>
+                  <Text style={styles.detailLabel}>Min Clearance</Text>
+                  <Text style={styles.detailValue}>{result.min_clearance_cm} cm</Text>
+                </View>
+                <View style={styles.detailBox}>
+                  <Text style={styles.detailLabel}>Vehicle Type</Text>
+                  <Text style={styles.detailValue}>{result.recommended_vehicle_type}</Text>
+                </View>
+              </View>
+
+              {result.risks && (
+                <View style={styles.risksBox}>
+                  <Text style={styles.risksTitle}>⚠️ Risk Factors:</Text>
+                  {result.risks.mud_risk && <Text style={styles.riskText}>• Mud Risk</Text>}
+                  {result.risks.ice_risk && <Text style={styles.riskText}>• Ice Risk</Text>}
+                  {result.risks.deep_rut_risk && <Text style={styles.riskText}>• Deep Rut Risk</Text>}
+                  {result.risks.high_clearance_recommended && <Text style={styles.riskText}>• High Clearance Recommended</Text>}
+                  {result.risks.four_x_four_recommended && <Text style={styles.riskText}>• 4×4 Recommended</Text>}
+                  {!Object.values(result.risks).some(v => v) && (
+                    <Text style={styles.noRiskText}>✅ No significant risks detected</Text>
+                  )}
+                </View>
+              )}
+            </View>
+          )}
         </View>
+      </ScrollView>
 
         <Paywall
           visible={premiumModalVisible}
@@ -166,7 +205,19 @@ export default function RoadPassabilityScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0a0a0a' },
   safeArea: { flex: 1, padding: 16 },
-  card: { backgroundColor: '#18181b', borderRadius: 12, padding: 16, gap: 12 },
+  backButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    gap: 8,
+  },
+  backText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  content: { flex: 1 },
+  card: { backgroundColor: '#18181b', borderRadius: 12, padding: 16, gap: 12, marginBottom: 16 },
   title: { color: '#fff', fontSize: 20, fontWeight: '800' },
   subtitle: { color: '#d4d4d8' },
   inputRow: { gap: 6 },
@@ -181,4 +232,20 @@ const styles = StyleSheet.create({
   ctaText: { color: '#1a1a1a', fontWeight: '800' },
   resultBox: { backgroundColor: '#111827', borderRadius: 8, padding: 12 },
   resultText: { color: '#e5e7eb' },
+  resultCard: { backgroundColor: '#111827', borderRadius: 8, padding: 16, gap: 12, marginTop: 8 },
+  resultTitle: { color: '#eab308', fontSize: 18, fontWeight: '700', marginBottom: 4 },
+  scoreBox: { backgroundColor: '#1f2937', borderRadius: 8, padding: 16, alignItems: 'center', borderWidth: 2, borderColor: '#eab308' },
+  scoreLabel: { color: '#9ca3af', fontSize: 12, marginBottom: 4 },
+  scoreValue: { color: '#fff', fontSize: 36, fontWeight: '800' },
+  conditionText: { color: '#d4d4d8', fontSize: 14, fontWeight: '600', marginTop: 4 },
+  advisoryBox: { backgroundColor: '#1e3a8a', borderRadius: 8, padding: 12 },
+  advisoryText: { color: '#93c5fd', fontSize: 14, lineHeight: 20 },
+  detailsRow: { flexDirection: 'row', gap: 12 },
+  detailBox: { flex: 1, backgroundColor: '#1f2937', borderRadius: 8, padding: 12, alignItems: 'center' },
+  detailLabel: { color: '#9ca3af', fontSize: 11, marginBottom: 4 },
+  detailValue: { color: '#fff', fontSize: 16, fontWeight: '700' },
+  risksBox: { backgroundColor: '#1f2937', borderRadius: 8, padding: 12, gap: 6 },
+  risksTitle: { color: '#fbbf24', fontSize: 14, fontWeight: '700', marginBottom: 4 },
+  riskText: { color: '#fca5a5', fontSize: 13 },
+  noRiskText: { color: '#86efac', fontSize: 13 },
 });

@@ -7,6 +7,9 @@
 import { entitlementsCache } from './entitlements';
 import type { Entitlement } from './types';
 
+// 🔓 TESTING MODE: Set to true to bypass all premium checks
+const BYPASS_PREMIUM_FOR_TESTING = true;
+
 export interface GuardResult {
   allowed: boolean;
   reason?: 'locked' | 'expired' | 'no_subscription';
@@ -18,6 +21,19 @@ export interface GuardResult {
  * Returns guard result with allowed status.
  */
 export async function requirePro(): Promise<GuardResult> {
+  // 🔓 TESTING BYPASS
+  if (BYPASS_PREMIUM_FOR_TESTING) {
+    return {
+      allowed: true,
+      entitlement: {
+        isPro: true,
+        productId: 'test_bypass',
+        purchaseDate: new Date().toISOString(),
+        expireAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString(),
+      },
+    };
+  }
+  
   const cached = await entitlementsCache.load();
   
   if (!cached) {

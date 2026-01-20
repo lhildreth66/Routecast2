@@ -42,23 +42,23 @@ interface Message {
 }
 
 const QUICK_COMMANDS = [
-  { cmd: '/prep-checklist', label: '📋 Checklist', free: true },
-  { cmd: '/power-forecast', label: '⚡ Power', free: false },
-  { cmd: '/propane-usage', label: '🔥 Propane', free: false },
-  { cmd: '/water-plan', label: '💧 Water', free: false },
-  { cmd: '/terrain-shade', label: '🌄 Shade', free: false },
-  { cmd: '/wind-shelter', label: '💨 Wind', free: false },
-  { cmd: '/road-sim', label: '🚙 Road', free: false },
-  { cmd: '/cell-starlink', label: '📡 Signal', free: false },
-  { cmd: '/camp-index', label: '⭐ Index', free: false },
-  { cmd: '/claim-log', label: '📄 Claim', free: false },
+  { cmd: '/prep-checklist', label: '📋 Checklist', free: true, desc: 'Basic camping prep tasks' },
+  { cmd: '/power-forecast', label: '⚡ Power', free: false, desc: 'Estimate solar output at your campsite' },
+  { cmd: '/propane-usage', label: '🔥 Propane', free: false, desc: 'Calculate fuel consumption' },
+  { cmd: '/water-plan', label: '💧 Water', free: false, desc: 'Plan water usage and storage' },
+  { cmd: '/terrain-shade', label: '🌄 Shade', free: false, desc: 'Analyze terrain shading' },
+  { cmd: '/wind-shelter', label: '💨 Wind', free: false, desc: 'Assess wind protection' },
+  { cmd: '/road-sim', label: '🚙 Road', free: false, desc: 'Check road passability' },
+  { cmd: '/cell-starlink', label: '📡 Signal', free: false, desc: 'Predict connectivity strength' },
+  { cmd: '/camp-index', label: '⭐ Index', free: false, desc: 'Score campsite quality' },
+  { cmd: '/claim-log', label: '📄 Claim', free: false, desc: 'Generate insurance claim log' },
 ];
 
 export default function CampPrepChat({ onClose }: CampPrepChatProps) {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'assistant',
-      text: 'Welcome to Camp Prep! Use the buttons below or type commands like /power-forecast lat=34.05 lon=-111.03 panelWatts=400',
+      text: '🏕️ Welcome to Boondockers Pro!\n\nYour all-in-one campsite planning assistant. Type a command or ask questions about your camping setup, resource planning, and site conditions.',
     },
   ]);
   const [input, setInput] = useState('');
@@ -176,25 +176,23 @@ export default function CampPrepChat({ onClose }: CampPrepChatProps) {
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>🏕️ Camp Prep</Text>
+        <View>
+          <Text style={styles.headerTitle}>🏕️ Boondockers Pro</Text>
+          <Text style={styles.headerSubtitle}>Premium campsite planning tools</Text>
+        </View>
         <TouchableOpacity onPress={onClose} style={styles.closeButton}>
           <Text style={styles.closeButtonText}>✕</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Quick Commands */}
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.quickCommands}>
-        {QUICK_COMMANDS.map((item) => (
-          <TouchableOpacity
-            key={item.cmd}
-            style={[styles.quickButton, !item.free && styles.quickButtonPremium]}
-            onPress={() => sendCommand(item.cmd)}
-          >
-            <Text style={styles.quickButtonText}>{item.label}</Text>
-            {!item.free && <Text style={styles.premiumBadge}>PRO</Text>}
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
+      {/* Quick Commands Info */}
+      <View style={styles.commandsInfo}>
+        <Text style={styles.commandsTitle}>Available Commands</Text>
+        <View style={styles.commandsList}>
+          <Text style={styles.commandItem}>💧 /water-plan • 🌄 /terrain-shade • 💨 /wind-shelter</Text>
+          <Text style={styles.commandItem}>🚙 /road-sim • 📡 /cell-starlink • ⭐ /camp-index</Text>
+        </View>
+      </View>
 
       {/* Messages */}
       <ScrollView style={styles.messagesContainer}>
@@ -240,7 +238,7 @@ export default function CampPrepChat({ onClose }: CampPrepChatProps) {
           style={styles.input}
           value={input}
           onChangeText={setInput}
-          placeholder="Type a command like /power-forecast lat=34.05..."
+          placeholder="Type a command like /water-plan or ask a question"
           placeholderTextColor="#999"
           onSubmitEditing={() => input.trim() && sendCommand(input.trim())}
         />
@@ -275,13 +273,19 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     padding: 16,
+    paddingBottom: 12,
     borderBottomWidth: 1,
     borderBottomColor: '#333',
   },
   headerTitle: {
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: 'bold',
     color: '#fff',
+  },
+  headerSubtitle: {
+    fontSize: 13,
+    color: '#999',
+    marginTop: 2,
   },
   closeButton: {
     padding: 8,
@@ -290,35 +294,29 @@ const styles = StyleSheet.create({
     fontSize: 24,
     color: '#fff',
   },
-  quickCommands: {
-    maxHeight: 60,
-    borderBottomWidth: 1,
-    borderBottomColor: '#333',
-    paddingVertical: 8,
-    paddingHorizontal: 8,
-  },
-  quickButton: {
+  commandsInfo: {
     backgroundColor: '#2a2a2a',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 16,
-    marginHorizontal: 4,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  quickButtonPremium: {
+    marginHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 8,
+    padding: 12,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: '#8b4513',
   },
-  quickButtonText: {
-    color: '#fff',
-    fontSize: 12,
-    marginRight: 4,
+  commandsTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#d4a574',
+    marginBottom: 8,
   },
-  premiumBadge: {
-    fontSize: 8,
-    color: '#8b4513',
-    fontWeight: 'bold',
+  commandsList: {
+    gap: 4,
+  },
+  commandItem: {
+    fontSize: 11,
+    color: '#999',
+    lineHeight: 16,
   },
   messagesContainer: {
     flex: 1,
@@ -326,7 +324,7 @@ const styles = StyleSheet.create({
   },
   messageBubble: {
     marginBottom: 12,
-    maxWidth: '80%',
+    maxWidth: '85%',
   },
   userBubble: {
     alignSelf: 'flex-end',
@@ -343,6 +341,7 @@ const styles = StyleSheet.create({
   messageText: {
     color: '#fff',
     fontSize: 14,
+    lineHeight: 20,
   },
   userMessageText: {
     color: '#fff',
@@ -389,6 +388,7 @@ const styles = StyleSheet.create({
   inputContainer: {
     flexDirection: 'row',
     padding: 16,
+    paddingBottom: 20,
     borderTopWidth: 1,
     borderTopColor: '#333',
     alignItems: 'center',
@@ -401,7 +401,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: 20,
     marginRight: 8,
-    fontSize: 14,
+    fontSize: 13,
   },
   sendButton: {
     backgroundColor: '#8b4513',

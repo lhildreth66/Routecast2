@@ -12,12 +12,15 @@ import {
   Keyboard,
   Switch,
   Modal,
+  Alert,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Notifications from 'expo-notifications';
 import { format } from 'date-fns';
 import { API_BASE } from './apiConfig';
 import { devToggleProEntitlement } from './utils/entitlements';
@@ -87,16 +90,10 @@ export default function HomeScreen() {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [useCustomTime, setUseCustomTime] = useState(false);
   
-  // AI Chat
-  const [showChat, setShowChat] = useState(false);
-  const [chatMessage, setChatMessage] = useState('');
-  const [chatHistory, setChatHistory] = useState<{role: 'user' | 'ai', text: string}[]>([]);
-  const [chatLoading, setChatLoading] = useState(false);
-  const [chatSuggestions, setChatSuggestions] = useState<string[]>(['How to drive in snow?', 'Is fog dangerous?', 'Rest stop tips']);
   const [isListening, setIsListening] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(false);
   
-  // Camp Prep Chat
+  // Boondockers Pro Chat
   const [showCampPrep, setShowCampPrep] = useState(false);
 
   // Navigation to dedicated Road Passability screen (Pro)
@@ -106,6 +103,8 @@ export default function HomeScreen() {
   const [showAddStop, setShowAddStop] = useState(false);
   const [newStopLocation, setNewStopLocation] = useState('');
   const [newStopType, setNewStopType] = useState('stop');
+  const [stopSuggestions, setStopSuggestions] = useState<AutocompleteSuggestion[]>([]);
+  const [showStopSuggestions, setShowStopSuggestions] = useState(false);
 
   // Dev-only: long-press gesture counter for Pro entitlement toggle (5 taps)
   const [devTapCount, setDevTapCount] = useState(0);
@@ -135,6 +134,11 @@ export default function HomeScreen() {
       const token = await AsyncStorage.getItem('expoPushToken');
       if (token) {
         setPushToken(token);
+        console.log('Push token loaded successfully');
+      } else {
+        // Token not available yet, retry after a delay
+        console.log('Push token not yet available, will retry...');
+        setTimeout(loadPushToken, 1000);
       }
     } catch (err) {
       console.log('Error loading push token:', err);
@@ -169,18 +173,29 @@ export default function HomeScreen() {
     setAutocompleteLoading(true);
     try {
       const response = await axios.get(`${API_BASE}/api/geocode/autocomplete`, {
-        params: { query, limit: 5 }
+        params: { query, limit: 5 },
+        timeout: 10000,
       });
       
+      const suggestions = Array.isArray(response.data) ? response.data : [];
+      
       if (type === 'origin') {
-        setOriginSuggestions(response.data);
-        setShowOriginSuggestions(response.data.length > 0);
+        setOriginSuggestions(suggestions);
+        setShowOriginSuggestions(suggestions.length > 0);
       } else {
-        setDestSuggestions(response.data);
-        setShowDestSuggestions(response.data.length > 0);
+        setDestSuggestions(suggestions);
+        setShowDestSuggestions(suggestions.length > 0);
       }
-    } catch (err) {
-      console.log('Autocomplete error:', err);
+    } catch (err: any) {
+      console.log('Autocomplete error:', err.message || err);
+      // Clear suggestions on error
+      if (type === 'origin') {
+        setOriginSuggestions([]);
+        setShowOriginSuggestions(false);
+      } else {
+        setDestSuggestions([]);
+        setShowDestSuggestions(false);
+      }
     } finally {
       setAutocompleteLoading(false);
     }
@@ -226,34 +241,20 @@ export default function HomeScreen() {
     setDestSuggestions([]);
   };
 
-  // AI Chat functions
-  const sendChatMessage = async (message?: string) => {
-    const msgToSend = message || chatMessage;
-    if (!msgToSend.trim()) return;
-    
-    setChatLoading(true);
-    setChatHistory(prev => [...prev, { role: 'user', text: msgToSend }]);
-    setChatMessage('');
-    
-    try {
-      const response = await axios.post(`${API_BASE}/api/chat`, {
-        message: msgToSend,
-        route_context: origin && destination ? `${origin} to ${destination}` : null
-      });
-      
-      setChatHistory(prev => [...prev, { role: 'ai', text: response.data.response }]);
-      if (response.data.suggestions) {
-        setChatSuggestions(response.data.suggestions);
-      }
-    } catch (err) {
-      setChatHistory(prev => [...prev, { role: 'ai', text: "Sorry, I couldn't process that. Please try again." }]);
-    } finally {
-      setChatLoading(false);
-    }
-  };
-
   const goToRoadPassability = () => router.push('/road-passability');
   const goToConnectivity = () => router.push('/connectivity');
+
+  // Cleanup debounce timers on unmount
+  useEffect(() => {
+    return () => {
+      if (originDebounceRef.current) {
+        clearTimeout(originDebounceRef.current);
+      }
+      if (destDebounceRef.current) {
+        clearTimeout(destDebounceRef.current);
+      }
+    };
+  }, []);
 
   // Voice-to-text function
   const startVoiceRecognition = () => {
@@ -327,12 +328,60 @@ export default function HomeScreen() {
     }
   };
 
+  const saveToRecentRoutes = async (origin: string, destination: string, stops: StopPoint[]) => {
+    try {
+      // Load existing recent routes from local storage
+      const stored = await AsyncStorage.getItem('recentRoutes');
+      let recents: SavedRoute[] = stored ? JSON.parse(stored) : [];
+      
+      // Create new route entry
+      const newRoute: SavedRoute = {
+        id: Date.now().toString(),
+        origin: origin,
+        destination: destination,
+        stops: stops,
+        is_favorite: false,
+        created_at: new Date().toISOString()
+      };
+      
+      // Remove duplicate if it exists (same origin and destination)
+      recents = recents.filter(r => 
+        !(r.origin === origin && r.destination === destination)
+      );
+      
+      // Add to front of list
+      recents.unshift(newRoute);
+      
+      // Keep only last 10
+      recents = recents.slice(0, 10);
+      
+      // Save back to storage
+      await AsyncStorage.setItem('recentRoutes', JSON.stringify(recents));
+      
+      // Update state
+      setRecentRoutes(recents.slice(0, 3));
+    } catch (err) {
+      console.log('Error saving to recent routes:', err);
+    }
+  };
+
   const fetchRecentRoutes = async () => {
     try {
+      // Try to fetch from backend first
       const response = await axios.get(`${API_BASE}/api/routes/history`);
-      setRecentRoutes(response.data.slice(0, 5));
+      setRecentRoutes(response.data.slice(0, 3));
     } catch (err) {
-      console.log('Error fetching history:', err);
+      console.log('Error fetching from backend, using local storage:', err);
+      // Fallback to local storage
+      try {
+        const stored = await AsyncStorage.getItem('recentRoutes');
+        if (stored) {
+          const recents = JSON.parse(stored);
+          setRecentRoutes(recents.slice(0, 3));
+        }
+      } catch (localErr) {
+        console.log('Error loading local recent routes:', localErr);
+      }
     }
   };
 
@@ -346,36 +395,55 @@ export default function HomeScreen() {
   };
 
   const handleAlertsToggle = async (enabled: boolean) => {
-    setAlertsEnabled(enabled);
-    
-    if (enabled && pushToken) {
+    if (enabled) {
+      // Request permissions first
+      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      let finalStatus = existingStatus;
+      
+      if (existingStatus !== 'granted') {
+        const { status } = await Notifications.requestPermissionsAsync();
+        finalStatus = status;
+      }
+      
+      if (finalStatus !== 'granted') {
+        Alert.alert(
+          'Permission Required',
+          'Please enable notifications in your device settings to receive weather alerts.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { text: 'Open Settings', onPress: () => Linking.openSettings() }
+          ]
+        );
+        return;
+      }
+      
+      // Get push token
       try {
-        setTestNotificationLoading(true);
-        setTestNotificationMessage('Saving token...');
+        const token = (await Notifications.getExpoPushTokenAsync({
+          projectId: '7eddbe0f-7b2-4ae3-b25c-cf1c1e67f0e7'
+        })).data;
         
-        // Save push token to backend
-        const response = await axios.post(`${API_BASE}/api/notifications/register`, {
-          push_token: pushToken,
+        await AsyncStorage.setItem('expoPushToken', token);
+        setPushToken(token);
+        
+        // Register with backend
+        await axios.post(`${API_BASE}/api/notifications/register`, {
+          push_token: token,
           enabled: true,
         });
         
+        setAlertsEnabled(true);
         setTestNotificationMessage('✅ Push alerts enabled!');
         setTimeout(() => setTestNotificationMessage(''), 3000);
       } catch (err) {
-        console.log('Error enabling alerts:', err);
+        console.error('Error setting up notifications:', err);
         setTestNotificationMessage('❌ Error enabling alerts');
-        setAlertsEnabled(false);
         setTimeout(() => setTestNotificationMessage(''), 3000);
-      } finally {
-        setTestNotificationLoading(false);
       }
-    } else if (!enabled) {
+    } else {
+      setAlertsEnabled(false);
       setTestNotificationMessage('Push alerts disabled');
       setTimeout(() => setTestNotificationMessage(''), 2000);
-    } else if (!pushToken) {
-      setTestNotificationMessage('⚠️ Token not yet available');
-      setAlertsEnabled(false);
-      setTimeout(() => setTestNotificationMessage(''), 3000);
     }
   };
 
@@ -423,24 +491,32 @@ export default function HomeScreen() {
         vehicle_type: vehicleType,
         trucker_mode: truckerMode,
       };
-      
       // Include vehicle height if in trucker mode
       if (truckerMode && vehicleHeight) {
         requestData.vehicle_height_ft = parseFloat(vehicleHeight);
       }
-      
       if (useCustomTime) {
         requestData.departure_time = departureTime.toISOString();
       }
 
       const response = await axios.post(`${API_BASE}/api/route/weather`, requestData);
-      
+      const data = response.data;
+
+      // Defensive: Ensure required fields exist
+      if (!data || !data.origin || !data.destination || !data.waypoints || !Array.isArray(data.waypoints)) {
+        setError('Weather route data is incomplete. Please try again.');
+        return;
+      }
+
       // Cache the route for offline
-      await AsyncStorage.setItem('lastRoute', JSON.stringify(response.data));
+      await AsyncStorage.setItem('lastRoute', JSON.stringify(data));
+      
+      // Save to recent routes
+      await saveToRecentRoutes(origin.trim(), destination.trim(), stops);
 
       router.push({
         pathname: '/route',
-        params: { routeData: JSON.stringify(response.data) },
+        params: { routeData: JSON.stringify(data) },
       });
     } catch (err: any) {
       console.error('Error:', err);
@@ -453,11 +529,58 @@ export default function HomeScreen() {
     }
   };
 
-  const handleRecentRoute = (route: SavedRoute) => {
+  const handleRecentRoute = async (route: SavedRoute) => {
+    // Fill in the route details
     setOrigin(route.origin);
     setDestination(route.destination);
     if (route.stops) {
       setStops(route.stops);
+    }
+    
+    // Automatically fetch weather for this route
+    setLoading(true);
+    setError('');
+    
+    try {
+      const requestData: any = {
+        origin: route.origin.trim(),
+        destination: route.destination.trim(),
+        stops: route.stops || [],
+        vehicle_type: vehicleType,
+        trucker_mode: truckerMode,
+      };
+      
+      if (truckerMode && vehicleHeight) {
+        requestData.vehicle_height_ft = parseFloat(vehicleHeight);
+      }
+      
+      if (useCustomTime) {
+        requestData.departure_time = departureTime.toISOString();
+      }
+
+      const response = await axios.post(`${API_BASE}/api/route/weather`, requestData);
+      const data = response.data;
+
+      if (!data || !data.origin || !data.destination || !data.waypoints || !Array.isArray(data.waypoints)) {
+        setError('Weather route data is incomplete. Please try again.');
+        setLoading(false);
+        return;
+      }
+
+      await AsyncStorage.setItem('lastRoute', JSON.stringify(data));
+
+      router.push({
+        pathname: '/route',
+        params: { routeData: JSON.stringify(data) },
+      });
+    } catch (err: any) {
+      console.error('Error:', err);
+      setError(
+        err.response?.data?.detail ||
+        'Unable to fetch route weather. Please try again.'
+      );
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -489,10 +612,50 @@ export default function HomeScreen() {
     }
   };
 
+  const stopDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleStopLocationChange = (text: string) => {
+    setNewStopLocation(text);
+    
+    // Debounce autocomplete
+    if (stopDebounceRef.current) {
+      clearTimeout(stopDebounceRef.current);
+    }
+    stopDebounceRef.current = setTimeout(() => {
+      fetchStopAutocomplete(text);
+    }, 300);
+  };
+
+  const fetchStopAutocomplete = async (query: string) => {
+    if (query.length < 2) {
+      setStopSuggestions([]);
+      setShowStopSuggestions(false);
+      return;
+    }
+
+    try {
+      const response = await axios.get(`${API_BASE}/api/geocode/autocomplete`, {
+        params: { query, limit: 5 }
+      });
+      setStopSuggestions(response.data);
+      setShowStopSuggestions(response.data.length > 0);
+    } catch (err) {
+      console.log('Stop autocomplete error:', err);
+    }
+  };
+
+  const selectStopSuggestion = (suggestion: AutocompleteSuggestion) => {
+    setNewStopLocation(suggestion.place_name);
+    setShowStopSuggestions(false);
+    setStopSuggestions([]);
+  };
+
   const addStop = () => {
     if (newStopLocation.trim()) {
       setStops([...stops, { location: newStopLocation.trim(), type: newStopType }]);
       setNewStopLocation('');
+      setStopSuggestions([]);
+      setShowStopSuggestions(false);
       setShowAddStop(false);
     }
   };
@@ -535,7 +698,7 @@ export default function HomeScreen() {
         <View style={styles.mapOverlay} />
       </View>
 
-      <SafeAreaView style={styles.safeArea}>
+      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.keyboardView}
@@ -550,7 +713,7 @@ export default function HomeScreen() {
               {/* Header */}
               <View style={styles.header}>
                 <View style={styles.iconContainer}>
-                  <MaterialCommunityIcons name="routes" size={28} color="#1a1a1a" />
+                  <MaterialCommunityIcons name="routes" size={22} color="#1a1a1a" />
                 </View>
                 <View style={styles.headerText}>
                   <Text style={styles.title}>Routecast</Text>
@@ -596,6 +759,18 @@ export default function HomeScreen() {
                   />
                   {autocompleteLoading && origin.length >= 2 && (
                     <ActivityIndicator size="small" color="#eab308" style={{ marginRight: 8 }} />
+                  )}
+                  {origin.length > 0 && !autocompleteLoading && (
+                    <TouchableOpacity 
+                      onPress={() => {
+                        setOrigin('');
+                        setOriginSuggestions([]);
+                        setShowOriginSuggestions(false);
+                      }}
+                      style={styles.clearButton}
+                    >
+                      <Ionicons name="close-circle" size={20} color="#6b7280" />
+                    </TouchableOpacity>
                   )}
                 </View>
                 {/* Origin Suggestions Dropdown */}
@@ -666,6 +841,18 @@ export default function HomeScreen() {
                   />
                   {autocompleteLoading && destination.length >= 2 && (
                     <ActivityIndicator size="small" color="#eab308" style={{ marginRight: 8 }} />
+                  )}
+                  {destination.length > 0 && !autocompleteLoading && (
+                    <TouchableOpacity 
+                      onPress={() => {
+                        setDestination('');
+                        setDestSuggestions([]);
+                        setShowDestSuggestions(false);
+                      }}
+                      style={styles.clearButton}
+                    >
+                      <Ionicons name="close-circle" size={20} color="#6b7280" />
+                    </TouchableOpacity>
                   )}
                   <TouchableOpacity onPress={swapLocations} style={styles.swapButton}>
                     <Ionicons name="swap-vertical" size={20} color="#60a5fa" />
@@ -768,41 +955,6 @@ export default function HomeScreen() {
                     <Text style={styles.heightUnit}>ft</Text>
                   </View>
                   
-                  {/* Quick Presets */}
-                  <View style={styles.presetsContainer}>
-                    <Text style={styles.presetsLabel}>Quick Presets:</Text>
-                    <View style={styles.presetsGrid}>
-                      <TouchableOpacity
-                        style={styles.presetBtn}
-                        onPress={() => setVehicleHeight('10')}
-                      >
-                        <Text style={styles.presetBtnText}>Box Truck</Text>
-                        <Text style={styles.presetBtnHeight}>10 ft</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={styles.presetBtn}
-                        onPress={() => setVehicleHeight('12')}
-                      >
-                        <Text style={styles.presetBtnText}>RV/Motorhome</Text>
-                        <Text style={styles.presetBtnHeight}>12 ft</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={styles.presetBtn}
-                        onPress={() => setVehicleHeight('13.5')}
-                      >
-                        <Text style={styles.presetBtnText}>Semi Truck</Text>
-                        <Text style={styles.presetBtnHeight}>13.5 ft</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={styles.presetBtn}
-                        onPress={() => setVehicleHeight('14')}
-                      >
-                        <Text style={styles.presetBtnText}>Double Deck</Text>
-                        <Text style={styles.presetBtnHeight}>14 ft</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                  
                   {/* Height Status */}
                   <View style={styles.heightStatus}>
                     <Ionicons name="information-circle" size={18} color="#eab308" />
@@ -810,6 +962,14 @@ export default function HomeScreen() {
                       Current: {vehicleHeight} ft • You'll get alerts for bridges shorter than this
                     </Text>
                   </View>
+                  
+                  {/* Done Button - Just dismisses keyboard, keeps mode active */}
+                  <TouchableOpacity 
+                    style={styles.heightDoneButton}
+                    onPress={() => Keyboard.dismiss()}
+                  >
+                    <Text style={styles.heightDoneButtonText}>Done</Text>
+                  </TouchableOpacity>
                 </View>
               )}
 
@@ -1089,11 +1249,27 @@ export default function HomeScreen() {
               
               <TextInput
                 style={styles.modalInput}
-                placeholder="Enter stop location"
+                placeholder="City, address, or landmark"
                 placeholderTextColor="#6b7280"
                 value={newStopLocation}
-                onChangeText={setNewStopLocation}
+                onChangeText={handleStopLocationChange}
               />
+              
+              {/* Stop Autocomplete Suggestions */}
+              {showStopSuggestions && stopSuggestions.length > 0 && (
+                <View style={styles.suggestions}>
+                  {stopSuggestions.map((suggestion, idx) => (
+                    <TouchableOpacity
+                      key={idx}
+                      style={styles.suggestionItem}
+                      onPress={() => selectStopSuggestion(suggestion)}
+                    >
+                      <Ionicons name="location-outline" size={18} color="#6b7280" />
+                      <Text style={styles.suggestionText}>{suggestion.place_name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              )}
               
               <Text style={styles.stopTypeLabel}>Stop Type</Text>
               <View style={styles.stopTypes}>
@@ -1181,100 +1357,7 @@ export default function HomeScreen() {
         </Modal>
       )}
 
-      {/* AI Chat Modal */}
-      {showChat && (
-        <Modal transparent animationType="slide">
-          <View style={styles.chatModalOverlay}>
-            <View style={styles.chatModalContent}>
-              <View style={styles.chatHeader}>
-                <View style={styles.chatHeaderLeft}>
-                  <Ionicons name="chatbubbles" size={24} color="#eab308" />
-                  <Text style={styles.chatTitle}>Ask Routecast AI</Text>
-                </View>
-                <TouchableOpacity onPress={() => setShowChat(false)}>
-                  <Ionicons name="close" size={24} color="#fff" />
-                </TouchableOpacity>
-              </View>
-              
-              <ScrollView style={styles.chatMessages} showsVerticalScrollIndicator={false}>
-                {chatHistory.length === 0 && (
-                  <View style={styles.chatWelcome}>
-                    <Text style={styles.chatWelcomeText}>👋 Hi! I'm your driving assistant.</Text>
-                    <Text style={styles.chatWelcomeSubtext}>Ask me about weather, road conditions, or safe driving tips!</Text>
-                  </View>
-                )}
-                
-                {chatHistory.map((msg, idx) => (
-                  <View key={idx} style={[styles.chatBubble, msg.role === 'user' ? styles.userBubble : styles.aiBubble]}>
-                    <Text style={styles.chatBubbleText}>{msg.text}</Text>
-                  </View>
-                ))}
-                
-                {chatLoading && (
-                  <View style={styles.chatTyping}>
-                    <ActivityIndicator size="small" color="#eab308" />
-                    <Text style={styles.chatTypingText}>Thinking...</Text>
-                  </View>
-                )}
-              </ScrollView>
-              
-              {/* Quick suggestions */}
-              <View style={styles.chatSuggestions}>
-                {chatSuggestions.map((suggestion, idx) => (
-                  <TouchableOpacity 
-                    key={idx} 
-                    style={styles.chatSuggestionBtn}
-                    onPress={() => sendChatMessage(suggestion)}
-                  >
-                    <Text style={styles.chatSuggestionText}>{suggestion}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              
-              {/* Input */}
-              <View style={styles.chatInputRow}>
-                <TextInput
-                  style={styles.chatInputFull}
-                  placeholder="Type your question here..."
-                  placeholderTextColor="#6b7280"
-                  value={chatMessage}
-                  onChangeText={setChatMessage}
-                  onSubmitEditing={() => sendChatMessage()}
-                  returnKeyType="send"
-                />
-                  placeholderTextColor="#6b7280"
-                  value={chatMessage}
-                  onChangeText={setChatMessage}
-                  onSubmitEditing={() => sendChatMessage()}
-                  returnKeyType="send"
-                />
-                <TouchableOpacity 
-                  style={[styles.chatSendBtn, !chatMessage.trim() && styles.chatSendBtnDisabled]}
-                  onPress={() => sendChatMessage()}
-                  disabled={!chatMessage.trim() || chatLoading}
-                >
-                  <Ionicons name="send" size={20} color="#fff" />
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </Modal>
-      )}
-
-      {/* Floating Chat Button */}
-      <TouchableOpacity style={styles.chatFab} onPress={() => setShowChat(true)}>
-        <Ionicons name="chatbubble-ellipses" size={24} color="#fff" />
-      </TouchableOpacity>
-      
-      {/* Camp Prep FAB */}
-      <TouchableOpacity 
-        style={[styles.chatFab, { bottom: 30, left: 20, right: undefined }]} 
-        onPress={() => setShowCampPrep(true)}
-      >
-        <Text style={{ fontSize: 24 }}>🏕️</Text>
-      </TouchableOpacity>
-      
-      {/* Camp Prep Modal */}
+      {/* Boondockers Pro Modal */}
       {showCampPrep && (
         <Modal
           visible={showCampPrep}
@@ -1309,7 +1392,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 16,
-    paddingTop: 12,
+    paddingTop: Platform.OS === 'android' ? 48 : 12,
     paddingBottom: 40,
   },
   mainCard: {
@@ -1324,22 +1407,23 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   iconContainer: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
+    width: 36,
+    height: 36,
+    borderRadius: 10,
     backgroundColor: '#eab308',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: 10,
   },
   headerText: {
     flex: 1,
   },
   title: {
-    fontSize: 22,
-    fontWeight: '700',
+    fontSize: 24,
+    fontWeight: '800',
     color: '#ffffff',
     marginBottom: 2,
+    letterSpacing: 0.5,
   },
   subtitle: {
     fontSize: 13,
@@ -1392,6 +1476,10 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     paddingVertical: 12,
     fontWeight: '500',
+  },
+  clearButton: {
+    padding: 4,
+    marginRight: 4,
   },
   swapButton: {
     padding: 8,
@@ -1824,22 +1912,22 @@ const styles = StyleSheet.create({
   heightSection: {
     backgroundColor: '#422006',
     borderRadius: 12,
-    padding: 16,
+    padding: 12,
     marginBottom: 16,
     borderWidth: 1,
     borderColor: '#f59e0b',
   },
   heightSectionTitle: {
     color: '#fbbf24',
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '700',
-    marginBottom: 4,
+    marginBottom: 3,
   },
   heightSectionSubtitle: {
     color: '#fde68a',
-    fontSize: 13,
-    marginBottom: 12,
-    lineHeight: 18,
+    fontSize: 11,
+    marginBottom: 10,
+    lineHeight: 16,
   },
   heightLabel: {
     color: '#e4e4e7',
@@ -1851,7 +1939,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginBottom: 16,
+    marginBottom: 10,
   },
   heightInputField: {
     flex: 1,
@@ -1870,13 +1958,13 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   presetsContainer: {
-    marginBottom: 12,
+    marginBottom: 10,
   },
   presetsLabel: {
     color: '#fde68a',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
-    marginBottom: 8,
+    marginBottom: 6,
   },
   presetsGrid: {
     flexDirection: 'row',
@@ -1890,8 +1978,8 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#f59e0b',
-    paddingHorizontal: 10,
-    paddingVertical: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1914,11 +2002,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 8,
     gap: 8,
+    marginTop: 4,
   },
   heightStatusText: {
     color: '#fde68a',
     fontSize: 12,
     flex: 1,
+  },
+  heightDoneButton: {
+    backgroundColor: '#f59e0b',
+    borderRadius: 8,
+    paddingVertical: 10,
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  heightDoneButtonText: {
+    color: '#1a1a1a',
+    fontSize: 14,
+    fontWeight: '700',
   },
   heightHint: {
     color: '#71717a',

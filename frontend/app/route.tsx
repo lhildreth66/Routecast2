@@ -13,6 +13,7 @@ import {
   Modal,
   TextInput,
   Dimensions,
+  Alert,
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -21,7 +22,6 @@ import { format, parseISO } from 'date-fns';
 import axios from 'axios';
 import { WebView } from 'react-native-webview';
 import { API_BASE } from './apiConfig';
-import PremiumFeaturesPanel from './components/PremiumFeaturesPanel';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -90,6 +90,9 @@ interface HazardAlert {
   message: string;
   recommendation: string;
   countdown_text: string;
+  full_description?: string;
+  description?: string;
+  instruction?: string;
 }
 
 interface RouteData {
@@ -470,8 +473,8 @@ export default function RouteScreen() {
   const params = useLocalSearchParams();
   const [routeData, setRouteData] = useState<RouteData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'conditions' | 'alerts'>('conditions');
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [activeTab, setActiveTab] = useState<'alerts' | 'bridges'>('alerts');
   
   // Radar map state
   const [showRadarMap, setShowRadarMap] = useState(false);
@@ -479,7 +482,7 @@ export default function RouteScreen() {
   // Expanded alert state - track which cards are expanded
   const [expandedCards, setExpandedCards] = useState<Set<number>>(new Set());
   
-  // Toggle card expansion
+  // Toggle card expansion (for alerts)
   const toggleCardExpand = (index: number) => {
     const newExpanded = new Set(expandedCards);
     if (newExpanded.has(index)) {
@@ -488,54 +491,57 @@ export default function RouteScreen() {
       newExpanded.add(index);
     }
     setExpandedCards(newExpanded);
-  };
+  }  
+
+  // Toggle card expansion (for bridge alerts)
+  const toggleCard = (index: number) => {
+    const newExpanded = new Set(expandedCards);
+    if (newExpanded.has(index)) {
+      newExpanded.delete(index);
+    } else {
+      newExpanded.add(index);
+    }
+    setExpandedCards(newExpanded);
+  }  
   
-  // AI Chat state
-  const [showChat, setShowChat] = useState(false);
-  const [chatMessage, setChatMessage] = useState('');
-  const [chatHistory, setChatHistory] = useState<{role: 'user' | 'ai', text: string}[]>([]);
-  const [chatLoading, setChatLoading] = useState(false);
-  const [chatSuggestions, setChatSuggestions] = useState<string[]>(['Road condition tips', 'Safe driving advice', 'Weather questions']);
   const [isListening, setIsListening] = useState(false);
 
   useEffect(() => {
-    if (params.routeData) {
-      try {
-        const data = JSON.parse(params.routeData as string);
-        setRouteData(data);
-      } catch (e) {
-        console.error('Error parsing route data:', e);
+    if (!params.routeData) {
+      Alert.alert(
+        'Missing Route Data',
+        'No route data was provided. Please try again from the home screen.',
+        [
+          { text: 'OK', onPress: () => router.back() }
+        ]
+      );
+      setLoading(false);
+      return;
+    }
+    try {
+      const data = JSON.parse(params.routeData as string);
+      if (!data || !data.origin || !data.destination) {
+        throw new Error('Missing required route fields');
       }
+      setRouteData(data);
+      
+      // Auto-switch to Bridge Alerts tab if there are trucker warnings
+      if (data.trucker_warnings && Array.isArray(data.trucker_warnings) && data.trucker_warnings.length > 0) {
+        setActiveTab('bridges');
+      }
+      
+    } catch (e) {
+      console.error('Error parsing route data:', e);
+      Alert.alert(
+        'Invalid Route Data',
+        'Could not load route details. Please try again from the home screen.',
+        [
+          { text: 'OK', onPress: () => router.back() }
+        ]
+      );
     }
     setLoading(false);
   }, [params.routeData]);
-
-  // AI Chat functions
-  const sendChatMessage = async (message?: string) => {
-    const msgToSend = message || chatMessage;
-    if (!msgToSend.trim()) return;
-    
-    setChatLoading(true);
-    setChatHistory(prev => [...prev, { role: 'user', text: msgToSend }]);
-    setChatMessage('');
-    
-    try {
-      const routeContext = routeData ? `${routeData.origin} to ${routeData.destination}, ${routeData.road_condition_summary}` : null;
-      const response = await axios.post(`${API_BASE}/api/chat`, {
-        message: msgToSend,
-        route_context: routeContext
-      });
-      
-      setChatHistory(prev => [...prev, { role: 'ai', text: response.data.response }]);
-      if (response.data.suggestions) {
-        setChatSuggestions(response.data.suggestions);
-      }
-    } catch (err) {
-      setChatHistory(prev => [...prev, { role: 'ai', text: "Sorry, I couldn't process that. Please try again." }]);
-    } finally {
-      setChatLoading(false);
-    }
-  };
 
   // Voice recognition
   const startVoiceRecognition = () => {
@@ -570,14 +576,10 @@ export default function RouteScreen() {
 
       recognition.onstart = () => {
         setIsListening(true);
-        setChatMessage('');
       };
 
       recognition.onresult = (event: any) => {
-        const transcript = Array.from(event.results)
-          .map((result: any) => result[0].transcript)
-          .join('');
-        setChatMessage(transcript);
+        // No-op: chat removed
       };
 
       recognition.onerror = () => setIsListening(false);
@@ -588,6 +590,18 @@ export default function RouteScreen() {
       alert('Failed to start voice recognition.');
       setIsListening(false);
     }
+  };
+
+  // Clean location for voice: remove country, zip codes
+  const cleanLocationForVoice = (location: string): string => {
+    return location
+      .replace(/, United States.*$/i, '') // Remove ", United States" and anything after
+      .replace(/\b\d{5}(-\d{4})?\b/g, '') // Remove zip codes
+      .replace(/,\s*,/g, ',') // Remove double commas
+      .replace(/,\s*$/,
+
+ '') // Remove trailing comma
+      .trim();
   };
 
   const speakSummary = async () => {
@@ -602,7 +616,9 @@ export default function RouteScreen() {
     setIsSpeaking(true);
     
     const parts: string[] = [];
-    parts.push(`Route from ${routeData.origin} to ${routeData.destination}.`);
+    const cleanOrigin = cleanLocationForVoice(routeData.origin);
+    const cleanDestination = cleanLocationForVoice(routeData.destination);
+    parts.push(`Route from ${cleanOrigin} to ${cleanDestination}.`);
     
     if (routeData.total_distance_miles) {
       parts.push(`Total distance: ${Math.round(routeData.total_distance_miles)} miles.`);
@@ -691,15 +707,8 @@ export default function RouteScreen() {
   }
 
   if (!routeData) {
-    return (
-      <SafeAreaView style={styles.errorContainer}>
-        <Ionicons name="alert-circle" size={48} color="#ef4444" />
-        <Text style={styles.errorText}>Unable to load route data</Text>
-        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-          <Text style={styles.backButtonText}>Go Back</Text>
-        </TouchableOpacity>
-      </SafeAreaView>
-    );
+    // Defensive: Don't render anything if routeData is missing, as Alert will show
+    return null;
   }
 
   const getSafetyColor = (score: number) => {
@@ -717,31 +726,13 @@ export default function RouteScreen() {
           <Ionicons name="arrow-back" size={24} color="#fff" />
           <Text style={styles.backText}>Back</Text>
         </TouchableOpacity>
-        <View style={styles.headerActions}>
-          <TouchableOpacity onPress={() => setShowRadarMap(true)} style={styles.radarBtn}>
-            <Ionicons name="radio-outline" size={18} color="#22c55e" />
-            <Text style={styles.radarBtnText}>Radar</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={speakSummary} style={styles.speakBtn}>
-            <Ionicons name={isSpeaking ? "stop-circle" : "volume-high"} size={22} color={isSpeaking ? "#ef4444" : "#60a5fa"} />
-          </TouchableOpacity>
-          <TouchableOpacity onPress={shareRoute} style={styles.shareBtn}>
-            <Ionicons name="share-outline" size={22} color="#fff" />
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* Route Stats Bar */}
-      <View style={styles.statsBar}>
-        <View style={styles.statItem}>
-          <Ionicons name="speedometer-outline" size={16} color="#60a5fa" />
-          <Text style={styles.statValue}>{routeData.total_distance_miles ? `${Math.round(routeData.total_distance_miles)} mi` : '--'}</Text>
-        </View>
-        <View style={styles.statDivider} />
-        <View style={styles.statItem}>
-          <Ionicons name="time-outline" size={16} color="#60a5fa" />
-          <Text style={styles.statValue}>{routeData.total_duration_minutes ? formatDuration(routeData.total_duration_minutes) : '--'}</Text>
-        </View>
+        <TouchableOpacity onPress={() => setShowRadarMap(true)} style={styles.radarBtn}>
+          <Ionicons name="radio-outline" size={18} color="#22c55e" />
+          <Text style={styles.radarBtnText}>Radar</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={speakSummary} style={styles.speakBtn}>
+          <Ionicons name={isSpeaking ? "stop-circle" : "volume-high"} size={22} color={isSpeaking ? "#ef4444" : "#60a5fa"} />
+        </TouchableOpacity>
       </View>
 
       {/* Radar Map Modal */}
@@ -805,72 +796,69 @@ export default function RouteScreen() {
         </TouchableOpacity>
       )}
 
-      {/* Road Condition Summary */}
-      <View style={styles.conditionSummary}>
-        <Text style={styles.conditionSummaryText}>
-          {routeData.road_condition_summary || '✅ Good road conditions expected'}
-        </Text>
-      </View>
+      {/* Boondockers Pro Section */}
+      <TouchableOpacity 
+        style={styles.boondockersProSection}
+        onPress={() => router.push('/boondockers-pro')}
+      >
+        <View style={styles.boondockersProIcon}>
+          <Ionicons name="bonfire" size={24} color="#8b4513" />
+        </View>
+        <View style={styles.boondockersProContent}>
+          <Text style={styles.boondockersProTitle}>Boondockers Pro</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={20} color="#71717a" />
+      </TouchableOpacity>
 
-      {/* Tabs */}
-      <View style={styles.tabs}>
-        <TouchableOpacity 
-          style={[styles.tab, activeTab === 'conditions' && styles.tabActive]}
-          onPress={() => setActiveTab('conditions')}
-        >
-          <Ionicons name="car" size={18} color={activeTab === 'conditions' ? '#eab308' : '#6b7280'} />
-          <Text style={[styles.tabText, activeTab === 'conditions' && styles.tabTextActive]}>Road</Text>
-        </TouchableOpacity>
+      {/* Road / Alerts Tabs */}
+      <View style={styles.tabsContainer}>
         <TouchableOpacity 
           style={[styles.tab, activeTab === 'alerts' && styles.tabActive]}
           onPress={() => setActiveTab('alerts')}
         >
-          <Ionicons name="warning" size={18} color={activeTab === 'alerts' ? '#ef4444' : '#6b7280'} />
-          <Text style={[styles.tabText, activeTab === 'alerts' && styles.tabTextActive]}>Alerts</Text>
-          {routeData.hazard_alerts?.length > 0 && (
-            <View style={styles.tabBadge}>
-              <Text style={styles.tabBadgeText}>{routeData.hazard_alerts.length}</Text>
-            </View>
-          )}
+          <Text style={[styles.tabText, activeTab === 'alerts' && styles.tabTextActive]}>
+            Weather Alerts
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={[styles.tab, activeTab === 'bridges' && styles.tabActive]}
+          onPress={() => setActiveTab('bridges')}
+        >
+          <Text style={[styles.tabText, activeTab === 'bridges' && styles.tabTextActive]}>
+            Bridge Alerts
+          </Text>
         </TouchableOpacity>
       </View>
 
-      {/* Premium Features Panel */}
-      <PremiumFeaturesPanel />
-
       {/* Content */}
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        
-        {/* Road Conditions Tab */}
-        {activeTab === 'conditions' && (
-          <View style={styles.conditionsTab}>
-            {/* Trucker Alerts Button */}
-            {routeData.trucker_warnings && routeData.trucker_warnings.length > 0 && (
-              <TouchableOpacity
-                style={styles.truckerAlertsButton}
-                onPress={() => router.push({
-                  pathname: '/truckerAlerts',
-                  params: { routeData: JSON.stringify(routeData) }
-                })}
-                activeOpacity={0.7}
-              >
-                <Text style={styles.truckerAlertsButtonIcon}>🚛</Text>
-                <View style={styles.truckerAlertsButtonContent}>
-                  <Text style={styles.truckerAlertsButtonTitle}>
-                    Trucker Alerts ({routeData.trucker_warnings.length})
-                  </Text>
-                  <Text style={styles.truckerAlertsButtonSubtitle}>
-                    Tap to view all alerts and safety tips
-                  </Text>
-                </View>
-                <Text style={styles.truckerAlertsButtonArrow}>›</Text>
-              </TouchableOpacity>
-            )}
+        {/* Trucker Alerts Button */}
+        {routeData.trucker_warnings && routeData.trucker_warnings.length > 0 && (
+          <TouchableOpacity
+            style={styles.truckerAlertsButton}
+            onPress={() => router.push({
+              pathname: '/truckerAlerts',
+              params: { routeData: JSON.stringify(routeData) }
+            })}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.truckerAlertsButtonIcon}>🚛</Text>
+            <View style={styles.truckerAlertsButtonContent}>
+              <Text style={styles.truckerAlertsButtonTitle}>
+                Trucker Alerts ({routeData.trucker_warnings.length})
+              </Text>
+              <Text style={styles.truckerAlertsButtonSubtitle}>
+                Tap to view all alerts and safety tips
+              </Text>
+            </View>
+            <Text style={styles.truckerAlertsButtonArrow}>›</Text>
+          </TouchableOpacity>
+        )}
 
-            {/* Waypoint Road Conditions */}
-            <Text style={styles.sectionTitle}>🛣️ Road Conditions Along Route</Text>
-            <Text style={styles.sectionSubtitle}>Weather-based road surface conditions</Text>
-            {routeData.waypoints.map((wp, index) => {
+        {/* Waypoint Road Conditions */}
+        <Text style={styles.sectionTitle}>🛣️ Road Conditions Along Route</Text>
+        <Text style={styles.sectionSubtitle}>Weather-based road surface conditions</Text>
+        {routeData.waypoints && Array.isArray(routeData.waypoints) && routeData.waypoints.map((wp, index) => {
               // Derive road condition from weather ONLY (no alerts shown here)
               const temp = wp.weather?.temperature || 50;
               const conditions = (wp.weather?.conditions || '').toLowerCase();
@@ -955,21 +943,20 @@ export default function RouteScreen() {
                 </View>
               );
             })}
-          </View>
-        )}
 
-        {/* Alerts Tab */}
+        {/* ALERTS TAB CONTENT */}
         {activeTab === 'alerts' && (
-          <View style={styles.alertsTab}>
+          <>
+            {/* Weather Alerts */}
             <Text style={styles.sectionTitle}>⚠️ Weather Alerts Along Route</Text>
             <Text style={styles.sectionSubtitle}>Tap any alert to see full details</Text>
+        
+        {routeData.hazard_alerts && routeData.hazard_alerts.length > 0 ? (
+          routeData.hazard_alerts.map((alert, index) => {
+            const isExpanded = expandedCards.has(index + 1000); // Use offset to differentiate from road cards
             
-            {routeData.hazard_alerts && routeData.hazard_alerts.length > 0 ? (
-              routeData.hazard_alerts.map((alert, index) => {
-                const isExpanded = expandedCards.has(index + 1000); // Use offset to differentiate from road cards
-                
-                return (
-                  <TouchableOpacity 
+            return (
+              <TouchableOpacity 
                     key={index} 
                     style={[
                       styles.alertCard,
@@ -1057,8 +1044,67 @@ export default function RouteScreen() {
                 <Text style={styles.noAlertsTitle}>All Clear!</Text>
                 <Text style={styles.noAlertsText}>No significant hazards on your route</Text>
               </View>
+          )}
+          </>
+        )}
+        
+        {/* BRIDGE ALERTS TAB CONTENT */}
+        {activeTab === 'bridges' && (
+          <>
+            <Text style={styles.sectionTitle}>🌉 Bridge Height Warnings</Text>
+            <Text style={styles.sectionSubtitle}>Low clearance bridges on your route</Text>
+        
+            {routeData.trucker_warnings && routeData.trucker_warnings.length > 0 ? (
+              routeData.trucker_warnings.map((warning, index) => {
+                const isBridgeExpanded = expandedCards.has(index + 2000); // Use different offset for bridge alerts
+                
+                return (
+                  <TouchableOpacity 
+                    key={index}
+                    style={[
+                      styles.bridgeAlertCard,
+                      isBridgeExpanded && styles.bridgeAlertCardExpanded
+                    ]}
+                    onPress={() => toggleCard(index + 2000)}
+                    activeOpacity={0.9}
+                  >
+                    <View style={styles.bridgeAlertHeader}>
+                      <View style={styles.bridgeAlertIconContainer}>
+                        <Text style={styles.bridgeAlertIcon}>🌉</Text>
+                      </View>
+                      <View style={styles.bridgeAlertInfo}>
+                        <Text style={styles.bridgeAlertTitle}>Low Clearance Bridge</Text>
+                        <Text style={styles.bridgeAlertSubtitle}>Bridge #{index + 1}</Text>
+                      </View>
+                      <Ionicons 
+                        name={isBridgeExpanded ? "chevron-up" : "chevron-down"} 
+                        size={20} 
+                        color="#eab308" 
+                      />
+                    </View>
+                    
+                    {isBridgeExpanded && (
+                      <View style={styles.bridgeAlertDetails}>
+                        <Text style={styles.bridgeAlertWarningText}>{warning}</Text>
+                        <View style={styles.bridgeAlertTip}>
+                          <Ionicons name="information-circle" size={16} color="#eab308" />
+                          <Text style={styles.bridgeAlertTipText}>
+                            Ensure your vehicle height is within safe limits before proceeding
+                          </Text>
+                        </View>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                );
+              })
+            ) : (
+              <View style={styles.noAlerts}>
+                <Ionicons name="checkmark-circle" size={64} color="#22c55e" />
+                <Text style={styles.noAlertsTitle}>All Clear!</Text>
+                <Text style={styles.noAlertsText}>No bridge height warnings on your route</Text>
+              </View>
             )}
-          </View>
+          </>
         )}
         
         <View style={styles.bottomPadding} />
@@ -1080,91 +1126,7 @@ export default function RouteScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* AI Chat Modal */}
-      {showChat && (
-        <Modal transparent animationType="slide">
-          <View style={styles.chatModalOverlay}>
-            <View style={styles.chatModalContent}>
-              <View style={styles.chatHeader}>
-                <View style={styles.chatHeaderLeft}>
-                  <Ionicons name="chatbubbles" size={24} color="#eab308" />
-                  <Text style={styles.chatTitle}>Ask Routecast AI</Text>
-                </View>
-                <TouchableOpacity onPress={() => setShowChat(false)}>
-                  <Ionicons name="close" size={24} color="#fff" />
-                </TouchableOpacity>
-              </View>
-              
-              <ScrollView style={styles.chatMessages} showsVerticalScrollIndicator={false}>
-                {chatHistory.length === 0 && (
-                  <View style={styles.chatWelcome}>
-                    <Text style={styles.chatWelcomeText}>👋 Ask about your route!</Text>
-                    <Text style={styles.chatWelcomeSubtext}>I can help with road conditions, weather, and safe driving tips.</Text>
-                  </View>
-                )}
-                
-                {chatHistory.map((msg, idx) => (
-                  <View key={idx} style={[styles.chatBubble, msg.role === 'user' ? styles.userBubble : styles.aiBubble]}>
-                    <Text style={styles.chatBubbleText}>{msg.text}</Text>
-                  </View>
-                ))}
-                
-                {chatLoading && (
-                  <View style={styles.chatTyping}>
-                    <ActivityIndicator size="small" color="#eab308" />
-                    <Text style={styles.chatTypingText}>Thinking...</Text>
-                  </View>
-                )}
-              </ScrollView>
-              
-              <View style={styles.chatSuggestions}>
-                {chatSuggestions.map((suggestion, idx) => (
-                  <TouchableOpacity 
-                    key={idx} 
-                    style={styles.chatSuggestionBtn}
-                    onPress={() => sendChatMessage(suggestion)}
-                  >
-                    <Text style={styles.chatSuggestionText}>{suggestion}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              
-              {isListening && (
-                <View style={styles.listeningIndicator}>
-                  <Text style={styles.listeningText}>🎤 Listening...</Text>
-                </View>
-              )}
-              
-              <View style={styles.chatInputRow}>
-                <TouchableOpacity style={[styles.micBtn, isListening && styles.micBtnActive]} onPress={startVoiceRecognition}>
-                  <Ionicons name={isListening ? "radio-button-on" : "mic"} size={22} color={isListening ? "#ef4444" : "#fff"} />
-                </TouchableOpacity>
-                <TextInput
-                  style={styles.chatInput}
-                  placeholder="Type or tap mic to speak..."
-                  placeholderTextColor="#6b7280"
-                  value={chatMessage}
-                  onChangeText={setChatMessage}
-                  onSubmitEditing={() => sendChatMessage()}
-                  returnKeyType="send"
-                />
-                <TouchableOpacity 
-                  style={[styles.chatSendBtn, !chatMessage.trim() && styles.chatSendBtnDisabled]}
-                  onPress={() => sendChatMessage()}
-                  disabled={!chatMessage.trim() || chatLoading}
-                >
-                  <Ionicons name="send" size={20} color="#fff" />
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </Modal>
-      )}
-
-      {/* Floating Chat Button */}
-      <TouchableOpacity style={styles.chatFab} onPress={() => setShowChat(true)}>
-        <Ionicons name="chatbubble-ellipses" size={24} color="#fff" />
-      </TouchableOpacity>
+      // ...existing code...
     </SafeAreaView>
   );
 }
@@ -1224,6 +1186,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 6,
     gap: 4,
+    minWidth: 80,
   },
   backText: {
     color: '#60a5fa',
@@ -1235,17 +1198,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
-  shareBtn: {
-    padding: 6,
-  },
-  statsBar: {
+  navBtn: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#1f1f23',
+    backgroundColor: '#2563eb',
+    borderRadius: 8,
+    marginHorizontal: 8,
     paddingVertical: 10,
-    paddingHorizontal: 16,
-    gap: 16,
+    paddingHorizontal: 12,
+    gap: 6,
+    marginBottom: 18, // Move button up
   },
   statItem: {
     flexDirection: 'row',
@@ -1278,6 +1242,8 @@ const styles = StyleSheet.create({
   },
   speakBtn: {
     padding: 6,
+    minWidth: 80,
+    alignItems: 'flex-end',
   },
   safetyBanner: {
     flexDirection: 'row',
@@ -1358,47 +1324,65 @@ const styles = StyleSheet.create({
     fontSize: 13,
     textAlign: 'center',
   },
-  tabs: {
+  boondockersProSection: {
     flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1f1f23',
     marginHorizontal: 16,
     marginTop: 12,
+    marginBottom: 8,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#8b4513',
+  },
+  boondockersProIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#fef3c7',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  boondockersProContent: {
+    flex: 1,
+  },
+  boondockersProTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
+    marginBottom: 2,
+  },
+  boondockersProDesc: {
+    fontSize: 12,
+    color: '#a1a1aa',
+  },
+  tabsContainer: {
+    flexDirection: 'row',
     backgroundColor: '#27272a',
-    borderRadius: 10,
+    marginHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 8,
+    borderRadius: 8,
     padding: 4,
   },
   tab: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
     paddingVertical: 10,
-    borderRadius: 8,
+    borderRadius: 6,
+    alignItems: 'center',
   },
   tabActive: {
-    backgroundColor: '#3f3f46',
+    backgroundColor: '#eab308',
   },
   tabText: {
-    color: '#6b7280',
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '600',
+    color: '#a1a1aa',
   },
   tabTextActive: {
-    color: '#eab308',
-  },
-  tabBadge: {
-    backgroundColor: '#ef4444',
-    borderRadius: 10,
-    minWidth: 18,
-    height: 18,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 4,
-  },
-  tabBadgeText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '700',
+    color: '#1a1a1a',
   },
   content: {
     flex: 1,
@@ -1799,8 +1783,75 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginTop: 4,
   },
+  bridgeAlertCard: {
+    backgroundColor: '#3f3f46',
+    borderRadius: 12,
+    padding: 16,
+    marginHorizontal: 16,
+    marginBottom: 12,
+    borderLeftWidth: 4,
+    borderLeftColor: '#eab308',
+  },
+  bridgeAlertCardExpanded: {
+    backgroundColor: '#27272a',
+  },
+  bridgeAlertHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  bridgeAlertIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#eab30820',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  bridgeAlertIcon: {
+    fontSize: 24,
+  },
+  bridgeAlertInfo: {
+    flex: 1,
+  },
+  bridgeAlertTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  bridgeAlertSubtitle: {
+    color: '#9ca3af',
+    fontSize: 13,
+    marginTop: 2,
+  },
+  bridgeAlertDetails: {
+    marginTop: 16,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#52525b',
+    gap: 12,
+  },
+  bridgeAlertWarningText: {
+    color: '#e5e7eb',
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  bridgeAlertTip: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: '#eab30810',
+    padding: 12,
+    borderRadius: 8,
+  },
+  bridgeAlertTipText: {
+    flex: 1,
+    color: '#fbbf24',
+    fontSize: 13,
+    lineHeight: 18,
+  },
   bottomPadding: {
-    height: 100,
+    height: Platform.OS === 'ios' ? 120 : 100,
   },
   actionBar: {
     flexDirection: 'row',
@@ -1809,6 +1860,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#27272a',
     paddingVertical: 12,
     paddingHorizontal: 16,
+    paddingBottom: Platform.OS === 'android' ? 40 : 24,
     borderTopWidth: 1,
     borderTopColor: '#3f3f46',
   },
@@ -1840,10 +1892,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#14532d',
-    paddingHorizontal: 10,
+    paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 16,
-    marginRight: 8,
     gap: 4,
   },
   radarBtnText: {

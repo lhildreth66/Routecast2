@@ -10,6 +10,9 @@ import {
   Alert,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import axios from 'axios';
+import { API_BASE } from './apiConfig';
 import PaywallModal from './components/PaywallModal';
 import { hasBoondockingPro } from './utils/entitlements';
 
@@ -42,61 +45,45 @@ export default function CampsiteIndexScreen() {
   const [isPro, setIsPro] = useState(false);
 
   useEffect(() => {
-    const checkPro = async () => {
-      const pro = await hasBoondockingPro();
-      setIsPro(pro);
-    };
-    checkPro();
+    // TESTING: Paywall disabled
+    // const checkPro = async () => {
+    //   const pro = await hasBoondockingPro();
+    //   setIsPro(pro);
+    // };
+    // checkPro();
+    setIsPro(true); // Always set to true for testing
   }, []);
 
-  const fillDemoValues = () => {
-    setWindGustMph('20');
-    setShadeScore('0.6');
-    setSlopePct('8');
-    setAccessScore('0.7');
-    setSignalScore('0.4');
-    setPassabilityScore('75');
-  };
-
   const calculateScore = async () => {
-    if (!isPro) {
-      setPremiumMessage('Upgrade to Routecast Pro to calculate Campsite Index scores.');
-      setShowPaywall(true);
-      return;
-    }
+    // TESTING: Paywall disabled
+    // if (!isPro) {
+    //   setPremiumMessage('Upgrade to Routecast Pro to calculate Campsite Index scores.');
+    //   setShowPaywall(true);
+    //   return;
+    // }
 
     setLoading(true);
+    setResult(null);
     try {
-      const response = await fetch('http://localhost:8000/api/pro/campsite-index', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          wind_gust_mph: parseFloat(windGustMph),
-          shade_score: parseFloat(shadeScore),
-          slope_pct: parseFloat(slopePct),
-          access_score: parseFloat(accessScore),
-          signal_score: parseFloat(signalScore),
-          road_passability_score: parseFloat(passabilityScore),
-          subscription_id: 'test-subscription', // For demo
-        }),
+      const response = await axios.post(`${API_BASE}/api/pro/campsite-index`, {
+        wind_gust_mph: parseFloat(windGustMph),
+        shade_score: parseFloat(shadeScore),
+        slope_pct: parseFloat(slopePct),
+        access_score: parseFloat(accessScore),
+        signal_score: parseFloat(signalScore),
+        road_passability_score: parseFloat(passabilityScore),
+        subscription_id: 'test', // TESTING: Bypass premium check
       });
 
-      if (response.status === 402) {
+      setResult(response.data);
+    } catch (error: any) {
+      console.error('Campsite index error:', error);
+      if (error?.response?.status === 402) {
         setPremiumMessage('Upgrade to Routecast Pro to calculate Campsite Index scores.');
         setShowPaywall(true);
         return;
       }
-
-      if (!response.ok) {
-        const error = await response.json();
-        Alert.alert('Error', error.detail || 'Failed to calculate campsite index');
-        return;
-      }
-
-      const data = await response.json();
-      setResult(data);
-    } catch (error) {
-      Alert.alert('Error', 'Failed to connect to server. Make sure backend is running.');
+      Alert.alert('Error', error?.response?.data?.detail || error?.message || 'Failed to calculate campsite index');
     } finally {
       setLoading(false);
     }
@@ -212,14 +199,6 @@ export default function CampsiteIndexScreen() {
           ) : (
             <Text style={styles.buttonText}>Calculate Score</Text>
           )}
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.button, styles.secondaryButton]}
-          onPress={fillDemoValues}
-          disabled={loading}
-        >
-          <Text style={styles.buttonTextSecondary}>Try Demo</Text>
         </TouchableOpacity>
       </View>
 

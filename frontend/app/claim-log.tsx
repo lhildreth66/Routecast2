@@ -159,7 +159,7 @@ export default function ClaimLogScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.title}>Generate Claim Log (Pro)</Text>
+        <Text style={styles.title}>Generate Claim Log</Text>
         <Text style={styles.subtitle}>Create an insurance-ready claim log and export as PDF.</Text>
 
         <View style={styles.card}>
