@@ -21,6 +21,9 @@ interface CampingSpot {
   elevation_ft: number;
   rating: number; // 0-5
   free: boolean;
+  phone?: string;
+  website?: string;
+  contact?: string;
 }
 
 export default function FreeCampingScreen() {
@@ -30,6 +33,7 @@ export default function FreeCampingScreen() {
   const [searchRadius, setSearchRadius] = useState('25'); // miles
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [locationLoading, setLocationLoading] = useState(false);
   const [spots, setSpots] = useState<CampingSpot[]>([]);
   const [error, setError] = useState<string>('');
   const [expandedSpots, setExpandedSpots] = useState(new Set<number>());
@@ -52,18 +56,21 @@ export default function FreeCampingScreen() {
   }, []);
 
   const useCurrentLocation = async () => {
+    setLocationLoading(true);
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
         Alert.alert('Permission Denied', 'Location permission is required to use current location.');
+        setLocationLoading(false);
         return;
       }
 
       const location = await Location.getCurrentPositionAsync({});
       setLatitude(location.coords.latitude.toFixed(4));
       setLongitude(location.coords.longitude.toFixed(4));
-      Alert.alert('Location Updated', `Using current position: ${location.coords.latitude.toFixed(4)}, ${location.coords.longitude.toFixed(4)}`);
+      setLocationLoading(false);
     } catch (err) {
+      setLocationLoading(false);
       Alert.alert('Error', 'Failed to get current location');
     }
   };
@@ -153,9 +160,19 @@ export default function FreeCampingScreen() {
             </Text>
           </View>
 
-          <TouchableOpacity onPress={useCurrentLocation} style={styles.locationButton}>
-            <Ionicons name="locate" size={18} color="#06b6d4" />
-            <Text style={styles.locationButtonText}>Use Current Location</Text>
+          <TouchableOpacity 
+            onPress={useCurrentLocation} 
+            style={styles.locationButton}
+            disabled={locationLoading}
+          >
+            {locationLoading ? (
+              <ActivityIndicator size="small" color="#06b6d4" />
+            ) : (
+              <>
+                <Ionicons name="locate" size={18} color="#06b6d4" />
+                <Text style={styles.locationButtonText}>Use Current Location</Text>
+              </>
+            )}
           </TouchableOpacity>
 
           <View style={styles.inputRow}>
@@ -316,6 +333,33 @@ export default function FreeCampingScreen() {
                         <Text style={styles.detailLabel}>🏔 Elevation:</Text>
                         <Text style={styles.detailValue}>{spot.elevation_ft.toLocaleString()} ft</Text>
                       </View>
+
+                      {spot.contact && (
+                        <View style={styles.detailSection}>
+                          <Text style={styles.detailLabel}>📞 Contact:</Text>
+                          <Text style={styles.detailValue}>{spot.contact}</Text>
+                        </View>
+                      )}
+
+                      {spot.phone && !spot.contact && (
+                        <View style={styles.detailSection}>
+                          <Text style={styles.detailLabel}>📞 Phone:</Text>
+                          <TouchableOpacity onPress={() => Linking.openURL(`tel:${spot.phone}`)}>
+                            <Text style={[styles.detailValue, { color: '#06b6d4' }]}>{spot.phone}</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
+
+                      {spot.website && (
+                        <View style={styles.detailSection}>
+                          <Text style={styles.detailLabel}>🌐 Website:</Text>
+                          <TouchableOpacity onPress={() => Linking.openURL(spot.website!)}>
+                            <Text style={[styles.detailValue, { color: '#06b6d4', textDecorationLine: 'underline' }]}>
+                              {spot.website}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
 
                       {spot.amenities.length > 0 && (
                         <View style={styles.detailSection}>

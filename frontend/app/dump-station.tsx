@@ -30,6 +30,7 @@ export default function DumpStationScreen() {
   const [searchRadius, setSearchRadius] = useState('50'); // miles - larger default for dump stations
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [locationLoading, setLocationLoading] = useState(false);
   const [stations, setStations] = useState<DumpStation[]>([]);
   const [error, setError] = useState<string>('');
   const [expandedStations, setExpandedStations] = useState(new Set<number>());
@@ -51,18 +52,21 @@ export default function DumpStationScreen() {
   }, []);
 
   const useCurrentLocation = async () => {
+    setLocationLoading(true);
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
         Alert.alert('Permission Denied', 'Location permission is required to use current location.');
+        setLocationLoading(false);
         return;
       }
 
       const location = await Location.getCurrentPositionAsync({});
       setLatitude(location.coords.latitude.toFixed(4));
       setLongitude(location.coords.longitude.toFixed(4));
-      Alert.alert('Location Updated', `Using current position: ${location.coords.latitude.toFixed(4)}, ${location.coords.longitude.toFixed(4)}`);
+      setLocationLoading(false);
     } catch (err) {
+      setLocationLoading(false);
       Alert.alert('Error', 'Failed to get current location');
     }
   };
@@ -130,9 +134,19 @@ export default function DumpStationScreen() {
             </Text>
           </View>
 
-          <TouchableOpacity onPress={useCurrentLocation} style={styles.locationButton}>
-            <Ionicons name="locate" size={18} color="#8b5cf6" />
-            <Text style={styles.locationButtonText}>Use Current Location</Text>
+          <TouchableOpacity 
+            onPress={useCurrentLocation} 
+            style={styles.locationButton}
+            disabled={locationLoading}
+          >
+            {locationLoading ? (
+              <ActivityIndicator size="small" color="#8b5cf6" />
+            ) : (
+              <>
+                <Ionicons name="locate" size={18} color="#8b5cf6" />
+                <Text style={styles.locationButtonText}>Use Current Location</Text>
+              </>
+            )}
           </TouchableOpacity>
 
           <View style={styles.inputRow}>
