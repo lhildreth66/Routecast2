@@ -3305,13 +3305,29 @@ async def search_free_camping(request: FreeCampingRequest):
         out skel qt;
         """
         
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            osm_response = await client.post(
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            # Try multiple Overpass API instances
+            overpass_urls = [
                 "https://overpass-api.de/api/interpreter",
-                data=overpass_query
-            )
-            osm_response.raise_for_status()
-            osm_data = osm_response.json()
+                "https://overpass.kumi.systems/api/interpreter",
+            ]
+            
+            osm_data = None
+            last_error = None
+            
+            for url in overpass_urls:
+                try:
+                    osm_response = await client.post(url, data=overpass_query)
+                    osm_response.raise_for_status()
+                    osm_data = osm_response.json()
+                    break
+                except Exception as e:
+                    last_error = e
+                    logger.warning(f"Free camping - Overpass instance {url} failed: {e}")
+                    continue
+            
+            if osm_data is None:
+                raise last_error or Exception("All Overpass instances failed")
         
         spots = []
         seen_coords = set()  # Avoid duplicates
@@ -3502,13 +3518,29 @@ async def search_dump_stations(request: DumpStationRequest):
         out skel qt;
         """
         
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            osm_response = await client.post(
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            # Try multiple Overpass API instances for better reliability
+            overpass_urls = [
                 "https://overpass-api.de/api/interpreter",
-                data=overpass_query
-            )
-            osm_response.raise_for_status()
-            osm_data = osm_response.json()
+                "https://overpass.kumi.systems/api/interpreter",
+            ]
+            
+            osm_data = None
+            last_error = None
+            
+            for url in overpass_urls:
+                try:
+                    osm_response = await client.post(url, data=overpass_query)
+                    osm_response.raise_for_status()
+                    osm_data = osm_response.json()
+                    break  # Success, exit loop
+                except Exception as e:
+                    last_error = e
+                    logger.warning(f"Dump stations - Overpass instance {url} failed: {e}")
+                    continue
+            
+            if osm_data is None:
+                raise last_error or Exception("All Overpass instances failed")
         
         stations = []
         seen_coords = set()
@@ -3621,62 +3653,16 @@ async def search_dump_stations(request: DumpStationRequest):
     
     except httpx.HTTPError as e:
         logger.error(f"[PREMIUM] Overpass API error for dump stations: {e}")
-        # Return mock data as fallback
-        mock_stations = [
-            DumpStation(
-                name="Sample RV Park & Dump Station",
-                type="RV Park",
-                distance_miles=5.2,
-                latitude=request.latitude + 0.05,
-                longitude=request.longitude + 0.05,
-                description="Full-service RV park with dump station and fresh water fill. Open year-round.",
-                has_potable_water=True,
-                is_free=False,
-                cost="$10",
-                hours="Open 24 hours",
-                restrictions=["RV park guests preferred"],
-                access="easy",
-                rating=4.2
-            ),
-            DumpStation(
-                name="Highway Rest Area - Dump Station",
-                type="Rest Stop",
-                distance_miles=12.8,
-                latitude=request.latitude - 0.12,
-                longitude=request.longitude + 0.08,
-                description="Public rest area with free RV dump station. No potable water available.",
-                has_potable_water=False,
-                is_free=True,
-                cost="Free",
-                hours="Open 24 hours",
-                restrictions=[],
-                access="easy",
-                rating=3.8
-            )
-        ]
-        logger.info(f"[PREMIUM] Returning {len(mock_stations)} sample dump stations due to API error")
-        return DumpStationResponse(stations=mock_stations, is_premium_locked=False)
+        raise HTTPException(
+            status_code=503,
+            detail="Dump station data service temporarily unavailable. The mapping service may be experiencing high load. Please try again in a few moments."
+        )
     except Exception as e:
         logger.error(f"[PREMIUM] Error searching dump stations: {e}")
-        # Return mock data for any error
-        mock_stations = [
-            DumpStation(
-                name="Sample RV Park & Dump Station",
-                type="RV Park",
-                distance_miles=5.2,
-                latitude=request.latitude + 0.05,
-                longitude=request.longitude + 0.05,
-                description="Full-service RV park with dump station and fresh water fill.",
-                has_potable_water=True,
-                is_free=False,
-                cost="$10",
-                hours="Open 24 hours",
-                restrictions=[],
-                access="easy",
-                rating=4.2
-            )
-        ]
-        return DumpStationResponse(stations=mock_stations, is_premium_locked=False)
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to search for dump stations. Please check your internet connection and try again."
+        )
 
 
 # ==================== Last Chance Supply Finder Endpoint ====================
@@ -3709,13 +3695,29 @@ async def search_last_chance_supplies(request: LastChanceRequest):
         out skel qt;
         """
         
-        async with httpx.AsyncClient(timeout=35.0) as client:
-            osm_response = await client.post(
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            # Try multiple Overpass API instances
+            overpass_urls = [
                 "https://overpass-api.de/api/interpreter",
-                data=overpass_query
-            )
-            osm_response.raise_for_status()
-            osm_data = osm_response.json()
+                "https://overpass.kumi.systems/api/interpreter",
+            ]
+            
+            osm_data = None
+            last_error = None
+            
+            for url in overpass_urls:
+                try:
+                    osm_response = await client.post(url, data=overpass_query)
+                    osm_response.raise_for_status()
+                    osm_data = osm_response.json()
+                    break
+                except Exception as e:
+                    last_error = e
+                    logger.warning(f"Last chance - Overpass instance {url} failed: {e}")
+                    continue
+            
+            if osm_data is None:
+                raise last_error or Exception("All Overpass instances failed")
         
         supplies = []
         seen_coords = set()
@@ -3841,69 +3843,16 @@ async def search_last_chance_supplies(request: LastChanceRequest):
     
     except httpx.HTTPError as e:
         logger.error(f"[PREMIUM] Overpass API error for last chance supplies: {e}")
-        # Return mock data as fallback
-        mock_supplies = [
-            SupplyPoint(
-                name="Walmart Supercenter",
-                type="Grocery",
-                subtype="Supermarket",
-                distance_miles=3.5,
-                latitude=request.latitude + 0.03,
-                longitude=request.longitude - 0.02,
-                description="Stock up on food, water, and essentials before heading into remote areas.",
-                hours="6:00 AM - 11:00 PM",
-                phone="(555) 123-4567",
-                amenities=["Groceries & Supplies", "Propane/LPG Refill", "Fuel", "ATM", "Restrooms"],
-                rating=4.1
-            ),
-            SupplyPoint(
-                name="Ace Hardware",
-                type="Hardware",
-                subtype="Hardware Store",
-                distance_miles=4.8,
-                latitude=request.latitude - 0.04,
-                longitude=request.longitude + 0.03,
-                description="Hardware store for emergency repairs, tools, and RV/camping supplies.",
-                hours="7:00 AM - 8:00 PM",
-                phone="(555) 234-5678",
-                amenities=["Tools & Repair Parts", "Propane/LPG Refill"],
-                rating=4.3
-            ),
-            SupplyPoint(
-                name="Shell Gas Station - Propane",
-                type="Propane",
-                subtype="Gas Station",
-                distance_miles=2.1,
-                latitude=request.latitude + 0.01,
-                longitude=request.longitude + 0.02,
-                description="Propane/LPG refill available at this location. Call ahead to confirm tank sizes and hours.",
-                hours="Open 24 hours",
-                phone="(555) 345-6789",
-                amenities=["Propane/LPG Refill", "Fuel", "Diesel", "ATM", "Restrooms"],
-                rating=3.9
-            )
-        ]
-        logger.info(f"[PREMIUM] Returning {len(mock_supplies)} sample supply points due to API error")
-        return LastChanceResponse(supplies=mock_supplies, is_premium_locked=False)
+        raise HTTPException(
+            status_code=503,
+            detail="Supply data service temporarily unavailable. The mapping service may be experiencing high load. Please try again in a few moments."
+        )
     except Exception as e:
         logger.error(f"[PREMIUM] Error searching last chance supplies: {e}")
-        # Return mock data for any error
-        mock_supplies = [
-            SupplyPoint(
-                name="Local Grocery Store",
-                type="Grocery",
-                subtype="Supermarket",
-                distance_miles=5.0,
-                latitude=request.latitude + 0.04,
-                longitude=request.longitude - 0.03,
-                description="Stock up on food, water, and essentials before heading into remote areas.",
-                hours="Call for hours",
-                phone="N/A",
-                amenities=["Groceries & Supplies"],
-                rating=3.5
-            )
-        ]
-        return LastChanceResponse(supplies=mock_supplies, is_premium_locked=False)
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to search for supply points. Please check your internet connection and try again."
+        )
 
 
 # ==================== RV Dealership Finder Endpoint ====================
@@ -3932,13 +3881,29 @@ async def search_rv_dealerships(request: RVDealershipRequest):
         out skel qt;
         """
         
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            osm_response = await client.post(
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            # Try multiple Overpass API instances
+            overpass_urls = [
                 "https://overpass-api.de/api/interpreter",
-                data=overpass_query
-            )
-            osm_response.raise_for_status()
-            osm_data = osm_response.json()
+                "https://overpass.kumi.systems/api/interpreter",
+            ]
+            
+            osm_data = None
+            last_error = None
+            
+            for url in overpass_urls:
+                try:
+                    osm_response = await client.post(url, data=overpass_query)
+                    osm_response.raise_for_status()
+                    osm_data = osm_response.json()
+                    break
+                except Exception as e:
+                    last_error = e
+                    logger.warning(f"RV dealerships - Overpass instance {url} failed: {e}")
+                    continue
+            
+            if osm_data is None:
+                raise last_error or Exception("All Overpass instances failed")
         
         dealerships = []
         seen_coords = set()
@@ -4044,56 +4009,16 @@ async def search_rv_dealerships(request: RVDealershipRequest):
     
     except httpx.HTTPError as e:
         logger.error(f"[PREMIUM] Overpass API error for RV dealerships: {e}")
-        # Return mock data as fallback
-        mock_dealerships = [
-            RVDealership(
-                name="ABC RV Sales & Service",
-                type="Dealership",
-                distance_miles=6.3,
-                latitude=request.latitude + 0.06,
-                longitude=request.longitude - 0.04,
-                description="Full-service RV dealership offering sales, parts, and repair services for all makes and models.",
-                hours="Mon-Sat 8:00 AM - 6:00 PM",
-                phone="(555) 789-0123",
-                services=["New & Used Sales", "Repair Services", "Parts Sales", "Maintenance"],
-                brands=["Winnebago", "Forest River", "Jayco"],
-                rating=4.2
-            ),
-            RVDealership(
-                name="Mobile RV Repair Center",
-                type="Service Center",
-                distance_miles=8.7,
-                latitude=request.latitude - 0.08,
-                longitude=request.longitude + 0.06,
-                description="Full-service RV repair and maintenance. Call ahead for emergency service availability.",
-                hours="Mon-Fri 7:00 AM - 5:00 PM",
-                phone="(555) 890-1234",
-                services=["Repair Services", "Maintenance", "Inspections"],
-                brands=[],
-                rating=4.5
-            )
-        ]
-        logger.info(f"[PREMIUM] Returning {len(mock_dealerships)} sample RV dealerships due to API error")
-        return RVDealershipResponse(dealerships=mock_dealerships, is_premium_locked=False)
+        raise HTTPException(
+            status_code=503,
+            detail="RV dealership data service temporarily unavailable. The mapping service may be experiencing high load. Please try again in a few moments."
+        )
     except Exception as e:
         logger.error(f"[PREMIUM] Error searching RV dealerships: {e}")
-        # Return mock data for any error
-        mock_dealerships = [
-            RVDealership(
-                name="Sample RV Center",
-                type="Dealership",
-                distance_miles=7.5,
-                latitude=request.latitude + 0.07,
-                longitude=request.longitude - 0.05,
-                description="RV dealership offering sales and service for recreational vehicles.",
-                hours="Call for hours",
-                phone="N/A",
-                services=["Call for services"],
-                brands=[],
-                rating=3.5
-            )
-        ]
-        return RVDealershipResponse(dealerships=mock_dealerships, is_premium_locked=False)
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to search for RV dealerships. Please check your internet connection and try again."
+        )
 
 
 # Add CORS middleware first, before including router
