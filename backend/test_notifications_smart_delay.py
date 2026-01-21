@@ -11,7 +11,7 @@ Table-driven parametrized tests covering:
 
 import pytest
 from datetime import datetime, timedelta, timezone
-from backend.notifications.smart_delay import (
+from notifications.smart_delay import (
     SmartDelayOptimizer,
     BestDelayResult,
     HazardType,

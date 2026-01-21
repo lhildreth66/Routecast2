@@ -8,7 +8,7 @@ import { entitlementsCache } from './entitlements';
 import type { Entitlement } from './types';
 
 // 🔓 TESTING MODE: Set to true to bypass all premium checks
-const BYPASS_PREMIUM_FOR_TESTING = true;
+const BYPASS_PREMIUM_FOR_TESTING = false;
 
 export interface GuardResult {
   allowed: boolean;
