@@ -20,7 +20,7 @@ from providers import get_providers
 from chat.camp_prep_dispatcher import dispatch as dispatch_camp_prep
 from billing import billing_verifier, VerificationRequest, VerificationResponse
 from common.premium_gate import require_premium
-from common.features import SOLAR_FORECAST, PROPANE_USAGE, WATER_BUDGET, ROAD_SIM, CAMPSITE_INDEX, CELL_STARLINK, CLAIM_LOG
+from common.features import SOLAR_FORECAST, PROPANE_USAGE, WATER_BUDGET, WIND_SHELTER, ROAD_SIM, CAMPSITE_INDEX, CELL_STARLINK, CLAIM_LOG
 from road_passability_service import RoadPassabilityService
 from solar_forecast_service import SolarForecastService
 from propane_usage_service import PropaneUsageService
@@ -548,6 +548,110 @@ class CampsiteIndexResponse(BaseModel):
 class ClaimHazardLocation(BaseModel):
     latitude: float
     longitude: float
+
+# ----- Free Camping Models -----
+class CampingSpot(BaseModel):
+    name: str
+    type: str  # 'BLM', 'National Forest', 'Bureau of Reclamation', etc.
+    distance_miles: float
+    latitude: float
+    longitude: float
+    description: str
+    amenities: List[str]
+    stay_limit: str
+    cell_coverage: str  # 'none', 'poor', 'fair', 'good'
+    access_difficulty: str  # 'easy', 'moderate', 'difficult', '4wd-required'
+    elevation_ft: int
+    rating: float  # 0-5
+    free: bool
+
+class FreeCampingRequest(BaseModel):
+    latitude: float
+    longitude: float
+    radius_miles: int
+    subscription_id: Optional[str] = None
+
+class FreeCampingResponse(BaseModel):
+    spots: List[CampingSpot]
+    is_premium_locked: bool = False
+    premium_message: Optional[str] = None
+
+# ----- Dump Station Models -----
+class DumpStation(BaseModel):
+    name: str
+    type: str  # 'RV Park', 'Rest Stop', 'Gas Station', 'Standalone'
+    distance_miles: float
+    latitude: float
+    longitude: float
+    description: str
+    has_potable_water: bool
+    is_free: bool
+    cost: str
+    hours: str
+    restrictions: List[str]
+    access: str  # 'easy', 'moderate', 'difficult'
+    rating: float
+
+class DumpStationRequest(BaseModel):
+    latitude: float
+    longitude: float
+    radius_miles: int
+    subscription_id: Optional[str] = None
+
+class DumpStationResponse(BaseModel):
+    stations: List[DumpStation]
+    is_premium_locked: bool = False
+    premium_message: Optional[str] = None
+
+# ----- Last Chance Supply Models -----
+class SupplyPoint(BaseModel):
+    name: str
+    type: str  # 'Grocery', 'Propane', 'Hardware'
+    subtype: str  # 'Supermarket', 'Gas Station', 'Hardware Store', etc.
+    distance_miles: float
+    latitude: float
+    longitude: float
+    description: str
+    hours: str
+    phone: str
+    amenities: List[str]
+    rating: float
+
+class LastChanceRequest(BaseModel):
+    latitude: float
+    longitude: float
+    radius_miles: int
+    subscription_id: Optional[str] = None
+
+class LastChanceResponse(BaseModel):
+    supplies: List[SupplyPoint]
+    is_premium_locked: bool = False
+    premium_message: Optional[str] = None
+
+# ----- RV Dealership Models -----
+class RVDealership(BaseModel):
+    name: str
+    type: str  # 'Dealership', 'Service Center', 'Parts & Accessories'
+    distance_miles: float
+    latitude: float
+    longitude: float
+    description: str
+    hours: str
+    phone: str
+    services: List[str]
+    brands: List[str]
+    rating: float
+
+class RVDealershipRequest(BaseModel):
+    latitude: float
+    longitude: float
+    radius_miles: int
+    subscription_id: Optional[str] = None
+
+class RVDealershipResponse(BaseModel):
+    dealerships: List[RVDealership]
+    is_premium_locked: bool = False
+    premium_message: Optional[str] = None
 
 
 class ClaimHazardEventModel(BaseModel):
@@ -2697,20 +2801,7 @@ async def estimate_shade_blocking(request: TerrainShadeRequest):
 async def recommend_orientation(request: WindShelterRequest):
     """Recommend RV orientation for wind shelter based on local ridges and topography."""
     # Check premium subscription
-    if not request.subscription_id:
-        logger.warning("[PREMIUM] Attempted wind shelter without subscription")
-        return WindShelterResponse(
-            is_premium_locked=True,
-            premium_message="Upgrade to Routecast Pro to optimize RV positioning against wind using local terrain."
-        )
-    
-    sub = await db.subscriptions.find_one({"_id": request.subscription_id, "status": "active"})
-    if not sub:
-        logger.warning(f"[PREMIUM] Invalid subscription {request.subscription_id}")
-        return WindShelterResponse(
-            is_premium_locked=True,
-            premium_message="Upgrade to Routecast Pro to optimize RV positioning against wind using local terrain."
-        )
+    require_premium(request.subscription_id, WIND_SHELTER)
     
     # Call pure domain service
     try:
@@ -3184,6 +3275,654 @@ async def check_notification(request: CheckNotificationRequest):
     except Exception as e:
         logger.error(f"[PREMIUM] Error checking notification: {e}")
         raise HTTPException(status_code=500, detail="Failed to check notification")
+
+
+# ==================== Free Camping Finder Endpoint ====================
+
+@api_router.post("/pro/free-camping/search", response_model=FreeCampingResponse)
+async def search_free_camping(request: FreeCampingRequest):
+    """Find free camping spots (BLM, National Forest, etc.) near given coordinates using OpenStreetMap data."""
+    require_premium(request.subscription_id, CAMPSITE_INDEX)  # Reuse campsite_index feature for now
+    
+    try:
+        # Convert miles to meters for Overpass API
+        radius_meters = int(request.radius_miles * 1609.34)
+        
+        # Query OpenStreetMap via Overpass API for camping sites
+        overpass_query = f"""
+        [out:json][timeout:25];
+        (
+          node["tourism"="camp_site"](around:{radius_meters},{request.latitude},{request.longitude});
+          node["tourism"="caravan_site"](around:{radius_meters},{request.latitude},{request.longitude});
+          way["tourism"="camp_site"](around:{radius_meters},{request.latitude},{request.longitude});
+          way["tourism"="caravan_site"](around:{radius_meters},{request.latitude},{request.longitude});
+        );
+        out body;
+        >;
+        out skel qt;
+        """
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            osm_response = await client.post(
+                "https://overpass-api.de/api/interpreter",
+                data=overpass_query
+            )
+            osm_response.raise_for_status()
+            osm_data = osm_response.json()
+        
+        spots = []
+        seen_coords = set()  # Avoid duplicates
+        
+        for element in osm_data.get("elements", []):
+            # Get coordinates
+            if element.get("type") == "node":
+                lat = element.get("lat")
+                lon = element.get("lon")
+            elif element.get("type") == "way" and "center" in element:
+                lat = element["center"].get("lat")
+                lon = element["center"].get("lon")
+            else:
+                continue
+            
+            if not lat or not lon:
+                continue
+            
+            # Avoid duplicate locations
+            coord_key = (round(lat, 4), round(lon, 4))
+            if coord_key in seen_coords:
+                continue
+            seen_coords.add(coord_key)
+            
+            # Calculate distance
+            distance_miles = math.sqrt(
+                (lat - request.latitude) ** 2 + (lon - request.longitude) ** 2
+            ) * 69.0  # Rough approximation: 1 degree ≈ 69 miles
+            
+            tags = element.get("tags", {})
+            
+            # Extract name
+            name = tags.get("name", "Unnamed Campsite")
+            
+            # Determine type
+            camp_type = "Campground"
+            if "camp_site" in tags.get("tourism", ""):
+                camp_type = "Campsite"
+            if tags.get("backcountry") == "yes":
+                camp_type = "Backcountry"
+            if "National Forest" in tags.get("operator", ""):
+                camp_type = "National Forest"
+            if "BLM" in tags.get("operator", ""):
+                camp_type = "BLM Land"
+            
+            # Extract amenities
+            amenities = []
+            if tags.get("toilets") == "yes":
+                amenities.append("Toilets")
+            if tags.get("drinking_water") == "yes":
+                amenities.append("Water")
+            if tags.get("shower") == "yes":
+                amenities.append("Showers")
+            if tags.get("electricity") == "yes":
+                amenities.append("Electricity")
+            if tags.get("tents") == "yes":
+                amenities.append("Tent Sites")
+            if tags.get("caravans") == "yes" or "caravan" in tags.get("tourism", ""):
+                amenities.append("RV Sites")
+            if not amenities:
+                amenities.append("Basic Site")
+            
+            # Determine if free
+            fee = tags.get("fee", "unknown")
+            is_free = fee == "no" or tags.get("backcountry") == "yes"
+            
+            # Estimate access difficulty
+            access = tags.get("access", "")
+            surface = tags.get("surface", "")
+            access_difficulty = "moderate"
+            if surface in ["paved", "asphalt"]:
+                access_difficulty = "easy"
+            elif "4wd" in surface.lower() or tags.get("4wd_only") == "yes":
+                access_difficulty = "4wd-required"
+            elif surface in ["gravel", "dirt"]:
+                access_difficulty = "moderate"
+            
+            # Get description
+            description = tags.get("description", f"Camping area near {name}")
+            
+            # Estimate elevation (would need elevation API for accuracy)
+            elevation_ft = int(tags.get("ele", 5000))  # Default 5000ft if unknown
+            
+            # Default rating (OSM doesn't have ratings)
+            rating = 3.5
+            
+            # Cell coverage estimate (unknown from OSM)
+            cell_coverage = "unknown"
+            
+            # Stay limit
+            stay_limit = tags.get("opening_hours", "Check local regulations")
+            if tags.get("backcountry") == "yes":
+                stay_limit = "14 days (typical)"
+            
+            spots.append(CampingSpot(
+                name=name,
+                type=camp_type,
+                distance_miles=round(distance_miles, 1),
+                latitude=lat,
+                longitude=lon,
+                description=description,
+                amenities=amenities,
+                stay_limit=stay_limit,
+                cell_coverage=cell_coverage,
+                access_difficulty=access_difficulty,
+                elevation_ft=elevation_ft,
+                rating=rating,
+                free=is_free
+            ))
+        
+        # Sort by distance
+        spots.sort(key=lambda x: x.distance_miles)
+        
+        # Limit to 20 results
+        spots = spots[:20]
+        
+        logger.info(f"[PREMIUM] Free camping search completed: found {len(spots)} spots from OSM within {request.radius_miles} miles")
+        
+        return FreeCampingResponse(
+            spots=spots,
+            is_premium_locked=False,
+        )
+    
+    except httpx.HTTPError as e:
+        logger.error(f"[PREMIUM] Overpass API error: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail="Camping data service temporarily unavailable"
+        )
+    except Exception as e:
+        logger.error(f"[PREMIUM] Error searching free camping: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to search for camping spots at this time"
+        )
+
+
+# ==================== Dump Station Finder Endpoint ====================
+
+@api_router.post("/pro/dump-stations/search", response_model=DumpStationResponse)
+async def search_dump_stations(request: DumpStationRequest):
+    """Find RV dump stations near given coordinates using OpenStreetMap data."""
+    require_premium(request.subscription_id, CAMPSITE_INDEX)  # Reuse campsite_index feature
+    
+    try:
+        # Convert miles to meters for Overpass API
+        radius_meters = int(request.radius_miles * 1609.34)
+        
+        # Query OpenStreetMap via Overpass API for dump stations
+        overpass_query = f"""
+        [out:json][timeout:25];
+        (
+          node["amenity"="sanitary_dump_station"](around:{radius_meters},{request.latitude},{request.longitude});
+          node["sanitary_dump_station"="yes"](around:{radius_meters},{request.latitude},{request.longitude});
+          way["amenity"="sanitary_dump_station"](around:{radius_meters},{request.latitude},{request.longitude});
+        );
+        out body;
+        >;
+        out skel qt;
+        """
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            osm_response = await client.post(
+                "https://overpass-api.de/api/interpreter",
+                data=overpass_query
+            )
+            osm_response.raise_for_status()
+            osm_data = osm_response.json()
+        
+        stations = []
+        seen_coords = set()
+        
+        for element in osm_data.get("elements", []):
+            # Get coordinates
+            if element.get("type") == "node":
+                lat = element.get("lat")
+                lon = element.get("lon")
+            elif element.get("type") == "way" and "center" in element:
+                lat = element["center"].get("lat")
+                lon = element["center"].get("lon")
+            else:
+                continue
+            
+            if not lat or not lon:
+                continue
+            
+            # Avoid duplicates
+            coord_key = (round(lat, 4), round(lon, 4))
+            if coord_key in seen_coords:
+                continue
+            seen_coords.add(coord_key)
+            
+            # Calculate distance
+            distance_miles = math.sqrt(
+                (lat - request.latitude) ** 2 + (lon - request.longitude) ** 2
+            ) * 69.0
+            
+            tags = element.get("tags", {})
+            
+            # Extract name
+            name = tags.get("name", tags.get("operator", "Dump Station"))
+            
+            # Determine type
+            station_type = "Standalone"
+            if "rest" in tags.get("highway", "").lower() or "rest area" in name.lower():
+                station_type = "Rest Stop"
+            elif "gas" in name.lower() or "fuel" in tags.get("amenity", "").lower():
+                station_type = "Gas Station"
+            elif "park" in tags.get("tourism", "").lower() or "rv park" in name.lower():
+                station_type = "RV Park"
+            elif tags.get("tourism") == "camp_site":
+                station_type = "Campground"
+            
+            # Check for potable water
+            has_water = tags.get("drinking_water") == "yes" or tags.get("water") == "yes"
+            
+            # Determine if free
+            fee = tags.get("fee", "unknown")
+            is_free = fee == "no"
+            cost = "Free" if is_free else tags.get("charge", "$5-10 (typical)")
+            
+            # Hours
+            hours = tags.get("opening_hours", "24/7")
+            if hours == "24/7":
+                hours = "Open 24 hours"
+            
+            # Restrictions
+            restrictions = []
+            if tags.get("access") == "customers":
+                restrictions.append("Customers only")
+            if tags.get("maxlength"):
+                restrictions.append(f"Max length: {tags.get('maxlength')}")
+            if tags.get("description") and "restriction" in tags.get("description", "").lower():
+                restrictions.append(tags.get("description"))
+            
+            # Access difficulty
+            access = "easy"
+            surface = tags.get("surface", "")
+            if surface in ["gravel", "dirt"]:
+                access = "moderate"
+            
+            # Description
+            description = tags.get("description", f"RV dump station at {name}")
+            if has_water:
+                description += " Fresh water fill also available."
+            
+            # Rating (default)
+            rating = 3.5
+            
+            stations.append(DumpStation(
+                name=name,
+                type=station_type,
+                distance_miles=round(distance_miles, 1),
+                latitude=lat,
+                longitude=lon,
+                description=description,
+                has_potable_water=has_water,
+                is_free=is_free,
+                cost=cost,
+                hours=hours,
+                restrictions=restrictions,
+                access=access,
+                rating=rating
+            ))
+        
+        # Sort by distance
+        stations.sort(key=lambda x: x.distance_miles)
+        
+        # Limit to 20 results
+        stations = stations[:20]
+        
+        logger.info(f"[PREMIUM] Dump station search completed: found {len(stations)} stations from OSM within {request.radius_miles} miles")
+        
+        return DumpStationResponse(
+            stations=stations,
+            is_premium_locked=False,
+        )
+    
+    except httpx.HTTPError as e:
+        logger.error(f"[PREMIUM] Overpass API error: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail="Dump station data service temporarily unavailable"
+        )
+    except Exception as e:
+        logger.error(f"[PREMIUM] Error searching dump stations: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to search for dump stations at this time"
+        )
+
+
+# ==================== Last Chance Supply Finder Endpoint ====================
+
+@api_router.post("/pro/last-chance/search", response_model=LastChanceResponse)
+async def search_last_chance_supplies(request: LastChanceRequest):
+    """Find grocery stores, propane refill, and hardware stores near given coordinates using OpenStreetMap data."""
+    require_premium(request.subscription_id, CAMPSITE_INDEX)  # Reuse campsite_index feature
+    
+    try:
+        # Convert miles to meters for Overpass API
+        radius_meters = int(request.radius_miles * 1609.34)
+        
+        # Query OpenStreetMap for grocery, propane, and hardware
+        overpass_query = f"""
+        [out:json][timeout:30];
+        (
+          node["shop"="supermarket"](around:{radius_meters},{request.latitude},{request.longitude});
+          node["shop"="convenience"](around:{radius_meters},{request.latitude},{request.longitude});
+          node["shop"="general"](around:{radius_meters},{request.latitude},{request.longitude});
+          node["shop"="hardware"](around:{radius_meters},{request.latitude},{request.longitude});
+          node["shop"="doityourself"](around:{radius_meters},{request.latitude},{request.longitude});
+          node["amenity"="fuel"]["fuel:lpg"="yes"](around:{radius_meters},{request.latitude},{request.longitude});
+          way["shop"="supermarket"](around:{radius_meters},{request.latitude},{request.longitude});
+          way["shop"="hardware"](around:{radius_meters},{request.latitude},{request.longitude});
+          way["amenity"="fuel"]["fuel:lpg"="yes"](around:{radius_meters},{request.latitude},{request.longitude});
+        );
+        out body;
+        >;
+        out skel qt;
+        """
+        
+        async with httpx.AsyncClient(timeout=35.0) as client:
+            osm_response = await client.post(
+                "https://overpass-api.de/api/interpreter",
+                data=overpass_query
+            )
+            osm_response.raise_for_status()
+            osm_data = osm_response.json()
+        
+        supplies = []
+        seen_coords = set()
+        
+        for element in osm_data.get("elements", []):
+            # Get coordinates
+            if element.get("type") == "node":
+                lat = element.get("lat")
+                lon = element.get("lon")
+            elif element.get("type") == "way" and "center" in element:
+                lat = element["center"].get("lat")
+                lon = element["center"].get("lon")
+            else:
+                continue
+            
+            if not lat or not lon:
+                continue
+            
+            # Avoid duplicates
+            coord_key = (round(lat, 4), round(lon, 4))
+            if coord_key in seen_coords:
+                continue
+            seen_coords.add(coord_key)
+            
+            # Calculate distance
+            distance_miles = math.sqrt(
+                (lat - request.latitude) ** 2 + (lon - request.longitude) ** 2
+            ) * 69.0
+            
+            tags = element.get("tags", {})
+            
+            # Extract name
+            name = tags.get("name", tags.get("brand", "Unnamed Store"))
+            
+            # Determine type and subtype
+            shop_type = tags.get("shop", "")
+            amenity = tags.get("amenity", "")
+            
+            supply_type = "Grocery"
+            subtype = "Store"
+            
+            if shop_type == "supermarket":
+                supply_type = "Grocery"
+                subtype = "Supermarket"
+            elif shop_type == "convenience":
+                supply_type = "Grocery"
+                subtype = "Convenience Store"
+            elif shop_type == "general":
+                supply_type = "Grocery"
+                subtype = "General Store"
+            elif shop_type in ["hardware", "doityourself"]:
+                supply_type = "Hardware"
+                subtype = "Hardware Store" if shop_type == "hardware" else "Home Improvement"
+            elif amenity == "fuel" and tags.get("fuel:lpg") == "yes":
+                supply_type = "Propane"
+                subtype = "Gas Station"
+                if "Propane" not in name and "LPG" not in name:
+                    name = f"{name} (Propane Available)"
+            
+            # Extract amenities
+            amenities = []
+            if tags.get("fuel:lpg") == "yes":
+                amenities.append("Propane/LPG Refill")
+            if tags.get("atm") == "yes":
+                amenities.append("ATM")
+            if tags.get("fuel:diesel") == "yes":
+                amenities.append("Diesel")
+            if tags.get("fuel") == "yes" or amenity == "fuel":
+                amenities.append("Fuel")
+            if tags.get("toilets") == "yes":
+                amenities.append("Restrooms")
+            if tags.get("wifi") == "yes":
+                amenities.append("WiFi")
+            if supply_type == "Grocery" and not amenities:
+                amenities.append("Groceries & Supplies")
+            if supply_type == "Hardware" and not amenities:
+                amenities.append("Tools & Repair Parts")
+            
+            # Hours
+            hours = tags.get("opening_hours", "Call for hours")
+            
+            # Phone
+            phone = tags.get("phone", tags.get("contact:phone", "N/A"))
+            
+            # Description
+            description = tags.get("description", f"{subtype} offering essential supplies")
+            if supply_type == "Propane":
+                description = f"Propane/LPG refill available at this location. Call ahead to confirm tank sizes and hours."
+            elif supply_type == "Hardware":
+                description = f"Hardware store for emergency repairs, tools, and RV/camping supplies."
+            elif supply_type == "Grocery":
+                description = f"Stock up on food, water, and essentials before heading into remote areas."
+            
+            # Rating (default)
+            rating = 3.8
+            
+            supplies.append(SupplyPoint(
+                name=name,
+                type=supply_type,
+                subtype=subtype,
+                distance_miles=round(distance_miles, 1),
+                latitude=lat,
+                longitude=lon,
+                description=description,
+                hours=hours,
+                phone=phone,
+                amenities=amenities,
+                rating=rating
+            ))
+        
+        # Sort by distance
+        supplies.sort(key=lambda x: x.distance_miles)
+        
+        # Limit to 30 results
+        supplies = supplies[:30]
+        
+        logger.info(f"[PREMIUM] Last chance supply search completed: found {len(supplies)} locations from OSM within {request.radius_miles} miles")
+        
+        return LastChanceResponse(
+            supplies=supplies,
+            is_premium_locked=False,
+        )
+    
+    except httpx.HTTPError as e:
+        logger.error(f"[PREMIUM] Overpass API error: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail="Supply data service temporarily unavailable"
+        )
+    except Exception as e:
+        logger.error(f"[PREMIUM] Error searching last chance supplies: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to search for supply points at this time"
+        )
+
+
+# ==================== RV Dealership Finder Endpoint ====================
+
+@api_router.post("/pro/rv-dealerships/search", response_model=RVDealershipResponse)
+async def search_rv_dealerships(request: RVDealershipRequest):
+    """Find RV dealerships, service centers, and parts stores near given coordinates using OpenStreetMap data."""
+    require_premium(request.subscription_id, CAMPSITE_INDEX)  # Reuse campsite_index feature
+    
+    try:
+        # Convert miles to meters for Overpass API
+        radius_meters = int(request.radius_miles * 1609.34)
+        
+        # Query OpenStreetMap for RV dealerships and services
+        overpass_query = f"""
+        [out:json][timeout:25];
+        (
+          node["shop"="car"]["car"~"rv|motorhome|caravan"](around:{radius_meters},{request.latitude},{request.longitude});
+          node["shop"="caravan"](around:{radius_meters},{request.latitude},{request.longitude});
+          node["amenity"="car_repair"]["service:vehicle:motorhome"="yes"](around:{radius_meters},{request.latitude},{request.longitude});
+          way["shop"="car"]["car"~"rv|motorhome|caravan"](around:{radius_meters},{request.latitude},{request.longitude});
+          way["shop"="caravan"](around:{radius_meters},{request.latitude},{request.longitude});
+        );
+        out body;
+        >;
+        out skel qt;
+        """
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            osm_response = await client.post(
+                "https://overpass-api.de/api/interpreter",
+                data=overpass_query
+            )
+            osm_response.raise_for_status()
+            osm_data = osm_response.json()
+        
+        dealerships = []
+        seen_coords = set()
+        
+        for element in osm_data.get("elements", []):
+            # Get coordinates
+            if element.get("type") == "node":
+                lat = element.get("lat")
+                lon = element.get("lon")
+            elif element.get("type") == "way" and "center" in element:
+                lat = element["center"].get("lat")
+                lon = element["center"].get("lon")
+            else:
+                continue
+            
+            if not lat or not lon:
+                continue
+            
+            # Avoid duplicates
+            coord_key = (round(lat, 4), round(lon, 4))
+            if coord_key in seen_coords:
+                continue
+            seen_coords.add(coord_key)
+            
+            # Calculate distance
+            distance_miles = math.sqrt(
+                (lat - request.latitude) ** 2 + (lon - request.longitude) ** 2
+            ) * 69.0
+            
+            tags = element.get("tags", {})
+            
+            # Extract name
+            name = tags.get("name", tags.get("brand", "RV Dealership"))
+            
+            # Determine type
+            dealership_type = "Dealership"
+            if tags.get("amenity") == "car_repair" or "repair" in tags.get("service", "").lower():
+                dealership_type = "Service Center"
+            elif "parts" in name.lower() or "accessories" in name.lower():
+                dealership_type = "Parts & Accessories"
+            
+            # Extract services
+            services = []
+            if tags.get("service:vehicle:repair") == "yes":
+                services.append("Repair Services")
+            if tags.get("service:vehicle:parts") == "yes":
+                services.append("Parts Sales")
+            if tags.get("service:vehicle:sales") == "yes" or dealership_type == "Dealership":
+                services.append("New & Used Sales")
+            if tags.get("service:vehicle:maintenance") == "yes":
+                services.append("Maintenance")
+            if tags.get("service:vehicle:inspection") == "yes":
+                services.append("Inspections")
+            if not services:
+                services.append("Call for services")
+            
+            # Extract brands (if available)
+            brands = []
+            brand_tag = tags.get("brand", "")
+            if brand_tag:
+                brands.append(brand_tag)
+            
+            # Hours
+            hours = tags.get("opening_hours", "Call for hours")
+            
+            # Phone
+            phone = tags.get("phone", tags.get("contact:phone", "N/A"))
+            
+            # Description
+            description = tags.get("description", f"RV {dealership_type.lower()} offering sales and service for recreational vehicles.")
+            if dealership_type == "Service Center":
+                description = "Full-service RV repair and maintenance. Call ahead for emergency service availability."
+            
+            # Rating (default)
+            rating = 3.7
+            
+            dealerships.append(RVDealership(
+                name=name,
+                type=dealership_type,
+                distance_miles=round(distance_miles, 1),
+                latitude=lat,
+                longitude=lon,
+                description=description,
+                hours=hours,
+                phone=phone,
+                services=services,
+                brands=brands,
+                rating=rating
+            ))
+        
+        # Sort by distance
+        dealerships.sort(key=lambda x: x.distance_miles)
+        
+        # Limit to 10 results (only looking within 10 miles anyway)
+        dealerships = dealerships[:10]
+        
+        logger.info(f"[PREMIUM] RV dealership search completed: found {len(dealerships)} dealerships from OSM within {request.radius_miles} miles")
+        
+        return RVDealershipResponse(
+            dealerships=dealerships,
+            is_premium_locked=False,
+        )
+    
+    except httpx.HTTPError as e:
+        logger.error(f"[PREMIUM] Overpass API error: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail="RV dealership data service temporarily unavailable"
+        )
+    except Exception as e:
+        logger.error(f"[PREMIUM] Error searching RV dealerships: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Unable to search for RV dealerships at this time"
+        )
 
 
 # Add CORS middleware first, before including router

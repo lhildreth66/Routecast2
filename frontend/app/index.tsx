@@ -14,7 +14,9 @@ import {
   Modal,
   Alert,
   Linking,
+  Animated,
 } from 'react-native';
+import * as Calendar from 'expo-calendar';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
@@ -57,6 +59,15 @@ interface AutocompleteSuggestion {
   coordinates: number[];
 }
 
+interface CalendarTrip {
+  id: string;
+  title: string;
+  startDate: Date;
+  endDate: Date;
+  location?: string;
+  parsedDestination?: string;
+}
+
 export default function HomeScreen() {
   const [origin, setOrigin] = useState('');
   const [destination, setDestination] = useState('');
@@ -95,6 +106,18 @@ export default function HomeScreen() {
   
   // Boondockers Pro Chat
   const [showCampPrep, setShowCampPrep] = useState(false);
+  
+  // Calendar integration
+  const [calendarTrips, setCalendarTrips] = useState<CalendarTrip[]>([]);
+  const [calendarPermission, setCalendarPermission] = useState(false);
+  
+  // Animations
+  const fadeAnim = React.useRef(new Animated.Value(0)).current;
+  const scaleAnim = React.useRef(new Animated.Value(1)).current;
+  
+  // Input focus states
+  const [originFocused, setOriginFocused] = useState(false);
+  const [destFocused, setDestFocused] = useState(false);
 
   // Navigation to dedicated Road Passability screen (Pro)
   
@@ -122,6 +145,14 @@ export default function HomeScreen() {
     fetchFavoriteRoutes();
     loadCachedRoute();
     loadPushToken();
+    requestCalendarPermission();
+    
+    // Fade in animation on mount
+    Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 500,
+      useNativeDriver: true,
+    }).start();
   }, []);
 
   // Reset favorite indicator when route changes
@@ -155,6 +186,81 @@ export default function HomeScreen() {
     } catch (e) {
       console.log('No cached route');
     }
+  };
+
+  // Calendar integration functions
+  const requestCalendarPermission = async () => {
+    try {
+      const { status } = await Calendar.requestCalendarPermissionsAsync();
+      if (status === 'granted') {
+        setCalendarPermission(true);
+        fetchUpcomingTrips();
+      }
+    } catch (error) {
+      console.log('Calendar permission error:', error);
+    }
+  };
+
+  const fetchUpcomingTrips = async () => {
+    try {
+      const calendars = await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT);
+      if (calendars.length === 0) return;
+
+      const now = new Date();
+      const futureDate = new Date();
+      futureDate.setDate(futureDate.getDate() + 30); // Next 30 days
+
+      const events = await Calendar.getEventsAsync(
+        calendars.map(c => c.id),
+        now,
+        futureDate
+      );
+
+      // Parse events for travel-related keywords
+      const tripKeywords = ['trip', 'travel', 'vacation', 'visit', 'camping', 'rv', 'road trip', 'drive to', 'flying to'];
+      const trips: CalendarTrip[] = events
+        .filter(event => {
+          const titleLower = event.title.toLowerCase();
+          return tripKeywords.some(keyword => titleLower.includes(keyword));
+        })
+        .map(event => {
+          // Try to extract destination from title
+          const destination = parseDestinationFromTitle(event.title);
+          return {
+            id: event.id,
+            title: event.title,
+            startDate: new Date(event.startDate),
+            endDate: new Date(event.endDate),
+            location: event.location,
+            parsedDestination: destination,
+          };
+        })
+        .slice(0, 3); // Show only first 3
+
+      setCalendarTrips(trips);
+    } catch (error) {
+      console.log('Error fetching calendar events:', error);
+    }
+  };
+
+  const parseDestinationFromTitle = (title: string): string | undefined => {
+    // Simple parsing: look for "to [Place]" or "[Place] Trip"
+    const toMatch = title.match(/to\s+([A-Z][a-zA-Z\s,]+)/);
+    if (toMatch) return toMatch[1].trim();
+    
+    const inMatch = title.match(/in\s+([A-Z][a-zA-Z\s,]+)/);
+    if (inMatch) return inMatch[1].trim();
+    
+    return undefined;
+  };
+
+  const useCalendarTrip = (trip: CalendarTrip) => {
+    if (trip.parsedDestination) {
+      setDestination(trip.parsedDestination);
+    } else if (trip.location) {
+      setDestination(trip.location);
+    }
+    // Destination is set, user can fill origin manually
   };
 
   // Debounced autocomplete function
@@ -708,8 +814,42 @@ export default function HomeScreen() {
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
+            {/* Upcoming Trips from Calendar */}
+            {calendarTrips.length > 0 && (
+              <Animated.View style={[styles.calendarSection, { opacity: fadeAnim }]}>
+                <View style={styles.calendarHeader}>
+                  <Ionicons name="calendar" size={20} color="#3b82f6" />
+                  <Text style={styles.calendarTitle}>Upcoming Trips</Text>
+                </View>
+                {calendarTrips.map((trip) => (
+                  <TouchableOpacity
+                    key={trip.id}
+                    style={styles.calendarCard}
+                    onPress={() => useCalendarTrip(trip)}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.calendarCardLeft}>
+                      <Text style={styles.calendarCardTitle}>{trip.title}</Text>
+                      <Text style={styles.calendarCardDate}>
+                        {format(trip.startDate, 'MMM d, yyyy')}
+                      </Text>
+                      {trip.parsedDestination && (
+                        <Text style={styles.calendarCardLocation}>
+                          📍 {trip.parsedDestination}
+                        </Text>
+                      )}
+                    </View>
+                    <View style={styles.calendarCardRight}>
+                      <Ionicons name="arrow-forward-circle" size={28} color="#3b82f6" />
+                      <Text style={styles.calendarCardAction}>Check Weather</Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </Animated.View>
+            )}
+
             {/* Main Card */}
-            <View style={styles.mainCard}>
+            <Animated.View style={[styles.mainCard, { opacity: fadeAnim }]}>
               {/* Header */}
               <View style={styles.header}>
                 <View style={styles.iconContainer}>
@@ -743,7 +883,7 @@ export default function HomeScreen() {
               {/* Origin Input */}
               <View style={styles.inputSection}>
                 <Text style={styles.inputLabel}>ORIGIN</Text>
-                <View style={styles.inputWrapper}>
+                <View style={[styles.inputWrapper, originFocused && styles.inputWrapperFocused]}>
                   <View style={styles.originIcon}>
                     <Ionicons name="location" size={20} color="#22c55e" />
                   </View>
@@ -753,8 +893,14 @@ export default function HomeScreen() {
                     placeholderTextColor="#6b7280"
                     value={origin}
                     onChangeText={handleOriginChange}
-                    onFocus={() => origin.length >= 2 && setShowOriginSuggestions(originSuggestions.length > 0)}
-                    onBlur={() => setTimeout(() => setShowOriginSuggestions(false), 200)}
+                    onFocus={() => {
+                      setOriginFocused(true);
+                      origin.length >= 2 && setShowOriginSuggestions(originSuggestions.length > 0);
+                    }}
+                    onBlur={() => {
+                      setOriginFocused(false);
+                      setTimeout(() => setShowOriginSuggestions(false), 200);
+                    }}
                     returnKeyType="next"
                   />
                   {autocompleteLoading && origin.length >= 2 && (
@@ -824,7 +970,7 @@ export default function HomeScreen() {
               {/* Destination Input */}
               <View style={styles.inputSection}>
                 <Text style={styles.inputLabel}>DESTINATION</Text>
-                <View style={styles.inputWrapper}>
+                <View style={[styles.inputWrapper, destFocused && styles.inputWrapperFocused]}>
                   <View style={styles.destinationIcon}>
                     <Ionicons name="navigate" size={20} color="#ef4444" />
                   </View>
@@ -834,8 +980,14 @@ export default function HomeScreen() {
                     placeholderTextColor="#6b7280"
                     value={destination}
                     onChangeText={handleDestinationChange}
-                    onFocus={() => destination.length >= 2 && setShowDestSuggestions(destSuggestions.length > 0)}
-                    onBlur={() => setTimeout(() => setShowDestSuggestions(false), 200)}
+                    onFocus={() => {
+                      setDestFocused(true);
+                      destination.length >= 2 && setShowDestSuggestions(destSuggestions.length > 0);
+                    }}
+                    onBlur={() => {
+                      setDestFocused(false);
+                      setTimeout(() => setShowDestSuggestions(false), 200);
+                    }}
                     returnKeyType="done"
                     onSubmitEditing={handleGetWeather}
                   />
@@ -973,41 +1125,6 @@ export default function HomeScreen() {
                 </View>
               )}
 
-              {/* Weather Alerts Toggle */}
-              <View style={styles.alertsToggle}>
-                <View style={styles.alertsLeft}>
-                  <Ionicons name="notifications-outline" size={22} color="#eab308" />
-                  <Text style={styles.alertsText}>Push Weather Alerts</Text>
-                </View>
-                <Switch
-                  value={alertsEnabled}
-                  onValueChange={handleAlertsToggle}
-                  trackColor={{ false: '#3f3f46', true: '#eab30880' }}
-                  thumbColor={alertsEnabled ? '#eab308' : '#71717a'}
-                />
-              </View>
-
-              {/* Test Notification Button */}
-              {alertsEnabled && (
-                <TouchableOpacity
-                  style={[styles.testButton, testNotificationLoading && styles.buttonDisabled]}
-                  onPress={handleTestNotification}
-                  disabled={testNotificationLoading}
-                >
-                  <Ionicons name="notifications" size={18} color="#eab308" />
-                  <Text style={styles.testButtonText}>
-                    {testNotificationLoading ? 'Sending...' : 'Send Test Alert'}
-                  </Text>
-                </TouchableOpacity>
-              )}
-
-              {/* Notification Status Message */}
-              {testNotificationMessage && (
-                <View style={styles.notificationStatusContainer}>
-                  <Text style={styles.notificationStatusText}>{testNotificationMessage}</Text>
-                </View>
-              )}
-
               {/* Error Message */}
               {error ? (
                 <View style={styles.errorContainer}>
@@ -1032,7 +1149,7 @@ export default function HomeScreen() {
                   </>
                 )}
               </TouchableOpacity>
-            </View>
+            </Animated.View>
 
             {/* Tabs for Recent/Favorites */}
             <View style={styles.tabsContainer}>
@@ -1397,9 +1514,14 @@ const styles = StyleSheet.create({
   },
   mainCard: {
     backgroundColor: '#27272a',
-    borderRadius: 16,
-    padding: 18,
+    borderRadius: 20,
+    padding: 20,
     marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 8,
   },
   header: {
     flexDirection: 'row',
@@ -1459,10 +1581,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#3f3f46',
-    borderRadius: 10,
-    borderWidth: 1,
+    borderRadius: 12,
+    borderWidth: 2,
     borderColor: '#52525b',
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
+    shadowColor: '#3b82f6',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0,
+    shadowRadius: 8,
+    elevation: 0,
+  },
+  inputWrapperFocused: {
+    borderColor: '#3b82f6',
+    shadowOpacity: 0.3,
+    elevation: 4,
   },
   originIcon: {
     marginRight: 10,
@@ -1607,12 +1739,18 @@ const styles = StyleSheet.create({
   },
   button: {
     backgroundColor: '#eab308',
-    borderRadius: 10,
-    paddingVertical: 14,
+    borderRadius: 14,
+    paddingVertical: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
+    shadowColor: '#eab308',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 6,
+    minHeight: 52,
   },
   buttonDisabled: {
     opacity: 0.7,
@@ -2231,5 +2369,62 @@ const styles = StyleSheet.create({
   },
   chatSendBtnDisabled: {
     backgroundColor: '#3f3f46',
+  },
+  calendarSection: {
+    marginBottom: 16,
+  },
+  calendarHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  calendarTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#e5e7eb',
+  },
+  calendarCard: {
+    backgroundColor: '#1e293b',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderLeftWidth: 4,
+    borderLeftColor: '#3b82f6',
+    shadowColor: '#3b82f6',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  calendarCardLeft: {
+    flex: 1,
+  },
+  calendarCardTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#e5e7eb',
+    marginBottom: 4,
+  },
+  calendarCardDate: {
+    fontSize: 12,
+    color: '#94a3b8',
+    marginBottom: 4,
+  },
+  calendarCardLocation: {
+    fontSize: 12,
+    color: '#60a5fa',
+  },
+  calendarCardRight: {
+    alignItems: 'center',
+    gap: 4,
+  },
+  calendarCardAction: {
+    fontSize: 10,
+    color: '#60a5fa',
+    fontWeight: '600',
   },
 });

@@ -10,6 +10,7 @@ SOLAR_FORECAST = "solar_forecast"
 BATTERY_SOC = "battery_soc"
 PROPANE_USAGE = "propane_usage"
 WATER_BUDGET = "water_budget"
+WIND_SHELTER = "wind_shelter"
 ROAD_SIM = "road_sim"
 CAMPSITE_INDEX = "campsite_index"
 CELL_STARLINK = "cell_starlink"
@@ -23,6 +24,7 @@ PREMIUM_FEATURES = {
     BATTERY_SOC,
     PROPANE_USAGE,
     WATER_BUDGET,
+    WIND_SHELTER,
     ROAD_SIM,
     CAMPSITE_INDEX,
     CELL_STARLINK,

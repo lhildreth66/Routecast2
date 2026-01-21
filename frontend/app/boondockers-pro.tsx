@@ -8,12 +8,14 @@ export default function BoondockersProScreen() {
 
   const features = [
     { id: 'checklist', icon: 'list', title: 'Camp Prep Checklist', route: '/camp-prep-checklist' },
+    { id: 'camping', icon: 'bonfire', title: 'Free Camping Finder', route: '/free-camping' },
+    { id: 'dump', icon: 'water-outline', title: 'Dump Station Finder', route: '/dump-station' },
+    { id: 'supplies', icon: 'cart', title: 'Last Chance Supplies', route: '/last-chance' },
+    { id: 'dealership', icon: 'car-sport', title: 'RV Dealerships', route: '/rv-dealership' },
     { id: 'power', icon: 'flash', title: 'Solar Forecast', route: '/solar-forecast' },
     { id: 'propane', icon: 'flame', title: 'Propane Usage', route: '/propane-usage' },
     { id: 'water', icon: 'water', title: 'Water Planning', route: '/water-budget' },
-    { id: 'shade', icon: 'sunny', title: 'Terrain Shade', route: '/terrain-shade' },
     { id: 'wind', icon: 'leaf', title: 'Wind Shelter', route: '/wind-shelter' },
-    { id: 'road', icon: 'car-sport', title: 'Road Passability', route: '/road-passability' },
     { id: 'connectivity', icon: 'wifi', title: 'Connectivity', route: '/connectivity' },
     { id: 'index', icon: 'analytics', title: 'Campsite Index', route: '/campsite-index' },
   ];
