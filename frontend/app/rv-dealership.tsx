@@ -19,6 +19,8 @@ interface RVDealership {
   services: string[];
   brands: string[];
   rating: number;
+  address?: string;
+  website?: string;
 }
 
 export default function RVDealershipScreen() {
@@ -248,11 +250,29 @@ export default function RVDealershipScreen() {
                         <Text style={styles.detailValue}>{dealership.hours}</Text>
                       </View>
 
+                      {dealership.address && (
+                        <View style={styles.detailSection}>
+                          <Text style={styles.detailLabel}>📍 Address:</Text>
+                          <Text style={styles.detailValue}>{dealership.address}</Text>
+                        </View>
+                      )}
+
                       {dealership.phone !== 'N/A' && (
                         <View style={styles.detailSection}>
                           <Text style={styles.detailLabel}>📞 Phone:</Text>
                           <TouchableOpacity onPress={() => callPhone(dealership.phone)}>
                             <Text style={[styles.detailValue, { color: '#06b6d4' }]}>{dealership.phone}</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
+
+                      {dealership.website && (
+                        <View style={styles.detailSection}>
+                          <Text style={styles.detailLabel}>🌐 Website:</Text>
+                          <TouchableOpacity onPress={() => Linking.openURL(dealership.website!)}>
+                            <Text style={[styles.detailValue, { color: '#06b6d4', textDecorationLine: 'underline' }]}>
+                              {dealership.website}
+                            </Text>
                           </TouchableOpacity>
                         </View>
                       )}

@@ -19,6 +19,8 @@ interface SupplyPoint {
   phone: string;
   amenities: string[];
   rating: number;
+  address?: string;
+  website?: string;
 }
 
 export default function LastChanceScreen() {
@@ -324,11 +326,29 @@ export default function LastChanceScreen() {
                         <Text style={styles.detailValue}>{supply.hours}</Text>
                       </View>
 
+                      {supply.address && (
+                        <View style={styles.detailSection}>
+                          <Text style={styles.detailLabel}>📍 Address:</Text>
+                          <Text style={styles.detailValue}>{supply.address}</Text>
+                        </View>
+                      )}
+
                       {supply.phone !== 'N/A' && (
                         <View style={styles.detailSection}>
                           <Text style={styles.detailLabel}>📞 Phone:</Text>
                           <TouchableOpacity onPress={() => callPhone(supply.phone)}>
                             <Text style={[styles.detailValue, { color: '#06b6d4' }]}>{supply.phone}</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
+
+                      {supply.website && (
+                        <View style={styles.detailSection}>
+                          <Text style={styles.detailLabel}>🌐 Website:</Text>
+                          <TouchableOpacity onPress={() => Linking.openURL(supply.website!)}>
+                            <Text style={[styles.detailValue, { color: '#06b6d4', textDecorationLine: 'underline' }]}>
+                              {supply.website}
+                            </Text>
                           </TouchableOpacity>
                         </View>
                       )}

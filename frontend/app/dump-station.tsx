@@ -21,6 +21,9 @@ interface DumpStation {
   restrictions: string[];
   access: string; // 'easy', 'moderate', 'difficult'
   rating: number;
+  address?: string;
+  website?: string;
+  phone?: string;
 }
 
 export default function DumpStationScreen() {
@@ -290,6 +293,33 @@ export default function DumpStationScreen() {
                         <Text style={styles.detailLabel}>💧 Potable Water:</Text>
                         <Text style={styles.detailValue}>{station.has_potable_water ? 'Yes - Fresh water fill available' : 'No'}</Text>
                       </View>
+
+                      {station.address && (
+                        <View style={styles.detailSection}>
+                          <Text style={styles.detailLabel}>📍 Address:</Text>
+                          <Text style={styles.detailValue}>{station.address}</Text>
+                        </View>
+                      )}
+
+                      {station.phone && (
+                        <View style={styles.detailSection}>
+                          <Text style={styles.detailLabel}>📞 Phone:</Text>
+                          <TouchableOpacity onPress={() => Linking.openURL(`tel:${station.phone}`)}>
+                            <Text style={[styles.detailValue, { color: '#06b6d4' }]}>{station.phone}</Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
+
+                      {station.website && (
+                        <View style={styles.detailSection}>
+                          <Text style={styles.detailLabel}>🌐 Website:</Text>
+                          <TouchableOpacity onPress={() => Linking.openURL(station.website!)}>
+                            <Text style={[styles.detailValue, { color: '#06b6d4', textDecorationLine: 'underline' }]}>
+                              {station.website}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      )}
 
                       {station.restrictions.length > 0 && (
                         <View style={styles.detailSection}>

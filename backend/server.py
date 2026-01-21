@@ -594,6 +594,9 @@ class DumpStation(BaseModel):
     restrictions: List[str]
     access: str  # 'easy', 'moderate', 'difficult'
     rating: float
+    address: Optional[str] = None
+    website: Optional[str] = None
+    phone: Optional[str] = None
 
 class DumpStationRequest(BaseModel):
     latitude: float
@@ -619,6 +622,8 @@ class SupplyPoint(BaseModel):
     phone: str
     amenities: List[str]
     rating: float
+    address: Optional[str] = None
+    website: Optional[str] = None
 
 class LastChanceRequest(BaseModel):
     latitude: float
@@ -644,6 +649,8 @@ class RVDealership(BaseModel):
     services: List[str]
     brands: List[str]
     rating: float
+    address: Optional[str] = None
+    website: Optional[str] = None
 
 class RVDealershipRequest(BaseModel):
     latitude: float
@@ -3619,6 +3626,24 @@ async def search_dump_stations(request: DumpStationRequest):
             if has_water:
                 description += " Fresh water fill also available."
             
+            # Extract contact information
+            phone = tags.get("phone") or tags.get("contact:phone")
+            website = tags.get("website") or tags.get("contact:website") or tags.get("url")
+            
+            # Extract address
+            address_parts = []
+            if tags.get("addr:housenumber") and tags.get("addr:street"):
+                address_parts.append(f"{tags.get('addr:housenumber')} {tags.get('addr:street')}")
+            elif tags.get("addr:street"):
+                address_parts.append(tags.get("addr:street"))
+            if tags.get("addr:city"):
+                address_parts.append(tags.get("addr:city"))
+            if tags.get("addr:state"):
+                address_parts.append(tags.get("addr:state"))
+            if tags.get("addr:postcode"):
+                address_parts.append(tags.get("addr:postcode"))
+            address = ", ".join(address_parts) if address_parts else None
+            
             # Rating (default)
             rating = 3.5
             
@@ -3635,7 +3660,10 @@ async def search_dump_stations(request: DumpStationRequest):
                 hours=hours,
                 restrictions=restrictions,
                 access=access,
-                rating=rating
+                rating=rating,
+                address=address,
+                website=website,
+                phone=phone
             ))
         
         # Sort by distance
@@ -3749,10 +3777,7 @@ async def search_last_chance_supplies(request: LastChanceRequest):
             
             tags = element.get("tags", {})
             
-            # Extract name
-            name = tags.get("name", tags.get("brand", "Unnamed Store"))
-            
-            # Determine type and subtype
+            # Determine type and subtype first (needed for name fallback)
             shop_type = tags.get("shop", "")
             amenity = tags.get("amenity", "")
             
@@ -3774,8 +3799,24 @@ async def search_last_chance_supplies(request: LastChanceRequest):
             elif amenity == "fuel" and tags.get("fuel:lpg") == "yes":
                 supply_type = "Propane"
                 subtype = "Gas Station"
-                if "Propane" not in name and "LPG" not in name:
-                    name = f"{name} (Propane Available)"
+            
+            # Extract name with better fallbacks
+            name = tags.get("name") or tags.get("brand")
+            if not name:
+                # Use operator if available
+                operator = tags.get("operator", "")
+                if operator:
+                    name = operator
+                else:
+                    # Use descriptive type-based name
+                    if subtype:
+                        name = f"{subtype}"
+                    else:
+                        name = f"{supply_type} Store"
+            
+            # Add propane indicator if applicable
+            if supply_type == "Propane" and "Propane" not in name and "LPG" not in name:
+                name = f"{name} (Propane Available)"
             
             # Extract amenities
             amenities = []
@@ -3802,6 +3843,23 @@ async def search_last_chance_supplies(request: LastChanceRequest):
             # Phone
             phone = tags.get("phone", tags.get("contact:phone", "N/A"))
             
+            # Website
+            website = tags.get("website") or tags.get("contact:website") or tags.get("url")
+            
+            # Extract address
+            address_parts = []
+            if tags.get("addr:housenumber") and tags.get("addr:street"):
+                address_parts.append(f"{tags.get('addr:housenumber')} {tags.get('addr:street')}")
+            elif tags.get("addr:street"):
+                address_parts.append(tags.get("addr:street"))
+            if tags.get("addr:city"):
+                address_parts.append(tags.get("addr:city"))
+            if tags.get("addr:state"):
+                address_parts.append(tags.get("addr:state"))
+            if tags.get("addr:postcode"):
+                address_parts.append(tags.get("addr:postcode"))
+            address = ", ".join(address_parts) if address_parts else None
+            
             # Description
             description = tags.get("description", f"{subtype} offering essential supplies")
             if supply_type == "Propane":
@@ -3825,7 +3883,9 @@ async def search_last_chance_supplies(request: LastChanceRequest):
                 hours=hours,
                 phone=phone,
                 amenities=amenities,
-                rating=rating
+                rating=rating,
+                address=address,
+                website=website
             ))
         
         # Sort by distance
@@ -3935,8 +3995,24 @@ async def search_rv_dealerships(request: RVDealershipRequest):
             
             tags = element.get("tags", {})
             
-            # Extract name
-            name = tags.get("name", tags.get("brand", "RV Dealership"))
+            # Extract name with better fallbacks
+            name = tags.get("name") or tags.get("brand")
+            if not name:
+                # Use operator if available
+                operator = tags.get("operator", "")
+                if operator:
+                    name = operator
+                else:
+                    # Use craft or shop tag for descriptive name
+                    craft = tags.get("craft", "")
+                    shop = tags.get("shop", "")
+                    if "caravan" in craft or "caravan" in shop:
+                        name = "RV Service Center"
+                    elif tags.get("amenity") == "car_repair":
+                        name = "RV Repair Shop"
+                    else:
+                        # Last resort: use coordinates
+                        name = f"RV Service ({round(lat, 3)}, {round(lon, 3)})"
             
             # Determine type
             dealership_type = "Dealership"
@@ -3972,6 +4048,23 @@ async def search_rv_dealerships(request: RVDealershipRequest):
             # Phone
             phone = tags.get("phone", tags.get("contact:phone", "N/A"))
             
+            # Website
+            website = tags.get("website") or tags.get("contact:website") or tags.get("url")
+            
+            # Extract address
+            address_parts = []
+            if tags.get("addr:housenumber") and tags.get("addr:street"):
+                address_parts.append(f"{tags.get('addr:housenumber')} {tags.get('addr:street')}")
+            elif tags.get("addr:street"):
+                address_parts.append(tags.get("addr:street"))
+            if tags.get("addr:city"):
+                address_parts.append(tags.get("addr:city"))
+            if tags.get("addr:state"):
+                address_parts.append(tags.get("addr:state"))
+            if tags.get("addr:postcode"):
+                address_parts.append(tags.get("addr:postcode"))
+            address = ", ".join(address_parts) if address_parts else None
+            
             # Description
             description = tags.get("description", f"RV {dealership_type.lower()} offering sales and service for recreational vehicles.")
             if dealership_type == "Service Center":
@@ -3991,7 +4084,9 @@ async def search_rv_dealerships(request: RVDealershipRequest):
                 phone=phone,
                 services=services,
                 brands=brands,
-                rating=rating
+                rating=rating,
+                address=address,
+                website=website
             ))
         
         # Sort by distance
