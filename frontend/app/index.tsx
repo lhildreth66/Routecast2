@@ -692,7 +692,7 @@ export default function HomeScreen() {
 
   const addToFavorites = async () => {
     if (!origin.trim() || !destination.trim()) {
-      setError('Enter a route first to save as favorite');
+      Alert.alert('Missing Information', 'Enter origin and destination first to save as favorite');
       return;
     }
 
@@ -704,8 +704,10 @@ export default function HomeScreen() {
       });
       setFavoriteAdded(true);
       fetchFavoriteRoutes();
-    } catch (err) {
+      Alert.alert('Saved!', 'Route added to favorites');
+    } catch (err: any) {
       console.error('Error saving favorite:', err);
+      Alert.alert('Error', err?.response?.data?.detail || 'Failed to save favorite. Please try again.');
     }
   };
 
