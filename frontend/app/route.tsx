@@ -14,6 +14,7 @@ import {
   TextInput,
   Dimensions,
   Alert,
+  RefreshControl,
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -473,8 +474,9 @@ export default function RouteScreen() {
   const params = useLocalSearchParams();
   const [routeData, setRouteData] = useState<RouteData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [activeTab, setActiveTab] = useState<'alerts' | 'bridges'>('alerts');
+  const [activeTab, setActiveTab] = useState<'road' | 'alerts' | 'bridges'>('road');
   
   // Radar map state
   const [showRadarMap, setShowRadarMap] = useState(false);
@@ -542,6 +544,18 @@ export default function RouteScreen() {
     }
     setLoading(false);
   }, [params.routeData]);
+
+  // Pull to refresh handler
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      const data = JSON.parse(params.routeData as string);
+      setRouteData(data);
+    } catch (e) {
+      console.error('Error refreshing route data:', e);
+    }
+    setRefreshing(false);
+  };
 
   // Voice recognition
   const startVoiceRecognition = () => {
@@ -813,6 +827,14 @@ export default function RouteScreen() {
       {/* Road / Alerts Tabs */}
       <View style={styles.tabsContainer}>
         <TouchableOpacity 
+          style={[styles.tab, activeTab === 'road' && styles.tabActive]}
+          onPress={() => setActiveTab('road')}
+        >
+          <Text style={[styles.tabText, activeTab === 'road' && styles.tabTextActive]}>
+            Road Conditions
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
           style={[styles.tab, activeTab === 'alerts' && styles.tabActive]}
           onPress={() => setActiveTab('alerts')}
         >
@@ -831,7 +853,18 @@ export default function RouteScreen() {
       </View>
 
       {/* Content */}
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.content} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor="#3b82f6"
+            colors={['#3b82f6']}
+          />
+        }
+      >
         {/* Trucker Alerts Button */}
         {routeData.trucker_warnings && routeData.trucker_warnings.length > 0 && (
           <TouchableOpacity
@@ -855,71 +888,115 @@ export default function RouteScreen() {
           </TouchableOpacity>
         )}
 
+        {/* ROAD CONDITIONS TAB CONTENT */}
+        {activeTab === 'road' && (
+          <>
         {/* Waypoint Road Conditions */}
         <Text style={styles.sectionTitle}>🛣️ Road Conditions Along Route</Text>
         <Text style={styles.sectionSubtitle}>Weather-based road surface conditions</Text>
         {routeData.waypoints && Array.isArray(routeData.waypoints) && routeData.waypoints.map((wp, index) => {
               // Derive road condition from weather ONLY (no alerts shown here)
               const temp = wp.weather?.temperature || 50;
-              const conditions = (wp.weather?.conditions || '').toLowerCase();
+              const conditions = (wp.weather?.conditions || 'Clear').toLowerCase();
+              const actualConditions = wp.weather?.conditions || 'Clear';
               const windSpeed = wp.weather?.wind_speed ? parseInt(wp.weather.wind_speed) : 0;
+              
+              // Check if weather data is missing
+              const hasWeatherData = wp.weather && wp.weather.temperature !== null && wp.weather.conditions;
               
               let condIcon = '✓';
               let condLabel = 'DRY';
               let condColor = '#22c55e';
-              let condDesc = 'Clear';
+              let condDesc = actualConditions; // Use actual conditions as default
               let roadSurface = 'Normal driving conditions';
               
-              // Road conditions based ONLY on weather - NO alerts here
-              if (temp <= 32 && (conditions.includes('rain') || conditions.includes('freezing') || conditions.includes('drizzle'))) {
-                condIcon = '🧊';
-                condLabel = 'ICY';
-                condColor = '#ef4444';
-                condDesc = `Black ice likely`;
-                roadSurface = `${temp}°F - Reduce speed significantly`;
-              } else if (temp <= 32 && conditions.includes('snow')) {
-                condIcon = '❄️';
-                condLabel = 'SNOW';
-                condColor = '#60a5fa';
-                condDesc = `Snow-covered`;
-                roadSurface = `${temp}°F - Use caution`;
-              } else if (temp > 32 && temp <= 40 && conditions.includes('snow')) {
-                condIcon = '🌨️';
-                condLabel = 'SLUSH';
-                condColor = '#f59e0b';
-                condDesc = `Slushy`;
-                roadSurface = `${temp}°F - Reduced traction`;
-              } else if (conditions.includes('fog') || conditions.includes('mist')) {
-                condIcon = '🌫️';
-                condLabel = 'FOG';
-                condColor = '#9ca3af';
-                condDesc = 'Low visibility';
-                roadSurface = 'Use low beams';
-              } else if (conditions.includes('rain') || conditions.includes('shower') || conditions.includes('drizzle')) {
-                condIcon = '💧';
-                condLabel = 'WET';
-                condColor = '#3b82f6';
-                condDesc = 'Wet roads';
-                roadSurface = 'Watch for hydroplaning';
-              } else if (conditions.includes('thunder') || conditions.includes('storm')) {
-                condIcon = '⛈️';
-                condLabel = 'STORM';
-                condColor = '#7c3aed';
-                condDesc = 'Storm conditions';
-                roadSurface = 'Heavy rain possible';
-              } else if (windSpeed > 30) {
-                condIcon = '💨';
-                condLabel = 'WINDY';
-                condColor = '#f59e0b';
-                condDesc = `Windy - ${windSpeed} mph`;
-                roadSurface = 'Watch for crosswinds';
+              // If no weather data, show warning
+              if (!hasWeatherData) {
+                condIcon = '⚠️';
+                condLabel = 'N/A';
+                condColor = '#6b7280';
+                condDesc = 'Weather data unavailable';
+                roadSurface = 'Check conditions locally';
+              } else {
+                // Road conditions based ONLY on weather - NO alerts here
+                if (temp <= 32 && (conditions.includes('rain') || conditions.includes('freezing') || conditions.includes('drizzle'))) {
+                  condIcon = '🧊';
+                  condLabel = 'ICY';
+                  condColor = '#ef4444';
+                  condDesc = `Black ice likely`;
+                  roadSurface = `${temp}°F - Reduce speed significantly`;
+                } else if (temp <= 32 && conditions.includes('snow')) {
+                  condIcon = '❄️';
+                  condLabel = 'SNOW';
+                  condColor = '#60a5fa';
+                  condDesc = `Snow-covered`;
+                  roadSurface = `${temp}°F - Use caution`;
+                } else if (temp > 32 && temp <= 40 && conditions.includes('snow')) {
+                  condIcon = '🌨️';
+                  condLabel = 'SLUSH';
+                  condColor = '#f59e0b';
+                  condDesc = `Slushy`;
+                  roadSurface = `${temp}°F - Reduced traction`;
+                } else if (conditions.includes('fog') || conditions.includes('mist')) {
+                  condIcon = '🌫️';
+                  condLabel = 'FOG';
+                  condColor = '#9ca3af';
+                  condDesc = 'Low visibility';
+                  roadSurface = 'Use low beams';
+                } else if (conditions.includes('rain') || conditions.includes('shower') || conditions.includes('drizzle')) {
+                  condIcon = '💧';
+                  condLabel = 'WET';
+                  condColor = '#3b82f6';
+                  condDesc = 'Wet roads';
+                  roadSurface = 'Watch for hydroplaning';
+                } else if (conditions.includes('thunder') || conditions.includes('storm')) {
+                  condIcon = '⛈️';
+                  condLabel = 'STORM';
+                  condColor = '#7c3aed';
+                  condDesc = 'Storm conditions';
+                  roadSurface = 'Heavy rain possible';
+                } else if (windSpeed > 30) {
+                  condIcon = '💨';
+                  condLabel = 'WINDY';
+                  condColor = '#f59e0b';
+                  condDesc = `Windy - ${windSpeed} mph`;
+                  roadSurface = 'Watch for crosswinds';
+                } else if (conditions.includes('cloud') || conditions.includes('overcast')) {
+                  condIcon = '☁️';
+                  condLabel = 'DRY';
+                  condColor = '#6b7280';
+                  condDesc = actualConditions;
+                  roadSurface = 'Normal driving conditions';
+                } else if (conditions.includes('partly') || conditions.includes('sun') || conditions.includes('clear')) {
+                  condIcon = '☀️';
+                  condLabel = 'DRY';
+                  condColor = '#22c55e';
+                  condDesc = actualConditions;
+                  roadSurface = 'Normal driving conditions';
+                }
               }
               
               const mileMarker = Math.round(wp.waypoint.distance_from_start || 0);
               const locationName = wp.waypoint.name || 'Unknown';
+              const isExpanded = expandedCards.has(index + 2000); // Offset to avoid collision with alert cards
               
               return (
-                <View key={index} style={styles.conditionCard}>
+                <TouchableOpacity 
+                  key={index} 
+                  style={styles.conditionCard}
+                  onPress={() => {
+                    setExpandedCards(prev => {
+                      const newSet = new Set(prev);
+                      if (newSet.has(index + 2000)) {
+                        newSet.delete(index + 2000);
+                      } else {
+                        newSet.add(index + 2000);
+                      }
+                      return newSet;
+                    });
+                  }}
+                  activeOpacity={0.7}
+                >
                   <View style={styles.conditionCardMain}>
                     <View style={styles.mileMarkerBox}>
                       <Text style={styles.mileMarkerLabel}>MILE</Text>
@@ -930,7 +1007,7 @@ export default function RouteScreen() {
                       <Text style={styles.conditionLabel}>{condLabel}</Text>
                     </View>
                     <View style={styles.conditionInfo}>
-                      <Text style={styles.conditionLocation} numberOfLines={1}>
+                      <Text style={styles.conditionLocation} numberOfLines={isExpanded ? undefined : 1}>
                         {locationName}
                       </Text>
                       <Text style={styles.conditionDesc}>{condDesc}</Text>
@@ -940,9 +1017,11 @@ export default function RouteScreen() {
                       </Text>
                     </View>
                   </View>
-                </View>
+                </TouchableOpacity>
               );
             })}
+          </>
+        )}
 
         {/* ALERTS TAB CONTENT */}
         {activeTab === 'alerts' && (
@@ -1464,7 +1543,7 @@ const styles = StyleSheet.create({
   },
   conditionCardMain: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: 8,
   },
   expandIndicator: {
