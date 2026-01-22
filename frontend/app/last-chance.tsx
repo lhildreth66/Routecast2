@@ -143,13 +143,6 @@ export default function LastChanceScreen() {
           <Text style={styles.subtitle}>Find grocery, propane, and hardware stores before going remote</Text>
           <Text style={styles.infoNote}>💡 Tip: The store name will typically appear in Google Maps when you navigate to the location.</Text>
 
-          <View style={styles.locationInfo}>
-            <Ionicons name="location" size={16} color="#f59e0b" />
-            <Text style={styles.locationText}>
-              Searching near: {latitude}, {longitude}
-            </Text>
-          </View>
-
           <TouchableOpacity onPress={useCurrentLocation} style={styles.locationButton}>
             <Ionicons name="locate" size={18} color="#f59e0b" />
             <Text style={styles.locationButtonText}>Use Current Location</Text>

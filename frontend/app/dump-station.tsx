@@ -144,13 +144,6 @@ export default function DumpStationScreen() {
           <Text style={styles.subtitle}>Locate RV dump stations and fresh water fill points</Text>
           <Text style={styles.infoNote}>💡 Tip: The station name will typically appear in Google Maps when you navigate to the location.</Text>
 
-          <View style={styles.locationInfo}>
-            <Ionicons name="location" size={16} color="#8b5cf6" />
-            <Text style={styles.locationText}>
-              Searching near: {latitude}, {longitude}
-            </Text>
-          </View>
-
           <TouchableOpacity 
             onPress={useCurrentLocation} 
             style={styles.locationButton}

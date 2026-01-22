@@ -167,13 +167,6 @@ export default function FreeCampingScreen() {
           <Text style={styles.subtitle}>Discover BLM land, National Forest dispersed camping, and other free spots</Text>
           <Text style={styles.infoNote}>💡 Tip: The campsite name will typically appear in Google Maps when you navigate to the location.</Text>
 
-          <View style={styles.locationInfo}>
-            <Ionicons name="location" size={16} color="#06b6d4" />
-            <Text style={styles.locationText}>
-              Searching near: {latitude}, {longitude}
-            </Text>
-          </View>
-
           <TouchableOpacity 
             onPress={useCurrentLocation} 
             style={styles.locationButton}

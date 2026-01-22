@@ -143,15 +143,6 @@ export default function RVDealershipScreen() {
           <Text style={styles.subtitle}>Find RV dealerships, service centers, and parts within 10 miles</Text>
           <Text style={styles.infoNote}>💡 Tip: The business name will typically appear in Google Maps when you navigate to the location.</Text>
 
-          {latitude && longitude && (
-            <View style={styles.locationInfo}>
-              <Ionicons name="location" size={16} color="#ec4899" />
-              <Text style={styles.locationText}>
-                Searching near: {latitude}, {longitude}
-              </Text>
-            </View>
-          )}
-
           <TouchableOpacity 
             onPress={refreshLocation} 
             style={styles.locationButton}
