@@ -476,8 +476,7 @@ export default function RouteScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [weatherAlertsExpanded, setWeatherAlertsExpanded] = useState(false);
-  const [bridgeAlertsExpanded, setBridgeAlertsExpanded] = useState(false);
+  const [activeTab, setActiveTab] = useState<'alerts' | 'bridges'>('alerts');
   
   // Radar map state
   const [showRadarMap, setShowRadarMap] = useState(false);
@@ -993,21 +992,28 @@ export default function RouteScreen() {
               );
             })}
 
-        {/* Weather Alerts - Collapsible Section */}
-        <TouchableOpacity 
-          style={styles.collapsibleHeader}
-          onPress={() => setWeatherAlertsExpanded(!weatherAlertsExpanded)}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.collapsibleHeaderText}>⚠️ Weather Alerts Along Route</Text>
-          <Ionicons 
-            name={weatherAlertsExpanded ? "chevron-up" : "chevron-down"} 
-            size={24} 
-            color="#fff" 
-          />
-        </TouchableOpacity>
-        
-        {weatherAlertsExpanded && (
+        {/* Tabs for Weather Alerts and Bridge Alerts */}
+        <View style={styles.tabsContainer}>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'alerts' && styles.tabActive]}
+            onPress={() => setActiveTab('alerts')}
+          >
+            <Text style={[styles.tabText, activeTab === 'alerts' && styles.tabTextActive]}>
+              Weather Alerts {routeData.hazard_alerts && routeData.hazard_alerts.length > 0 && `(${routeData.hazard_alerts.length})`}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tab, activeTab === 'bridges' && styles.tabActive]}
+            onPress={() => setActiveTab('bridges')}
+          >
+            <Text style={[styles.tabText, activeTab === 'bridges' && styles.tabTextActive]}>
+              Bridge Alerts {routeData.bridge_warnings && routeData.bridge_warnings.length > 0 && `(${routeData.bridge_warnings.length})`}
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* Weather Alerts Tab Content */}
+        {activeTab === 'alerts' && (
           <>
             <Text style={styles.sectionSubtitle}>Tap any alert to see full details</Text>
         
@@ -1108,21 +1114,8 @@ export default function RouteScreen() {
           </>
         )}
 
-        {/* Bridge Alerts - Collapsible Section */}
-        <TouchableOpacity 
-          style={styles.collapsibleHeader}
-          onPress={() => setBridgeAlertsExpanded(!bridgeAlertsExpanded)}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.collapsibleHeaderText}>🌉 Bridge Height Warnings</Text>
-          <Ionicons 
-            name={bridgeAlertsExpanded ? "chevron-up" : "chevron-down"} 
-            size={24} 
-            color="#fff" 
-          />
-        </TouchableOpacity>
-        
-        {bridgeAlertsExpanded && (
+        {/* Bridge Alerts Tab Content */}
+        {activeTab === 'bridges' && (
           <>
             <Text style={styles.sectionSubtitle}>Low clearance bridges on your route</Text>
         
@@ -1430,20 +1423,30 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#a1a1aa',
   },
-  collapsibleHeader: {
+  tabsContainer: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: '#27272a',
-    borderRadius: 8,
-    padding: 14,
     marginTop: 16,
     marginBottom: 8,
+    gap: 8,
   },
-  collapsibleHeaderText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
+  tab: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    backgroundColor: '#27272a',
+  },
+  tabActive: {
+    backgroundColor: '#eab308',
+  },
+  tabText: {
+    color: '#a1a1aa',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  tabTextActive: {
+    color: '#000',
   },
   content: {
     flex: 1,
