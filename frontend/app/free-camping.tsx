@@ -60,18 +60,31 @@ export default function FreeCampingScreen() {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission Denied', 'Location permission is required to use current location.');
+        Alert.alert(
+          'Location Permission Required', 
+          'Please enable location permissions in your device settings to use this feature.',
+          [{ text: 'OK' }]
+        );
         setLocationLoading(false);
         return;
       }
 
-      const location = await Location.getCurrentPositionAsync({});
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+        timeInterval: 10000,
+        distanceInterval: 0,
+      });
       setLatitude(location.coords.latitude.toFixed(4));
       setLongitude(location.coords.longitude.toFixed(4));
       setLocationLoading(false);
-    } catch (err) {
+      Alert.alert('Location Updated', 'Your current location has been set.');
+    } catch (err: any) {
       setLocationLoading(false);
-      Alert.alert('Error', 'Failed to get current location');
+      Alert.alert(
+        'Location Error', 
+        err.message || 'Unable to get your location. Make sure GPS is enabled and you have a clear view of the sky.',
+        [{ text: 'OK' }]
+      );
     }
   };
 
@@ -152,6 +165,7 @@ export default function FreeCampingScreen() {
         <View style={styles.card}>
           <Text style={styles.title}>🏕️ Free Camping Finder</Text>
           <Text style={styles.subtitle}>Discover BLM land, National Forest dispersed camping, and other free spots</Text>
+          <Text style={styles.infoNote}>💡 Tip: The campsite name will typically appear in Google Maps when you navigate to the location.</Text>
 
           <View style={styles.locationInfo}>
             <Ionicons name="location" size={16} color="#06b6d4" />
@@ -374,6 +388,11 @@ export default function FreeCampingScreen() {
                         </View>
                       )}
 
+                      <View style={styles.infoNote}>
+                        <Ionicons name="information-circle-outline" size={14} color="#9ca3af" />
+                        <Text style={styles.infoNoteText}>The campsite name and details will be shown in Google Maps when you navigate to this location.</Text>
+                      </View>
+
                       <TouchableOpacity
                         style={styles.navigateButton}
                         onPress={() => openInMaps(spot)}
@@ -430,6 +449,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#9ca3af',
     marginBottom: 16,
+  },
+  infoNote: {
+    fontSize: 12,
+    color: '#fbbf24',
+    marginBottom: 16,
+    fontStyle: 'italic',
+    lineHeight: 18,
   },
   locationInfo: {
     flexDirection: 'row',
@@ -635,6 +661,21 @@ const styles = StyleSheet.create({
   amenityText: {
     fontSize: 12,
     color: '#e5e7eb',
+  },
+  infoNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#3f3f46',
+    borderRadius: 6,
+    padding: 8,
+    marginTop: 8,
+    gap: 6,
+  },
+  infoNoteText: {
+    flex: 1,
+    fontSize: 11,
+    color: '#9ca3af',
+    lineHeight: 16,
   },
   navigateButton: {
     flexDirection: 'row',

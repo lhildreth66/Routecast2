@@ -141,6 +141,7 @@ export default function LastChanceScreen() {
         <View style={styles.card}>
           <Text style={styles.title}>🏪 Last Chance Supplies</Text>
           <Text style={styles.subtitle}>Find grocery, propane, and hardware stores before going remote</Text>
+          <Text style={styles.infoNote}>💡 Tip: The store name will typically appear in Google Maps when you navigate to the location.</Text>
 
           <View style={styles.locationInfo}>
             <Ionicons name="location" size={16} color="#f59e0b" />
@@ -366,6 +367,11 @@ export default function LastChanceScreen() {
                         </View>
                       )}
 
+                      <View style={styles.infoNote}>
+                        <Ionicons name="information-circle-outline" size={14} color="#9ca3af" />
+                        <Text style={styles.infoNoteText}>The business name and details will be shown in Google Maps when you navigate to this location.</Text>
+                      </View>
+
                       <TouchableOpacity
                         style={styles.navigateButton}
                         onPress={() => openInMaps(supply)}
@@ -430,6 +436,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#9ca3af',
     marginBottom: 16,
+  },
+  infoNote: {
+    fontSize: 12,
+    color: '#fbbf24',
+    marginBottom: 16,
+    fontStyle: 'italic',
+    lineHeight: 18,
   },
   locationInfo: {
     flexDirection: 'row',
@@ -644,6 +657,21 @@ const styles = StyleSheet.create({
   amenityText: {
     fontSize: 12,
     color: '#e5e7eb',
+  },
+  infoNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: '#3f3f46',
+    borderRadius: 6,
+    padding: 8,
+    marginTop: 8,
+    gap: 6,
+  },
+  infoNoteText: {
+    flex: 1,
+    fontSize: 11,
+    color: '#9ca3af',
+    lineHeight: 16,
   },
   navigateButton: {
     flexDirection: 'row',
