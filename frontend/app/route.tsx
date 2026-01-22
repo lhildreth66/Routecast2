@@ -828,6 +828,17 @@ export default function RouteScreen() {
           </View>
           <Text style={styles.proFeatureTitle}>Tractor Trailer Pro</Text>
         </TouchableOpacity>
+
+        {/* Weather Radar Map */}
+        <TouchableOpacity 
+          style={styles.proFeatureCard}
+          onPress={() => router.push('/weather-map')}
+        >
+          <View style={[styles.proFeatureIcon, { backgroundColor: '#10b981' }]}>
+            <Ionicons name="thunderstorm" size={20} color="#fff" />
+          </View>
+          <Text style={styles.proFeatureTitle}>Weather Radar Map</Text>
+        </TouchableOpacity>
       </View>
 
       {/* Content */}
