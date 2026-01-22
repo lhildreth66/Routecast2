@@ -4709,7 +4709,7 @@ async def search_truck_parking(request: TruckParkingRequest):
 class TruckServiceRequest(BaseModel):
     latitude: float
     longitude: float
-    radius_miles: int = 50
+    radius_miles: int = 25
 
 class TruckService(BaseModel):
     name: str
@@ -4732,38 +4732,31 @@ async def search_truck_services(request: TruckServiceRequest):
     try:
         radius_meters = int(request.radius_miles * 1609.34)
         
+        # Simplified query - look for general automotive services
         overpass_query = f"""
-        [out:json][timeout:25];
+        [out:json][timeout:15];
         (
-          node["shop"="car_repair"]["service:vehicle:truck"="yes"](around:{radius_meters},{request.latitude},{request.longitude});
-          node["shop"="tyres"]["service:vehicle:truck"="yes"](around:{radius_meters},{request.latitude},{request.longitude});
-          node["amenity"="vehicle_inspection"]["vehicle:truck"="yes"](around:{radius_meters},{request.latitude},{request.longitude});
-          node["amenity"="car_wash"]["maxheight:physical"](around:{radius_meters},{request.latitude},{request.longitude});
-          way["shop"="car_repair"]["service:vehicle:truck"="yes"](around:{radius_meters},{request.latitude},{request.longitude});
-          way["shop"="tyres"]["service:vehicle:truck"="yes"](around:{radius_meters},{request.latitude},{request.longitude});
+          node["shop"="car_repair"](around:{radius_meters},{request.latitude},{request.longitude});
+          node["shop"="tyres"](around:{radius_meters},{request.latitude},{request.longitude});
+          node["amenity"="car_wash"](around:{radius_meters},{request.latitude},{request.longitude});
+          node["amenity"="weighbridge"](around:{radius_meters},{request.latitude},{request.longitude});
         );
-        out body;
-        >;
-        out skel qt;
+        out center;
         """
         
-        async with httpx.AsyncClient(timeout=45.0) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post("https://overpass-api.de/api/interpreter", data=overpass_query)
             response.raise_for_status()
             data = response.json()
         
         services = []
         for element in data.get('elements', []):
-            if element['type'] not in ['node', 'way']:
+            if element['type'] != 'node':
                 continue
             
             tags = element.get('tags', {})
-            if element['type'] == 'way':
-                lat = element.get('center', {}).get('lat') or (element.get('bounds', {}).get('minlat', 0) + element.get('bounds', {}).get('maxlat', 0)) / 2
-                lon = element.get('center', {}).get('lon') or (element.get('bounds', {}).get('minlon', 0) + element.get('bounds', {}).get('maxlon', 0)) / 2
-            else:
-                lat = element.get('lat', 0)
-                lon = element.get('lon', 0)
+            lat = element.get('lat', 0)
+            lon = element.get('lon', 0)
             
             distance = haversine_miles(request.latitude, request.longitude, lat, lon)
             
@@ -4776,7 +4769,7 @@ async def search_truck_services(request: TruckServiceRequest):
                 service_type = 'tire'
             elif amenity == 'car_wash':
                 service_type = 'wash'
-            elif amenity == 'vehicle_inspection':
+            elif amenity == 'weighbridge':
                 service_type = 'scale'
             else:
                 service_type = 'repair'
