@@ -6,8 +6,7 @@ import { router } from 'expo-router';
 interface PremiumFeaturesPanelProps {
   onRoadPassability?: () => void;
   onConnectivity?: () => void;
-  onCampsiteIndex?: () => void;
-}
+  onCampsiteIndex?: () => void;  onTractorTrailerPro: () => void;}
 
 export default function PremiumFeaturesPanel({
   onRoadPassability,

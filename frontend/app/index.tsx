@@ -1147,6 +1147,16 @@ export default function HomeScreen() {
                   </>
                 )}
               </TouchableOpacity>
+
+              {/* Test Button for Tractor Trailer Pro */}
+              <TouchableOpacity
+                style={[styles.button, { backgroundColor: '#3b82f6', marginTop: 12 }]}
+                onPress={() => router.push('/tractor-trailer-pro')}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="bus-outline" size={22} color="#fff" />
+                <Text style={[styles.buttonText, { color: '#fff' }]}>TRACTOR TRAILER PRO</Text>
+              </TouchableOpacity>
             </Animated.View>
 
             {/* Tabs for Recent/Favorites */}
