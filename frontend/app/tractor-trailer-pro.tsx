@@ -1,177 +1,109 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  ActivityIndicator,
-  Alert,
 } from 'react-native';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import axios from 'axios';
-import { API_BASE } from './apiConfig';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-
-interface TruckAlert {
-  type: 'hazmat' | 'weigh_station' | 'parking' | 'steep_grade' | 'sharp_turn' | 'toll';
-  mile_marker: number;
-  severity: 'info' | 'warning' | 'critical';
-  title: string;
-  description: string;
-  details?: string;
-  cost?: number; // For tolls
-  lat: number;
-  lon: number;
-}
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function TractorTrailerProScreen() {
   const router = useRouter();
-  const params = useLocalSearchParams();
-  const [loading, setLoading] = useState(true);
-  const [alerts, setAlerts] = useState<TruckAlert[]>([]);
-  const [expandedCards, setExpandedCards] = useState<Set<number>>(new Set());
-  const [activeFilter, setActiveFilter] = useState<string>('all');
-  const [totalDistance, setTotalDistance] = useState<number>(0);
-  const [error, setError] = useState<string>('');
 
-  useEffect(() => {
-    loadTruckAlerts();
-  }, []);
+  const categories = [
+    {
+      id: 'truck-stops',
+      title: 'Truck Stops & Fuel',
+      icon: 'business' as const,
+      description: 'Find Flying J, Love\'s, TA, Pilot, and independent truck stops',
+      color: '#3b82f6',
+      route: '/truck-stops',
+    },
+    {
+      id: 'weigh-stations',
+      title: 'Weigh Stations',
+      icon: 'scale' as const,
+      description: 'Locate weigh stations and check bypass status',
+      color: '#8b5cf6',
+      route: '/weigh-stations',
+    },
+    {
+      id: 'truck-parking',
+      title: 'Truck Parking',
+      icon: 'car' as const,
+      description: 'Rest areas, truck parking lots, and safe parking zones',
+      color: '#22c55e',
+      route: '/truck-parking',
+    },
+    {
+      id: 'low-clearance',
+      title: 'Low Clearance Alerts',
+      icon: 'warning' as const,
+      description: 'Bridges and overpasses with height restrictions',
+      color: '#ef4444',
+      route: '/low-clearance',
+    },
+    {
+      id: 'truck-services',
+      title: 'Truck Services',
+      icon: 'construct' as const,
+      description: 'Repair shops, tire services, truck washes, and CAT scales',
+      color: '#f59e0b',
+      route: '/truck-services',
+    },
+    {
+      id: 'truck-routes',
+      title: 'Truck-Restricted Routes',
+      icon: 'close-circle' as const,
+      description: 'Roads with truck restrictions, hazmat routes, and detours',
+      color: '#ec4899',
+      route: '/truck-restrictions',
+    },
+  ];
 
-  const loadTruckAlerts = async () => {
-    try {
-      setLoading(true);
-      setError('');
+  return (
+    <SafeAreaView style={styles.container} edges={['top']}>
+      <ScrollView contentContainerStyle={styles.scrollContent}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={24} color="#fff" />
+          </TouchableOpacity>
+          <Text style={styles.title}>🚛 Tractor Trailer Pro</Text>
+          <Text style={styles.subtitle}>Professional tools for commercial drivers</Text>
+        </View>
 
-      // Try to get route data from params or last cached route
-      let routePolyline = params.routePolyline as string;
-      let vehicleHeight = params.vehicleHeight ? parseFloat(params.vehicleHeight as string) : undefined;
+        <View style={styles.categoriesContainer}>
+          {categories.map((category) => (
+            <TouchableOpacity
+              key={category.id}
+              style={[styles.categoryCard, { borderLeftColor: category.color }]}
+              onPress={() => router.push(category.route as any)}
+              activeOpacity={0.7}
+            >
+              <View style={styles.categoryHeader}>
+                <View style={[styles.iconContainer, { backgroundColor: category.color }]}>
+                  <Ionicons name={category.icon} size={28} color="#fff" />
+                </View>
+                <Ionicons name="chevron-forward" size={24} color="#71717a" />
+              </View>
+              <Text style={styles.categoryTitle}>{category.title}</Text>
+              <Text style={styles.categoryDescription}>{category.description}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
 
-      if (!routePolyline) {
-        // Try to load from last route
-        const lastRoute = await AsyncStorage.getItem('lastRoute');
-        if (lastRoute) {
-          const routeData = JSON.parse(lastRoute);
-          routePolyline = routeData.overview_polyline;
-          vehicleHeight = routeData.vehicle_height_ft;
-        }
-      }
-
-      if (!routePolyline) {
-        // No route available - show demo data
-        loadDemoData();
-        return;
-      }
-
-      // Fetch real truck alerts from API
-      const response = await axios.post(`${API_BASE}/api/truck-alerts`, {
-        route_polyline: routePolyline,
-        vehicle_height_ft: vehicleHeight,
-      });
-
-      setAlerts(response.data.alerts);
-      setTotalDistance(response.data.total_distance_miles);
-      setLoading(false);
-    } catch (err: any) {
-      console.error('Error loading truck alerts:', err);
-      setError('Unable to load truck alerts. Showing demo data instead.');
-      loadDemoData();
-    }
-  };
-
-  const loadDemoData = () => {
-    // Demo truck alerts data
-    const demoAlerts: TruckAlert[] = [
-      {
-        type: 'weigh_station',
-        mile_marker: 45,
-        severity: 'info',
-        title: 'Weigh Station Ahead',
-        description: 'Commercial vehicle inspection station - Currently OPEN',
-        details: 'All commercial vehicles over 10,000 lbs must stop. Average wait time: 5-10 minutes.',
-        lat: 0,
-        lon: 0,
-      },
-      {
-        type: 'steep_grade',
-        mile_marker: 78,
-        severity: 'warning',
-        title: 'Steep Downgrade - 6% for 3 Miles',
-        description: 'Use lower gear, check brakes before descent',
-        details: 'Sustained 6% downgrade for 3.2 miles. Runaway truck ramp available at mile 79.5. Reduce speed to 35 mph maximum.',
-        lat: 0,
-        lon: 0,
-      },
-      {
-        type: 'sharp_turn',
-        mile_marker: 112,
-        severity: 'warning',
-        title: 'Sharp Right Turn - 25 MPH',
-        description: 'Tight radius turn, 25 mph speed limit for trucks',
-        details: 'Turn radius: 45 feet. Not recommended for vehicles over 65 feet. Alternative route available.',
-        lat: 0,
-        lon: 0,
-      },
-      {
-        type: 'toll',
-        mile_marker: 156,
-        severity: 'info',
-        title: 'Toll Plaza - Class 5 Vehicle',
-        description: 'Cash & E-ZPass accepted',
-        details: 'Estimated toll for 5-axle truck: $18.50. E-ZPass discount available.',
-        cost: 18.50,
-        lat: 0,
-        lon: 0,
-      },
-      {
-        type: 'parking',
-        mile_marker: 189,
-        severity: 'info',
-        title: 'Truck Parking Available',
-        description: 'Rest area with 45 truck spaces',
-        details: 'Amenities: Restrooms, vending, picnic area. No overnight parking limit. 23 spaces currently available.',
-        lat: 0,
-        lon: 0,
-      },
-      {
-        type: 'hazmat',
-        mile_marker: 234,
-        severity: 'critical',
-        title: 'Hazmat Restriction Ahead',
-        description: 'Tunnel prohibits hazardous materials',
-        details: 'No vehicles carrying hazardous materials (Classes 1-9) allowed in tunnel. Alternate route adds 12 miles.',
-        lat: 0,
-        lon: 0,
-      },
-      {
-        type: 'steep_grade',
-        mile_marker: 267,
-        severity: 'critical',
-        title: 'Steep Upgrade - 7% for 4 Miles',
-        description: 'Long sustained climb, use appropriate gear',
-        details: 'Sustained 7% upgrade for 4.1 miles. Monitor engine temperature. Right lane for trucks only.',
-        lat: 0,
-        lon: 0,
-      },
-      {
-        type: 'weigh_station',
-        mile_marker: 312,
-        severity: 'info',
-        title: 'Weigh Station Ahead',
-        description: 'Currently CLOSED - PrePass/Bypass OK',
-        details: 'Station typically opens 6am-10pm weekdays. PrePass equipped vehicles may bypass when closed.',
-        lat: 0,
-        lon: 0,
-      },
-    ];
-
-    setAlerts(demoAlerts);
-    setLoading(false);
-  };
-
-  const toggleCard = (index: number) => {
+        <View style={styles.footer}>
+          <Text style={styles.footerText}>
+            All data sourced from OpenStreetMap and state DOT databases
+          </Text>
+        </View>
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
     setExpandedCards(prev => {
       const newSet = new Set(prev);
       if (newSet.has(index)) {

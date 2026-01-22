@@ -4421,7 +4421,485 @@ async def search_rv_dealerships(request: RVDealershipRequest):
         )
 
 
-# ===== TRACTOR TRAILER PRO ALERTS =====
+# ==================== TRACTOR TRAILER PRO ENDPOINTS ====================
+
+# Truck Stops & Fuel
+class TruckStopRequest(BaseModel):
+    latitude: float
+    longitude: float
+    radius_miles: int = 25
+
+class TruckStop(BaseModel):
+    name: str
+    brand: Optional[str] = None
+    distance_miles: float
+    latitude: float
+    longitude: float
+    amenities: List[str]
+    fuel_types: List[str]
+    services: List[str]
+    rating: Optional[float] = None
+    phone: Optional[str] = None
+    website: Optional[str] = None
+    hours: Optional[str] = None
+
+class TruckStopResponse(BaseModel):
+    stops: List[TruckStop]
+
+@api_router.post("/pro/truck-stops/search", response_model=TruckStopResponse)
+async def search_truck_stops(request: TruckStopRequest):
+    """Find truck stops with fuel and amenities using OpenStreetMap."""
+    try:
+        radius_meters = int(request.radius_miles * 1609.34)
+        
+        overpass_query = f"""
+        [out:json][timeout:25];
+        (
+          node["amenity"="fuel"]["hgv"="yes"](around:{radius_meters},{request.latitude},{request.longitude});
+          node["amenity"="fuel"]["name"~"Flying J|Love's|TA Travel|Pilot|Petro"](around:{radius_meters},{request.latitude},{request.longitude});
+          node["highway"="services"]["truck"="yes"](around:{radius_meters},{request.latitude},{request.longitude});
+          way["amenity"="fuel"]["hgv"="yes"](around:{radius_meters},{request.latitude},{request.longitude});
+          way["amenity"="fuel"]["name"~"Flying J|Love's|TA Travel|Pilot|Petro"](around:{radius_meters},{request.latitude},{request.longitude});
+        );
+        out body;
+        >;
+        out skel qt;
+        """
+        
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            response = await client.post("https://overpass-api.de/api/interpreter", data=overpass_query)
+            response.raise_for_status()
+            data = response.json()
+        
+        stops = []
+        for element in data.get('elements', []):
+            if element['type'] not in ['node', 'way']:
+                continue
+            
+            tags = element.get('tags', {})
+            if element['type'] == 'way':
+                lat = element.get('center', {}).get('lat') or (element.get('bounds', {}).get('minlat', 0) + element.get('bounds', {}).get('maxlat', 0)) / 2
+                lon = element.get('center', {}).get('lon') or (element.get('bounds', {}).get('minlon', 0) + element.get('bounds', {}).get('maxlon', 0)) / 2
+            else:
+                lat = element.get('lat', 0)
+                lon = element.get('lon', 0)
+            
+            distance = haversine_miles(request.latitude, request.longitude, lat, lon)
+            
+            # Extract amenities
+            amenities = []
+            if tags.get('shop'):
+                amenities.append('Convenience Store')
+            if tags.get('toilets') == 'yes' or 'restroom' in tags.get('name', '').lower():
+                amenities.append('Restrooms')
+            if tags.get('shower') == 'yes':
+                amenities.append('Showers')
+            if tags.get('food') or tags.get('restaurant'):
+                amenities.append('Food')
+            if tags.get('repair') == 'yes':
+                amenities.append('Repair')
+            if tags.get('parking:truck') or tags.get('capacity:hgv'):
+                amenities.append('Truck Parking')
+            
+            # Fuel types
+            fuel_types = []
+            if tags.get('fuel:diesel') == 'yes':
+                fuel_types.append('Diesel')
+            if tags.get('fuel:diesel:class1') == 'yes':
+                fuel_types.append('DEF')
+            if tags.get('fuel:lpg') == 'yes':
+                fuel_types.append('Propane')
+            if not fuel_types:
+                fuel_types.append('Diesel')  # Assume diesel if truck stop
+            
+            # Services
+            services = []
+            if 'scales' in tags.get('name', '').lower() or tags.get('amenity:scale'):
+                services.append('CAT Scale')
+            if tags.get('truck_wash') == 'yes' or 'wash' in tags.get('name', '').lower():
+                services.append('Truck Wash')
+            if tags.get('wifi') == 'yes':
+                services.append('WiFi')
+            
+            # Detect brand
+            name = tags.get('name', 'Unknown Truck Stop')
+            brand = tags.get('brand')
+            if not brand:
+                for b in ['Flying J', "Love's", 'TA Travel', 'Pilot', 'Petro']:
+                    if b.lower() in name.lower():
+                        brand = b
+                        break
+            
+            stops.append(TruckStop(
+                name=name,
+                brand=brand,
+                distance_miles=round(distance, 1),
+                latitude=lat,
+                longitude=lon,
+                amenities=amenities,
+                fuel_types=fuel_types,
+                services=services,
+                phone=tags.get('phone'),
+                website=tags.get('website'),
+                hours=tags.get('opening_hours'),
+            ))
+        
+        stops.sort(key=lambda x: x.distance_miles)
+        stops = stops[:20]
+        
+        logger.info(f"Found {len(stops)} truck stops within {request.radius_miles} miles")
+        return TruckStopResponse(stops=stops)
+    
+    except Exception as e:
+        logger.error(f"Error searching truck stops: {e}")
+        raise HTTPException(status_code=500, detail=f"Error searching truck stops: {str(e)}")
+
+
+# Truck Parking
+class TruckParkingRequest(BaseModel):
+    latitude: float
+    longitude: float
+    radius_miles: int = 25
+
+class ParkingSpot(BaseModel):
+    name: str
+    type: str  # 'rest_area', 'parking_lot', 'truck_stop'
+    distance_miles: float
+    latitude: float
+    longitude: float
+    capacity: Optional[int] = None
+    amenities: List[str]
+    restrictions: List[str]
+    hours: Optional[str] = None
+    fee: Optional[str] = None
+
+class TruckParkingResponse(BaseModel):
+    spots: List[ParkingSpot]
+
+@api_router.post("/pro/truck-parking/search", response_model=TruckParkingResponse)
+async def search_truck_parking(request: TruckParkingRequest):
+    """Find truck parking including rest areas and safe parking zones."""
+    try:
+        radius_meters = int(request.radius_miles * 1609.34)
+        
+        overpass_query = f"""
+        [out:json][timeout:25];
+        (
+          node["highway"="rest_area"](around:{radius_meters},{request.latitude},{request.longitude});
+          node["highway"="services"](around:{radius_meters},{request.latitude},{request.longitude});
+          node["amenity"="parking"]["hgv"="yes"](around:{radius_meters},{request.latitude},{request.longitude});
+          node["amenity"="parking"]["parking"="truck_stop"](around:{radius_meters},{request.latitude},{request.longitude});
+          way["highway"="rest_area"](around:{radius_meters},{request.latitude},{request.longitude});
+          way["highway"="services"](around:{radius_meters},{request.latitude},{request.longitude});
+          way["amenity"="parking"]["hgv"="yes"](around:{radius_meters},{request.latitude},{request.longitude});
+        );
+        out body;
+        >;
+        out skel qt;
+        """
+        
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            response = await client.post("https://overpass-api.de/api/interpreter", data=overpass_query)
+            response.raise_for_status()
+            data = response.json()
+        
+        spots = []
+        for element in data.get('elements', []):
+            if element['type'] not in ['node', 'way']:
+                continue
+            
+            tags = element.get('tags', {})
+            if element['type'] == 'way':
+                lat = element.get('center', {}).get('lat') or (element.get('bounds', {}).get('minlat', 0) + element.get('bounds', {}).get('maxlat', 0)) / 2
+                lon = element.get('center', {}).get('lon') or (element.get('bounds', {}).get('minlon', 0) + element.get('bounds', {}).get('maxlon', 0)) / 2
+            else:
+                lat = element.get('lat', 0)
+                lon = element.get('lon', 0)
+            
+            distance = haversine_miles(request.latitude, request.longitude, lat, lon)
+            
+            # Determine type
+            highway = tags.get('highway')
+            amenity = tags.get('amenity')
+            if highway == 'rest_area':
+                spot_type = 'rest_area'
+            elif highway == 'services':
+                spot_type = 'rest_area'
+            elif amenity == 'parking':
+                spot_type = 'parking_lot'
+            else:
+                spot_type = 'truck_stop'
+            
+            # Amenities
+            amenities = []
+            if tags.get('toilets') == 'yes':
+                amenities.append('Restrooms')
+            if tags.get('drinking_water') == 'yes':
+                amenities.append('Water')
+            if tags.get('shower') == 'yes':
+                amenities.append('Showers')
+            if tags.get('picnic_table') == 'yes':
+                amenities.append('Picnic Area')
+            if tags.get('wifi') == 'yes':
+                amenities.append('WiFi')
+            
+            # Restrictions
+            restrictions = []
+            max_stay = tags.get('maxstay')
+            if max_stay:
+                restrictions.append(f'Max stay: {max_stay}')
+            if tags.get('supervised') == 'yes':
+                restrictions.append('Supervised')
+            
+            # Capacity
+            capacity = None
+            if tags.get('capacity:hgv'):
+                try:
+                    capacity = int(tags.get('capacity:hgv'))
+                except:
+                    pass
+            elif tags.get('capacity:disabled'):
+                try:
+                    capacity = int(tags.get('capacity')) - int(tags.get('capacity:disabled'))
+                except:
+                    pass
+            
+            # Fee
+            fee = None
+            if tags.get('fee') == 'yes':
+                fee = tags.get('charge') or 'Paid parking'
+            elif tags.get('fee') == 'no':
+                fee = 'Free'
+            
+            spots.append(ParkingSpot(
+                name=tags.get('name', f'Rest Area ({spot_type})'),
+                type=spot_type,
+                distance_miles=round(distance, 1),
+                latitude=lat,
+                longitude=lon,
+                capacity=capacity,
+                amenities=amenities,
+                restrictions=restrictions,
+                hours=tags.get('opening_hours'),
+                fee=fee,
+            ))
+        
+        spots.sort(key=lambda x: x.distance_miles)
+        spots = spots[:20]
+        
+        logger.info(f"Found {len(spots)} truck parking spots within {request.radius_miles} miles")
+        return TruckParkingResponse(spots=spots)
+    
+    except Exception as e:
+        logger.error(f"Error searching truck parking: {e}")
+        raise HTTPException(status_code=500, detail=f"Error searching truck parking: {str(e)}")
+
+
+# Truck Services
+class TruckServiceRequest(BaseModel):
+    latitude: float
+    longitude: float
+    radius_miles: int = 50
+
+class TruckService(BaseModel):
+    name: str
+    service_type: str  # 'repair', 'tire', 'wash', 'scale'
+    distance_miles: float
+    latitude: float
+    longitude: float
+    services_offered: List[str]
+    brands_serviced: List[str]
+    phone: Optional[str] = None
+    website: Optional[str] = None
+    hours: Optional[str] = None
+
+class TruckServiceResponse(BaseModel):
+    services: List[TruckService]
+
+@api_router.post("/pro/truck-services/search", response_model=TruckServiceResponse)
+async def search_truck_services(request: TruckServiceRequest):
+    """Find truck repair shops, tire services, washes, and scales."""
+    try:
+        radius_meters = int(request.radius_miles * 1609.34)
+        
+        overpass_query = f"""
+        [out:json][timeout:25];
+        (
+          node["shop"="car_repair"]["service:vehicle:truck"="yes"](around:{radius_meters},{request.latitude},{request.longitude});
+          node["shop"="tyres"]["service:vehicle:truck"="yes"](around:{radius_meters},{request.latitude},{request.longitude});
+          node["amenity"="vehicle_inspection"]["vehicle:truck"="yes"](around:{radius_meters},{request.latitude},{request.longitude});
+          node["amenity"="car_wash"]["maxheight:physical"](around:{radius_meters},{request.latitude},{request.longitude});
+          way["shop"="car_repair"]["service:vehicle:truck"="yes"](around:{radius_meters},{request.latitude},{request.longitude});
+          way["shop"="tyres"]["service:vehicle:truck"="yes"](around:{radius_meters},{request.latitude},{request.longitude});
+        );
+        out body;
+        >;
+        out skel qt;
+        """
+        
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            response = await client.post("https://overpass-api.de/api/interpreter", data=overpass_query)
+            response.raise_for_status()
+            data = response.json()
+        
+        services = []
+        for element in data.get('elements', []):
+            if element['type'] not in ['node', 'way']:
+                continue
+            
+            tags = element.get('tags', {})
+            if element['type'] == 'way':
+                lat = element.get('center', {}).get('lat') or (element.get('bounds', {}).get('minlat', 0) + element.get('bounds', {}).get('maxlat', 0)) / 2
+                lon = element.get('center', {}).get('lon') or (element.get('bounds', {}).get('minlon', 0) + element.get('bounds', {}).get('maxlon', 0)) / 2
+            else:
+                lat = element.get('lat', 0)
+                lon = element.get('lon', 0)
+            
+            distance = haversine_miles(request.latitude, request.longitude, lat, lon)
+            
+            # Determine service type
+            shop = tags.get('shop')
+            amenity = tags.get('amenity')
+            if shop == 'car_repair':
+                service_type = 'repair'
+            elif shop == 'tyres':
+                service_type = 'tire'
+            elif amenity == 'car_wash':
+                service_type = 'wash'
+            elif amenity == 'vehicle_inspection':
+                service_type = 'scale'
+            else:
+                service_type = 'repair'
+            
+            # Services offered
+            services_offered = []
+            if service_type == 'repair':
+                if tags.get('service:vehicle:engine_repair') == 'yes':
+                    services_offered.append('Engine Repair')
+                if tags.get('service:vehicle:brakes') == 'yes':
+                    services_offered.append('Brakes')
+                if tags.get('service:vehicle:electrical') == 'yes':
+                    services_offered.append('Electrical')
+                if tags.get('service:vehicle:tyres') == 'yes':
+                    services_offered.append('Tires')
+                if not services_offered:
+                    services_offered.append('General Repair')
+            elif service_type == 'tire':
+                services_offered = ['Tire Sales', 'Tire Repair', 'Tire Service']
+            elif service_type == 'wash':
+                services_offered = ['Truck Wash', 'Detailing']
+            elif service_type == 'scale':
+                services_offered = ['CAT Scale', 'Weighing']
+            
+            services.append(TruckService(
+                name=tags.get('name', f'Truck {service_type.title()} Service'),
+                service_type=service_type,
+                distance_miles=round(distance, 1),
+                latitude=lat,
+                longitude=lon,
+                services_offered=services_offered,
+                brands_serviced=[],
+                phone=tags.get('phone'),
+                website=tags.get('website'),
+                hours=tags.get('opening_hours'),
+            ))
+        
+        services.sort(key=lambda x: x.distance_miles)
+        services = services[:15]
+        
+        logger.info(f"Found {len(services)} truck services within {request.radius_miles} miles")
+        return TruckServiceResponse(services=services)
+    
+    except Exception as e:
+        logger.error(f"Error searching truck services: {e}")
+        raise HTTPException(status_code=500, detail=f"Error searching truck services: {str(e)}")
+
+
+# Weigh Stations
+class WeighStationRequest(BaseModel):
+    latitude: float
+    longitude: float
+    radius_miles: int = 100
+
+class WeighStation(BaseModel):
+    name: str
+    distance_miles: float
+    latitude: float
+    longitude: float
+    direction: Optional[str] = None
+    status: str  # 'unknown', 'open', 'closed'
+    bypass_available: bool
+    phone: Optional[str] = None
+
+class WeighStationResponse(BaseModel):
+    stations: List[WeighStation]
+
+@api_router.post("/pro/weigh-stations/search", response_model=WeighStationResponse)
+async def search_weigh_stations(request: WeighStationRequest):
+    """Find weigh stations along highways."""
+    try:
+        radius_meters = int(request.radius_miles * 1609.34)
+        
+        overpass_query = f"""
+        [out:json][timeout:25];
+        (
+          node["amenity"="weighbridge"](around:{radius_meters},{request.latitude},{request.longitude});
+          node["amenity"="weigh_station"](around:{radius_meters},{request.latitude},{request.longitude});
+          way["amenity"="weighbridge"](around:{radius_meters},{request.latitude},{request.longitude});
+          way["amenity"="weigh_station"](around:{radius_meters},{request.latitude},{request.longitude});
+        );
+        out body;
+        >;
+        out skel qt;
+        """
+        
+        async with httpx.AsyncClient(timeout=45.0) as client:
+            response = await client.post("https://overpass-api.de/api/interpreter", data=overpass_query)
+            response.raise_for_status()
+            data = response.json()
+        
+        stations = []
+        for element in data.get('elements', []):
+            if element['type'] not in ['node', 'way']:
+                continue
+            
+            tags = element.get('tags', {})
+            if element['type'] == 'way':
+                lat = element.get('center', {}).get('lat') or (element.get('bounds', {}).get('minlat', 0) + element.get('bounds', {}).get('maxlat', 0)) / 2
+                lon = element.get('center', {}).get('lon') or (element.get('bounds', {}).get('minlon', 0) + element.get('bounds', {}).get('maxlon', 0)) / 2
+            else:
+                lat = element.get('lat', 0)
+                lon = element.get('lon', 0)
+            
+            distance = haversine_miles(request.latitude, request.longitude, lat, lon)
+            
+            # Status (would need real-time feed for actual status)
+            status = 'unknown'
+            bypass = tags.get('prepass') == 'yes' or tags.get('bypass') == 'yes'
+            
+            stations.append(WeighStation(
+                name=tags.get('name', 'Weigh Station'),
+                distance_miles=round(distance, 1),
+                latitude=lat,
+                longitude=lon,
+                direction=tags.get('direction'),
+                status=status,
+                bypass_available=bypass,
+                phone=tags.get('phone'),
+            ))
+        
+        stations.sort(key=lambda x: x.distance_miles)
+        stations = stations[:10]
+        
+        logger.info(f"Found {len(stations)} weigh stations within {request.radius_miles} miles")
+        return WeighStationResponse(stations=stations)
+    
+    except Exception as e:
+        logger.error(f"Error searching weigh stations: {e}")
+        raise HTTPException(status_code=500, detail=f"Error searching weigh stations: {str(e)}")
+
+
+# ===== TRACTOR TRAILER PRO ALERTS (Keep existing synthetic route analysis) =====
 class TruckAlertRequest(BaseModel):
     """Request for truck alerts along a route"""
     route_polyline: str = Field(..., description="Encoded polyline of the route")
