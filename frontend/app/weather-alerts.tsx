@@ -21,6 +21,7 @@ interface HazardAlert {
   full_description?: string;
   description?: string;
   instruction?: string;
+  location_name?: string;
 }
 
 interface TruckerWarning {
@@ -62,10 +63,29 @@ export default function WeatherAlertsScreen() {
       </TouchableOpacity>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        {/* Route Context */}
+        <View style={styles.routeContext}>
+          <Text style={styles.routeContextTitle}>Your Route</Text>
+          <View style={styles.routeContextRow}>
+            <Text style={styles.routeContextLabel}>From:</Text>
+            <Text style={styles.routeContextValue}>{routeData.origin}</Text>
+          </View>
+          <View style={styles.routeContextRow}>
+            <Text style={styles.routeContextLabel}>To:</Text>
+            <Text style={styles.routeContextValue}>{routeData.destination}</Text>
+          </View>
+          {routeData.total_distance_miles && (
+            <View style={styles.routeContextRow}>
+              <Text style={styles.routeContextLabel}>Distance:</Text>
+              <Text style={styles.routeContextValue}>{Math.round(routeData.total_distance_miles)} miles</Text>
+            </View>
+          )}
+        </View>
+
         {/* Weather Alerts Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>⚠️ Weather Alerts Along Route</Text>
-          <Text style={styles.sectionSubtitle}>Tap any alert to see full details</Text>
+          <Text style={styles.sectionTitle}>⚠️ Weather Hazards on This Route</Text>
+          <Text style={styles.sectionSubtitle}>Each alert shows the specific location along your route</Text>
         
           {routeData.hazard_alerts && routeData.hazard_alerts.length > 0 ? (
             routeData.hazard_alerts.map((alert: HazardAlert, index: number) => {
@@ -95,8 +115,11 @@ export default function WeatherAlertsScreen() {
                       color="#fff" 
                     />
                     <View style={styles.alertInfo}>
-                      <Text style={styles.alertCountdown}>{alert.countdown_text}</Text>
+                      {alert.location_name && (
+                        <Text style={styles.alertLocation}>📍 {alert.location_name}</Text>
+                      )}
                       <Text style={styles.alertMessage}>{alert.message}</Text>
+                      <Text style={styles.alertCountdown}>{alert.countdown_text}</Text>
                     </View>
                     <Ionicons 
                       name={isExpanded ? "chevron-up" : "chevron-down"} 
@@ -139,16 +162,16 @@ export default function WeatherAlertsScreen() {
                         <Text style={styles.alertRec}>{alert.recommendation}</Text>
                       </View>
                       <View style={styles.alertMeta}>
-                        <Text style={styles.alertDistance}>📍 {Math.round(alert.distance_miles)} mi</Text>
-                        <Text style={styles.alertEta}>⏱ {alert.eta_minutes} min</Text>
+                        <Text style={styles.alertDistance}>{Math.round(alert.distance_miles)} mi from start</Text>
+                        <Text style={styles.alertEta}>ETA: {alert.eta_minutes} min</Text>
                       </View>
                     </>
                   )}
                   
                   {isExpanded && (
                     <View style={styles.alertMeta}>
-                      <Text style={styles.alertDistance}>📍 {Math.round(alert.distance_miles)} mi away</Text>
-                      <Text style={styles.alertEta}>⏱ ETA: {alert.eta_minutes} min</Text>
+                      <Text style={styles.alertDistance}>{Math.round(alert.distance_miles)} mi from start</Text>
+                      <Text style={styles.alertEta}>ETA: {alert.eta_minutes} min</Text>
                     </View>
                   )}
                 </TouchableOpacity>
@@ -258,6 +281,36 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 16,
   },
+  routeContext: {
+    backgroundColor: '#27272a',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+    marginTop: 8,
+    borderLeftWidth: 4,
+    borderLeftColor: '#3b82f6',
+  },
+  routeContextTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#e5e7eb',
+    marginBottom: 12,
+  },
+  routeContextRow: {
+    flexDirection: 'row',
+    marginBottom: 6,
+  },
+  routeContextLabel: {
+    fontSize: 14,
+    color: '#9ca3af',
+    width: 80,
+  },
+  routeContextValue: {
+    fontSize: 14,
+    color: '#fff',
+    fontWeight: '600',
+    flex: 1,
+  },
   section: {
     marginBottom: 24,
   },
@@ -303,12 +356,19 @@ const styles = StyleSheet.create({
   alertCountdown: {
     fontSize: 12,
     color: '#9ca3af',
-    marginBottom: 4,
+    marginTop: 2,
   },
   alertMessage: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '600',
     color: '#fff',
+    marginBottom: 4,
+  },
+  alertLocation: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#60a5fa',
+    marginBottom: 6,
   },
   alertExpandedContent: {
     marginTop: 8,

@@ -180,6 +180,7 @@ class HazardAlert(BaseModel):
     message: str
     recommendation: str
     countdown_text: str  # "Heavy rain in 27 minutes"
+    location_name: Optional[str] = None  # Name/description of the location where alert occurs
 
 class RestStop(BaseModel):
     name: str
@@ -1142,6 +1143,7 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
             
         distance = wp.waypoint.distance_from_start or 0
         eta_mins = wp.waypoint.eta_minutes or int(distance / 55 * 60)
+        location_name = wp.waypoint.name or f"Mile {int(distance)}"
         
         # Wind hazards
         wind_str = wp.weather.wind_speed or "0 mph"
@@ -1159,7 +1161,8 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                 eta_minutes=eta_mins,
                 message=f"Strong winds of {wind_speed} mph",
                 recommendation=f"Reduce speed to {max(35, 65 - wind_speed + 25)} mph",
-                countdown_text=f"High winds in {eta_mins} minutes" if eta_mins > 0 else "High winds at start"
+                countdown_text=f"High winds in {eta_mins} minutes" if eta_mins > 0 else "High winds at start",
+                location_name=location_name
             ))
             
         # Rain/visibility hazards
@@ -1172,7 +1175,8 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                 eta_minutes=eta_mins,
                 message="Heavy rain expected",
                 recommendation="Reduce speed, increase following distance to 4 seconds",
-                countdown_text=f"Heavy rain in {eta_mins} minutes at mile {int(distance)}"
+                countdown_text=f"Heavy rain in {eta_mins} minutes at mile {int(distance)}",
+                location_name=location_name
             ))
         elif "rain" in conditions or "shower" in conditions:
             alerts.append(HazardAlert(
@@ -1182,7 +1186,8 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                 eta_minutes=eta_mins,
                 message="Rain expected",
                 recommendation="Turn on headlights and wipers",
-                countdown_text=f"Rain in {eta_mins} minutes"
+                countdown_text=f"Rain in {eta_mins} minutes",
+                location_name=location_name
             ))
             
         # Snow/ice hazards
@@ -1194,7 +1199,8 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                 eta_minutes=eta_mins,
                 message="Snow conditions expected",
                 recommendation="Reduce speed by 50%, use winter tires if available",
-                countdown_text=f"Snow conditions in {eta_mins} minutes"
+                countdown_text=f"Snow conditions in {eta_mins} minutes",
+                location_name=location_name
             ))
             
         # Temperature-based ice warnings
@@ -1207,7 +1213,8 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                 eta_minutes=eta_mins,
                 message=f"Freezing temperature ({temp}°F) - ice risk",
                 recommendation="Watch for black ice on bridges and overpasses",
-                countdown_text=f"Ice risk zone in {eta_mins} minutes"
+                countdown_text=f"Ice risk zone in {eta_mins} minutes",
+                location_name=location_name
             ))
             
         # Fog warnings
@@ -1219,7 +1226,8 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                 eta_minutes=eta_mins,
                 message="Fog reducing visibility",
                 recommendation="Use low beams, reduce speed to match visibility",
-                countdown_text=f"Fog in {eta_mins} minutes"
+                countdown_text=f"Fog in {eta_mins} minutes",
+                location_name=location_name
             ))
             
         # Weather alerts from NOAA
@@ -1232,7 +1240,8 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                 eta_minutes=eta_mins,
                 message=alert.event,
                 recommendation=alert.headline[:100],
-                countdown_text=f"{alert.event} in {eta_mins} minutes"
+                countdown_text=f"{alert.event} in {eta_mins} minutes",
+                location_name=location_name
             ))
     
     # Sort by distance and deduplicate similar alerts

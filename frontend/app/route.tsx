@@ -94,6 +94,7 @@ interface HazardAlert {
   full_description?: string;
   description?: string;
   instruction?: string;
+  location_name?: string;
 }
 
 interface RouteData {
