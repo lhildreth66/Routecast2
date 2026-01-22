@@ -4902,6 +4902,153 @@ async def search_weigh_stations(request: WeighStationRequest):
         raise HTTPException(status_code=500, detail=f"Error searching weigh stations: {str(e)}")
 
 
+# Truck Restrictions
+class TruckRestrictionRequest(BaseModel):
+    latitude: float
+    longitude: float
+    radius_miles: int = 25
+
+class TruckRestriction(BaseModel):
+    name: str
+    type: str  # 'weight', 'height', 'width', 'hazmat', 'truck_ban', 'tunnel'
+    distance_miles: float
+    latitude: float
+    longitude: float
+    restriction: str
+    value: Optional[str] = None
+    details: Optional[str] = None
+
+class TruckRestrictionResponse(BaseModel):
+    restrictions: List[TruckRestriction]
+
+@api_router.post("/pro/truck-restrictions/search", response_model=TruckRestrictionResponse)
+async def search_truck_restrictions(request: TruckRestrictionRequest):
+    """Find roads with truck restrictions using OpenStreetMap."""
+    try:
+        radius_meters = int(request.radius_miles * 1609.34)
+        
+        # Query for various truck restrictions
+        overpass_query = f"""
+        [out:json][timeout:15];
+        (
+          way["maxweight"](around:{radius_meters},{request.latitude},{request.longitude});
+          way["maxheight"](around:{radius_meters},{request.latitude},{request.longitude});
+          way["maxwidth"](around:{radius_meters},{request.latitude},{request.longitude});
+          way["hgv"="no"](around:{radius_meters},{request.latitude},{request.longitude});
+          way["hazmat"="no"](around:{radius_meters},{request.latitude},{request.longitude});
+          way["tunnel"="yes"]["maxheight"](around:{radius_meters},{request.latitude},{request.longitude});
+        );
+        out center;
+        """
+        
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post("https://overpass-api.de/api/interpreter", data=overpass_query)
+            response.raise_for_status()
+            data = response.json()
+        
+        restrictions = []
+        for element in data.get('elements', []):
+            if element['type'] != 'way':
+                continue
+            
+            tags = element.get('tags', {})
+            center = element.get('center', {})
+            lat = center.get('lat', 0)
+            lon = center.get('lon', 0)
+            
+            if not lat or not lon:
+                continue
+            
+            distance = haversine_miles(request.latitude, request.longitude, lat, lon)
+            name = tags.get('name', tags.get('ref', 'Unnamed Road'))
+            
+            # Check for weight restrictions
+            if 'maxweight' in tags:
+                restrictions.append(TruckRestriction(
+                    name=name,
+                    type='weight',
+                    distance_miles=round(distance, 1),
+                    latitude=lat,
+                    longitude=lon,
+                    restriction='Maximum weight limit',
+                    value=tags.get('maxweight'),
+                    details=f"This road has a weight restriction of {tags.get('maxweight')}",
+                ))
+            
+            # Check for height restrictions
+            if 'maxheight' in tags:
+                restrictions.append(TruckRestriction(
+                    name=name,
+                    type='height',
+                    distance_miles=round(distance, 1),
+                    latitude=lat,
+                    longitude=lon,
+                    restriction='Maximum height limit',
+                    value=tags.get('maxheight'),
+                    details=f"This road has a height restriction of {tags.get('maxheight')}",
+                ))
+            
+            # Check for width restrictions
+            if 'maxwidth' in tags:
+                restrictions.append(TruckRestriction(
+                    name=name,
+                    type='width',
+                    distance_miles=round(distance, 1),
+                    latitude=lat,
+                    longitude=lon,
+                    restriction='Maximum width limit',
+                    value=tags.get('maxwidth'),
+                    details=f"This road has a width restriction of {tags.get('maxwidth')}",
+                ))
+            
+            # Check for truck bans
+            if tags.get('hgv') == 'no':
+                restrictions.append(TruckRestriction(
+                    name=name,
+                    type='truck_ban',
+                    distance_miles=round(distance, 1),
+                    latitude=lat,
+                    longitude=lon,
+                    restriction='No trucks allowed',
+                    details='Heavy goods vehicles (trucks) are not permitted on this road',
+                ))
+            
+            # Check for hazmat restrictions
+            if tags.get('hazmat') == 'no':
+                restrictions.append(TruckRestriction(
+                    name=name,
+                    type='hazmat',
+                    distance_miles=round(distance, 1),
+                    latitude=lat,
+                    longitude=lon,
+                    restriction='Hazmat prohibited',
+                    details='Hazardous materials transport not allowed on this road',
+                ))
+            
+            # Check for tunnel restrictions
+            if tags.get('tunnel') == 'yes' and 'maxheight' in tags:
+                restrictions.append(TruckRestriction(
+                    name=name,
+                    type='tunnel',
+                    distance_miles=round(distance, 1),
+                    latitude=lat,
+                    longitude=lon,
+                    restriction='Tunnel height restriction',
+                    value=tags.get('maxheight'),
+                    details=f"Tunnel with height limit of {tags.get('maxheight')}",
+                ))
+        
+        restrictions.sort(key=lambda x: x.distance_miles)
+        restrictions = restrictions[:30]
+        
+        logger.info(f"Found {len(restrictions)} truck restrictions within {request.radius_miles} miles")
+        return TruckRestrictionResponse(restrictions=restrictions)
+    
+    except Exception as e:
+        logger.error(f"Error searching truck restrictions: {e}")
+        raise HTTPException(status_code=500, detail=f"Error searching truck restrictions: {str(e)}")
+
+
 # ===== TRACTOR TRAILER PRO ALERTS (Keep existing synthetic route analysis) =====
 class TruckAlertRequest(BaseModel):
     """Request for truck alerts along a route"""
