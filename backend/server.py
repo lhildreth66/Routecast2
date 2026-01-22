@@ -4423,6 +4423,24 @@ async def search_rv_dealerships(request: RVDealershipRequest):
 
 # ==================== TRACTOR TRAILER PRO ENDPOINTS ====================
 
+# Helper function for distance calculations
+def haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Calculate distance in miles between two lat/lon points using Haversine formula."""
+    from math import radians, cos, sin, asin, sqrt
+    
+    # Convert to radians
+    lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
+    
+    # Haversine formula
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = sin(dlat/2)**2 + cos(lat1) * cos(lat2) * sin(dlon/2)**2
+    c = 2 * asin(sqrt(a))
+    
+    # Radius of earth in miles
+    miles = 3956 * c
+    return miles
+
 # Truck Stops & Fuel
 class TruckStopRequest(BaseModel):
     latitude: float
