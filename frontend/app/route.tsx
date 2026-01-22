@@ -476,7 +476,8 @@ export default function RouteScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [activeTab, setActiveTab] = useState<'road' | 'alerts' | 'bridges'>('road');
+  const [weatherAlertsExpanded, setWeatherAlertsExpanded] = useState(false);
+  const [bridgeAlertsExpanded, setBridgeAlertsExpanded] = useState(false);
   
   // Radar map state
   const [showRadarMap, setShowRadarMap] = useState(false);
@@ -824,33 +825,7 @@ export default function RouteScreen() {
         <Ionicons name="chevron-forward" size={20} color="#71717a" />
       </TouchableOpacity>
 
-      {/* Road / Alerts Tabs */}
-      <View style={styles.tabsContainer}>
-        <TouchableOpacity 
-          style={[styles.tab, activeTab === 'road' && styles.tabActive]}
-          onPress={() => setActiveTab('road')}
-        >
-          <Text style={[styles.tabText, activeTab === 'road' && styles.tabTextActive]}>
-            Road Conditions
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity 
-          style={[styles.tab, activeTab === 'alerts' && styles.tabActive]}
-          onPress={() => setActiveTab('alerts')}
-        >
-          <Text style={[styles.tabText, activeTab === 'alerts' && styles.tabTextActive]}>
-            Weather Alerts
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity 
-          style={[styles.tab, activeTab === 'bridges' && styles.tabActive]}
-          onPress={() => setActiveTab('bridges')}
-        >
-          <Text style={[styles.tabText, activeTab === 'bridges' && styles.tabTextActive]}>
-            Bridge Alerts
-          </Text>
-        </TouchableOpacity>
-      </View>
+
 
       {/* Content */}
       <ScrollView 
@@ -888,10 +863,7 @@ export default function RouteScreen() {
           </TouchableOpacity>
         )}
 
-        {/* ROAD CONDITIONS TAB CONTENT */}
-        {activeTab === 'road' && (
-          <>
-        {/* Waypoint Road Conditions */}
+        {/* Road Conditions - Always Visible */}
         <Text style={styles.sectionTitle}>🛣️ Road Conditions Along Route</Text>
         <Text style={styles.sectionSubtitle}>Weather-based road surface conditions</Text>
         {routeData.waypoints && Array.isArray(routeData.waypoints) && routeData.waypoints.map((wp, index) => {
@@ -1020,14 +992,23 @@ export default function RouteScreen() {
                 </TouchableOpacity>
               );
             })}
-          </>
-        )}
 
-        {/* ALERTS TAB CONTENT */}
-        {activeTab === 'alerts' && (
+        {/* Weather Alerts - Collapsible Section */}
+        <TouchableOpacity 
+          style={styles.collapsibleHeader}
+          onPress={() => setWeatherAlertsExpanded(!weatherAlertsExpanded)}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.collapsibleHeaderText}>⚠️ Weather Alerts Along Route</Text>
+          <Ionicons 
+            name={weatherAlertsExpanded ? "chevron-up" : "chevron-down"} 
+            size={24} 
+            color="#fff" 
+          />
+        </TouchableOpacity>
+        
+        {weatherAlertsExpanded && (
           <>
-            {/* Weather Alerts */}
-            <Text style={styles.sectionTitle}>⚠️ Weather Alerts Along Route</Text>
             <Text style={styles.sectionSubtitle}>Tap any alert to see full details</Text>
         
         {routeData.hazard_alerts && routeData.hazard_alerts.length > 0 ? (
@@ -1126,11 +1107,23 @@ export default function RouteScreen() {
           )}
           </>
         )}
+
+        {/* Bridge Alerts - Collapsible Section */}
+        <TouchableOpacity 
+          style={styles.collapsibleHeader}
+          onPress={() => setBridgeAlertsExpanded(!bridgeAlertsExpanded)}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.collapsibleHeaderText}>🌉 Bridge Height Warnings</Text>
+          <Ionicons 
+            name={bridgeAlertsExpanded ? "chevron-up" : "chevron-down"} 
+            size={24} 
+            color="#fff" 
+          />
+        </TouchableOpacity>
         
-        {/* BRIDGE ALERTS TAB CONTENT */}
-        {activeTab === 'bridges' && (
+        {bridgeAlertsExpanded && (
           <>
-            <Text style={styles.sectionTitle}>🌉 Bridge Height Warnings</Text>
             <Text style={styles.sectionSubtitle}>Low clearance bridges on your route</Text>
         
             {routeData.trucker_warnings && routeData.trucker_warnings.length > 0 ? (
@@ -1437,31 +1430,20 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#a1a1aa',
   },
-  tabsContainer: {
+  collapsibleHeader: {
     flexDirection: 'row',
-    backgroundColor: '#27272a',
-    marginHorizontal: 16,
-    marginTop: 12,
-    marginBottom: 8,
-    borderRadius: 8,
-    padding: 4,
-  },
-  tab: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 6,
     alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#27272a',
+    borderRadius: 8,
+    padding: 14,
+    marginTop: 16,
+    marginBottom: 8,
   },
-  tabActive: {
-    backgroundColor: '#eab308',
-  },
-  tabText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#a1a1aa',
-  },
-  tabTextActive: {
-    color: '#1a1a1a',
+  collapsibleHeaderText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
   },
   content: {
     flex: 1,

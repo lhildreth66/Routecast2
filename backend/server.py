@@ -537,6 +537,11 @@ class CampsiteIndexRequest(BaseModel):
     road_passability_score: float  # 0-100
     subscription_id: Optional[str] = None
 
+class CampsiteIndexAutoRequest(BaseModel):
+    latitude: float
+    longitude: float
+    subscription_id: Optional[str] = None
+
 class CampsiteIndexResponse(BaseModel):
     score: Optional[int] = None
     breakdown: Optional[Dict[str, float]] = None
@@ -1902,6 +1907,9 @@ async def get_route_weather(request: RouteRequest):
 @api_router.get("/routes/history", response_model=List[SavedRoute])
 async def get_route_history():
     """Get recent route history."""
+    if db is None:
+        logger.warning("Database not available for route history")
+        return []
     try:
         routes = await db.routes.find().sort("created_at", -1).limit(10).to_list(10)
         return [SavedRoute(
@@ -1919,6 +1927,9 @@ async def get_route_history():
 @api_router.get("/routes/favorites", response_model=List[SavedRoute])
 async def get_favorite_routes():
     """Get favorite routes."""
+    if db is None:
+        logger.warning("Database not available for favorites")
+        return []
     try:
         routes = await db.favorites.find().sort("created_at", -1).limit(20).to_list(20)
         return [SavedRoute(
@@ -1936,6 +1947,9 @@ async def get_favorite_routes():
 @api_router.post("/routes/favorites")
 async def add_favorite_route(request: FavoriteRouteRequest):
     """Add a route to favorites."""
+    if db is None:
+        logger.warning("Database not available for favorites")
+        raise HTTPException(status_code=503, detail="Database not available. Favorites require database connection.")
     try:
         favorite = {
             "id": str(uuid.uuid4()),
@@ -1955,6 +1969,9 @@ async def add_favorite_route(request: FavoriteRouteRequest):
 @api_router.delete("/routes/favorites/{route_id}")
 async def remove_favorite_route(route_id: str):
     """Remove a route from favorites."""
+    if db is None:
+        logger.warning("Database not available for favorites")
+        raise HTTPException(status_code=503, detail="Database not available. Favorites require database connection.")
     try:
         from bson import ObjectId
         # Try custom id field first
@@ -2976,6 +2993,255 @@ async def predict_starlink_risk(request: ConnectivityStarlinkRequest):
         logger.error(f"[PREMIUM] Unexpected error computing Starlink risk: {e}")
         raise HTTPException(status_code=500, detail="Unable to compute Starlink risk at this time")
 
+# ==================== Campsite Index Endpoints (A8) ====================
+
+async def _fetch_wind_data(client: httpx.AsyncClient, lat: float, lon: float) -> float:
+    """Fetch current wind gust from NOAA weather API."""
+    try:
+        # Get NOAA grid point
+        point_url = f"https://api.weather.gov/points/{lat},{lon}"
+        point_resp = await client.get(point_url, headers=NOAA_HEADERS, timeout=10.0)
+        if point_resp.status_code != 200:
+            logger.warning(f"NOAA point lookup failed: {point_resp.status_code}")
+            return 10.0  # Default moderate wind
+        
+        point_data = point_resp.json()
+        forecast_url = point_data['properties']['forecast']
+        
+        # Get current forecast
+        forecast_resp = await client.get(forecast_url, headers=NOAA_HEADERS, timeout=10.0)
+        if forecast_resp.status_code != 200:
+            logger.warning(f"NOAA forecast failed: {forecast_resp.status_code}")
+            return 10.0
+        
+        forecast_data = forecast_resp.json()
+        periods = forecast_data['properties']['periods']
+        if not periods:
+            return 10.0
+        
+        # Get wind speed from current period
+        current_period = periods[0]
+        wind_speed_str = current_period.get('windSpeed', '10 mph')
+        
+        # Parse wind speed (format: "10 mph" or "5 to 10 mph")
+        import re
+        matches = re.findall(r'\d+', wind_speed_str)
+        if matches:
+            # Use the higher value if range
+            wind_mph = float(matches[-1])
+            # Estimate gust as 1.3x sustained
+            return wind_mph * 1.3
+        
+        return 10.0
+    except Exception as e:
+        logger.warning(f"Error fetching wind data: {e}")
+        return 10.0  # Default
+
+
+async def _fetch_terrain_data(client: httpx.AsyncClient, lat: float, lon: float) -> tuple[float, float]:
+    """Fetch terrain slope and shade estimate."""
+    try:
+        # Use Open-Elevation API for elevation data
+        # Get 4 points in a small grid to calculate slope
+        offset = 0.001  # ~100m
+        points = [
+            f"{lat},{lon}",
+            f"{lat+offset},{lon}",
+            f"{lat},{lon+offset}",
+            f"{lat-offset},{lon}",
+            f"{lat},{lon-offset}",
+        ]
+        
+        url = "https://api.open-elevation.com/api/v1/lookup"
+        payload = {"locations": [{"latitude": float(p.split(',')[0]), "longitude": float(p.split(',')[1])} for p in points]}
+        
+        resp = await client.post(url, json=payload, timeout=15.0)
+        if resp.status_code != 200:
+            logger.warning(f"Elevation API failed: {resp.status_code}")
+            return 5.0, 0.3  # Default moderate slope, low shade
+        
+        data = resp.json()
+        elevations = [r['elevation'] for r in data['results']]
+        
+        if len(elevations) >= 5:
+            # Calculate slope as max elevation difference
+            center = elevations[0]
+            diffs = [abs(e - center) for e in elevations[1:]]
+            max_diff = max(diffs)
+            # Convert to percentage (approximate)
+            distance_m = offset * 111000  # degrees to meters (rough)
+            slope_pct = (max_diff / distance_m) * 100
+            slope_pct = min(slope_pct, 50.0)  # Cap at 50%
+        else:
+            slope_pct = 5.0
+        
+        # Shade: use OSM to check for tree coverage
+        shade_score = await _fetch_shade_from_osm(client, lat, lon)
+        
+        return slope_pct, shade_score
+    except Exception as e:
+        logger.warning(f"Error fetching terrain data: {e}")
+        return 5.0, 0.3  # Default
+
+
+async def _fetch_shade_from_osm(client: httpx.AsyncClient, lat: float, lon: float) -> float:
+    """Estimate shade from OSM tree/forest coverage."""
+    try:
+        # Query OSM for natural=wood, landuse=forest near location
+        bbox_size = 0.005  # ~500m radius
+        bbox = f"{lat-bbox_size},{lon-bbox_size},{lat+bbox_size},{lon+bbox_size}"
+        
+        overpass_query = f"""
+        [out:json][timeout:10];
+        (
+          way["natural"="wood"]({bbox});
+          way["landuse"="forest"]({bbox});
+          way["natural"="tree_row"]({bbox});
+        );
+        out geom;
+        """
+        
+        overpass_url = "https://overpass-api.de/api/interpreter"
+        resp = await client.post(overpass_url, data={"data": overpass_query}, timeout=15.0)
+        
+        if resp.status_code != 200:
+            return 0.2  # Low shade default
+        
+        data = resp.json()
+        elements = data.get('elements', [])
+        
+        if len(elements) > 0:
+            # If trees/forest found nearby, assume moderate to high shade
+            return 0.6
+        else:
+            # Open area, low shade
+            return 0.2
+    except Exception as e:
+        logger.warning(f"Error fetching shade data: {e}")
+        return 0.3  # Default moderate
+
+
+async def _fetch_access_score(client: httpx.AsyncClient, lat: float, lon: float) -> float:
+    """Calculate access score based on nearby road types."""
+    try:
+        # Query OSM for roads near location
+        bbox_size = 0.01  # ~1km radius
+        bbox = f"{lat-bbox_size},{lon-bbox_size},{lat+bbox_size},{lon+bbox_size}"
+        
+        overpass_query = f"""
+        [out:json][timeout:10];
+        (
+          way["highway"]({bbox});
+        );
+        out geom;
+        """
+        
+        overpass_url = "https://overpass-api.de/api/interpreter"
+        resp = await client.post(overpass_url, data={"data": overpass_query}, timeout=15.0)
+        
+        if resp.status_code != 200:
+            return 0.5  # Medium access default
+        
+        data = resp.json()
+        elements = data.get('elements', [])
+        
+        if not elements:
+            return 0.3  # Poor access
+        
+        # Score based on best road type found
+        road_scores = {
+            'motorway': 1.0,
+            'trunk': 0.95,
+            'primary': 0.9,
+            'secondary': 0.85,
+            'tertiary': 0.8,
+            'unclassified': 0.6,
+            'residential': 0.7,
+            'service': 0.5,
+            'track': 0.4,
+            'path': 0.2,
+        }
+        
+        best_score = 0.3
+        for element in elements:
+            highway_type = element.get('tags', {}).get('highway', '')
+            score = road_scores.get(highway_type, 0.5)
+            best_score = max(best_score, score)
+        
+        return best_score
+    except Exception as e:
+        logger.warning(f"Error fetching access score: {e}")
+        return 0.5  # Default
+
+
+async def _fetch_signal_score(lat: float, lon: float) -> float:
+    """Estimate cell signal based on distance to populated areas."""
+    try:
+        # Use the existing cell signal prediction service
+        signal_data = await predict_cell_signal_at_location(lat, lon)
+        
+        if signal_data:
+            # Convert bars (0-5) to score (0-1)
+            bars = signal_data.get('bars', 2.5)
+            return bars / 5.0
+        
+        return 0.5  # Default medium signal
+    except Exception as e:
+        logger.warning(f"Error fetching signal score: {e}")
+        return 0.5
+
+
+async def _fetch_passability_score(client: httpx.AsyncClient, lat: float, lon: float) -> float:
+    """Get road passability using the existing service."""
+    try:
+        # Use the road passability service
+        service = RoadPassabilityService()
+        
+        # Get current weather
+        point_url = f"https://api.weather.gov/points/{lat},{lon}"
+        point_resp = await client.get(point_url, headers=NOAA_HEADERS, timeout=10.0)
+        
+        if point_resp.status_code != 200:
+            return 75.0  # Default good passability
+        
+        point_data = point_resp.json()
+        forecast_url = point_data['properties']['forecastHourly']
+        
+        forecast_resp = await client.get(forecast_url, headers=NOAA_HEADERS, timeout=10.0)
+        if forecast_resp.status_code != 200:
+            return 75.0
+        
+        forecast_data = forecast_resp.json()
+        periods = forecast_data['properties']['periods']
+        if not periods:
+            return 75.0
+        
+        current = periods[0]
+        
+        # Extract weather conditions
+        temp_f = current.get('temperature', 50)
+        precip_prob = current.get('probabilityOfPrecipitation', {}).get('value', 0) or 0
+        
+        # Simple passability calculation
+        # Start with 100, reduce for adverse conditions
+        score = 100.0
+        
+        # Reduce for freezing temps
+        if temp_f < 32:
+            score -= 20
+        
+        # Reduce for precipitation
+        if precip_prob > 50:
+            score -= 15
+        elif precip_prob > 20:
+            score -= 10
+        
+        return max(score, 0.0)
+    except Exception as e:
+        logger.warning(f"Error fetching passability score: {e}")
+        return 75.0  # Default
+
+
 @api_router.post("/pro/campsite-index", response_model=CampsiteIndexResponse)
 async def calculate_campsite_index(request: CampsiteIndexRequest):
     """Premium-gated Campsite Index scoring (Task A8)."""
@@ -3006,6 +3272,58 @@ async def calculate_campsite_index(request: CampsiteIndexRequest):
         raise HTTPException(status_code=400, detail=f"Invalid parameters: {str(e)}")
     except Exception as e:
         logger.error(f"[PREMIUM] Unexpected error computing campsite index: {e}")
+        raise HTTPException(status_code=500, detail="Unable to compute campsite index at this time")
+
+
+@api_router.post("/pro/campsite-index/auto", response_model=CampsiteIndexResponse)
+async def calculate_campsite_index_auto(request: CampsiteIndexAutoRequest):
+    """Premium-gated Campsite Index with automatic data fetching."""
+    logger.info(f"[PREMIUM] Auto campsite index for lat={request.latitude}, lon={request.longitude}")
+    
+    # Check premium entitlement
+    require_premium(request.subscription_id, CAMPSITE_INDEX)
+
+    try:
+        # Fetch real data from various sources
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            # 1. Get current weather for wind
+            wind_gust_mph = await _fetch_wind_data(client, request.latitude, request.longitude)
+            
+            # 2. Get terrain data for slope and shade
+            slope_pct, shade_score = await _fetch_terrain_data(client, request.latitude, request.longitude)
+            
+            # 3. Get road access score from OSM
+            access_score = await _fetch_access_score(client, request.latitude, request.longitude)
+            
+            # 4. Get cell signal estimate
+            signal_score = await _fetch_signal_score(request.latitude, request.longitude)
+            
+            # 5. Get road passability
+            road_passability_score = await _fetch_passability_score(client, request.latitude, request.longitude)
+
+        # Calculate the score using the real data
+        factors = SiteFactors(
+            wind_gust_mph=wind_gust_mph,
+            shade_score=shade_score,
+            slope_pct=slope_pct,
+            access_score=access_score,
+            signal_score=signal_score,
+            road_passability_score=road_passability_score,
+        )
+        result = campsite_score(factors)
+        
+        logger.info(f"[PREMIUM] Auto campsite index computed: score={result.score}")
+        return CampsiteIndexResponse(
+            score=result.score,
+            breakdown=result.breakdown,
+            explanations=result.explanations,
+            is_premium_locked=False,
+        )
+    except ValueError as e:
+        logger.error(f"[PREMIUM] Invalid parameters for auto campsite index: {e}")
+        raise HTTPException(status_code=400, detail=f"Invalid parameters: {str(e)}")
+    except Exception as e:
+        logger.error(f"[PREMIUM] Unexpected error computing auto campsite index: {e}")
         raise HTTPException(status_code=500, detail="Unable to compute campsite index at this time")
 
 # ==================== Claim Log Endpoints (A9) ====================

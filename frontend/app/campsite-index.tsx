@@ -12,6 +12,7 @@ import {
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
+import * as Location from 'expo-location';
 import { API_BASE } from './apiConfig';
 import PaywallModal from './components/PaywallModal';
 import { hasBoondockingPro } from './utils/entitlements';
@@ -31,12 +32,18 @@ interface CampsiteIndexResult {
 
 export default function CampsiteIndexScreen() {
   const router = useRouter();
+  const [latitude, setLatitude] = useState('');
+  const [longitude, setLongitude] = useState('');
+  const [locationLoading, setLocationLoading] = useState(false);
+  
+  // Keep manual inputs as fallback
   const [windGustMph, setWindGustMph] = useState('15');
   const [shadeScore, setShadeScore] = useState('0.5');
   const [slopePct, setSlopePct] = useState('8');
   const [accessScore, setAccessScore] = useState('0.7');
   const [signalScore, setSignalScore] = useState('0.6');
   const [passabilityScore, setPassabilityScore] = useState('75');
+  const [useAutoMode, setUseAutoMode] = useState(true);
 
   const [result, setResult] = useState<CampsiteIndexResult | null>(null);
   const [loading, setLoading] = useState(false);
@@ -45,6 +52,20 @@ export default function CampsiteIndexScreen() {
   const [isPro, setIsPro] = useState(false);
 
   useEffect(() => {
+    // Get current location on mount
+    (async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status === 'granted') {
+          const location = await Location.getCurrentPositionAsync({});
+          setLatitude(location.coords.latitude.toFixed(4));
+          setLongitude(location.coords.longitude.toFixed(4));
+        }
+      } catch (err) {
+        console.log('Could not get current location');
+      }
+    })();
+    
     // TESTING: Paywall disabled
     // const checkPro = async () => {
     //   const pro = await hasBoondockingPro();
@@ -54,6 +75,39 @@ export default function CampsiteIndexScreen() {
     setIsPro(true); // Always set to true for testing
   }, []);
 
+  const useCurrentLocation = async () => {
+    setLocationLoading(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert(
+          'Location Permission Required',
+          'Please enable location permissions in your device settings to use this feature.',
+          [{ text: 'OK' }]
+        );
+        setLocationLoading(false);
+        return;
+      }
+
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+        timeInterval: 10000,
+        distanceInterval: 0,
+      });
+      setLatitude(location.coords.latitude.toFixed(4));
+      setLongitude(location.coords.longitude.toFixed(4));
+      setLocationLoading(false);
+      Alert.alert('Location Updated', 'Your current location has been set.');
+    } catch (err: any) {
+      setLocationLoading(false);
+      Alert.alert(
+        'Location Error',
+        err.message || 'Unable to get your location. Make sure GPS is enabled.',
+        [{ text: 'OK' }]
+      );
+    }
+  };
+
   const calculateScore = async () => {
     // TESTING: Paywall disabled
     // if (!isPro) {
@@ -62,18 +116,34 @@ export default function CampsiteIndexScreen() {
     //   return;
     // }
 
+    if (useAutoMode && (!latitude || !longitude)) {
+      Alert.alert('Location Required', 'Please enter coordinates or use current location.');
+      return;
+    }
+
     setLoading(true);
     setResult(null);
     try {
-      const response = await axios.post(`${API_BASE}/api/pro/campsite-index`, {
-        wind_gust_mph: parseFloat(windGustMph),
-        shade_score: parseFloat(shadeScore),
-        slope_pct: parseFloat(slopePct),
-        access_score: parseFloat(accessScore),
-        signal_score: parseFloat(signalScore),
-        road_passability_score: parseFloat(passabilityScore),
-        subscription_id: 'test', // TESTING: Bypass premium check
-      });
+      let response;
+      if (useAutoMode) {
+        // Auto mode: fetch real data from backend
+        response = await axios.post(`${API_BASE}/api/pro/campsite-index/auto`, {
+          latitude: parseFloat(latitude),
+          longitude: parseFloat(longitude),
+          subscription_id: 'test',
+        });
+      } else {
+        // Manual mode: use user inputs
+        response = await axios.post(`${API_BASE}/api/pro/campsite-index`, {
+          wind_gust_mph: parseFloat(windGustMph),
+          shade_score: parseFloat(shadeScore),
+          slope_pct: parseFloat(slopePct),
+          access_score: parseFloat(accessScore),
+          signal_score: parseFloat(signalScore),
+          road_passability_score: parseFloat(passabilityScore),
+          subscription_id: 'test',
+        });
+      }
 
       setResult(response.data);
     } catch (error: any) {
@@ -107,85 +177,158 @@ export default function CampsiteIndexScreen() {
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Site Conditions</Text>
-
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>Wind Gust (mph)</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="e.g., 15"
-            keyboardType="decimal-pad"
-            value={windGustMph}
-            onChangeText={setWindGustMph}
-            editable={!loading}
-          />
-          <Text style={styles.hint}>0-40+ mph. Higher wind reduces comfort.</Text>
+        <View style={styles.modeToggle}>
+          <TouchableOpacity
+            style={[styles.modeButton, useAutoMode && styles.modeButtonActive]}
+            onPress={() => setUseAutoMode(true)}
+          >
+            <Text style={[styles.modeButtonText, useAutoMode && styles.modeButtonTextActive]}>
+              Auto
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.modeButton, !useAutoMode && styles.modeButtonActive]}
+            onPress={() => setUseAutoMode(false)}
+          >
+            <Text style={[styles.modeButtonText, !useAutoMode && styles.modeButtonTextActive]}>
+              Manual
+            </Text>
+          </TouchableOpacity>
         </View>
 
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>Shade Score (0-1)</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="e.g., 0.5"
-            keyboardType="decimal-pad"
-            value={shadeScore}
-            onChangeText={setShadeScore}
-            editable={!loading}
-          />
-          <Text style={styles.hint}>0 = no shade, 1 = full shade coverage</Text>
-        </View>
+        {useAutoMode ? (
+          <>
+            <Text style={styles.sectionTitle}>Location</Text>
+            <Text style={styles.infoText}>
+              Automatic mode fetches real-time data: current wind, terrain slope, tree shade, road access, cell signal, and passability conditions.
+            </Text>
+            
+            <View style={styles.locationRow}>
+              <View style={styles.coordInput}>
+                <Text style={styles.label}>Latitude</Text>
+                <TextInput
+                  style={styles.input}
+                  keyboardType="numeric"
+                  value={latitude}
+                  onChangeText={setLatitude}
+                  placeholder="40.7128"
+                  placeholderTextColor="#999"
+                  editable={!loading}
+                />
+              </View>
+              <View style={styles.coordInput}>
+                <Text style={styles.label}>Longitude</Text>
+                <TextInput
+                  style={styles.input}
+                  keyboardType="numeric"
+                  value={longitude}
+                  onChangeText={setLongitude}
+                  placeholder="-74.0060"
+                  placeholderTextColor="#999"
+                  editable={!loading}
+                />
+              </View>
+            </View>
 
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>Slope (%)</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="e.g., 8"
-            keyboardType="decimal-pad"
-            value={slopePct}
-            onChangeText={setSlopePct}
-            editable={!loading}
-          />
-          <Text style={styles.hint}>0% = flat, 25%+ = steep. Steeper slopes are harder to set up.</Text>
-        </View>
+            <TouchableOpacity
+              style={styles.locationButton}
+              onPress={useCurrentLocation}
+              disabled={locationLoading || loading}
+            >
+              {locationLoading ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Ionicons name="location" size={20} color="#fff" />
+              )}
+              <Text style={styles.locationButtonText}>Use Current Location</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <>
+            <Text style={styles.sectionTitle}>Site Conditions (Manual)</Text>
+            <Text style={styles.infoText}>
+              Manual mode requires you to enter each factor yourself.
+            </Text>
 
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>Access Score (0-1)</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="e.g., 0.7"
-            keyboardType="decimal-pad"
-            value={accessScore}
-            onChangeText={setAccessScore}
-            editable={!loading}
-          />
-          <Text style={styles.hint}>0 = poor road/parking access, 1 = excellent</Text>
-        </View>
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Wind Gust (mph)</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g., 15"
+                keyboardType="decimal-pad"
+                value={windGustMph}
+                onChangeText={setWindGustMph}
+                editable={!loading}
+              />
+              <Text style={styles.hint}>0-40+ mph. Higher wind reduces comfort.</Text>
+            </View>
 
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>Signal Score (0-1)</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="e.g., 0.6"
-            keyboardType="decimal-pad"
-            value={signalScore}
-            onChangeText={setSignalScore}
-            editable={!loading}
-          />
-          <Text style={styles.hint}>0 = no signal, 1 = excellent connectivity</Text>
-        </View>
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Shade Score (0-1)</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g., 0.5"
+                keyboardType="decimal-pad"
+                value={shadeScore}
+                onChangeText={setShadeScore}
+                editable={!loading}
+              />
+              <Text style={styles.hint}>0 = no shade, 1 = full shade coverage</Text>
+            </View>
 
-        <View style={styles.inputGroup}>
-          <Text style={styles.label}>Road Passability Score (0-100)</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="e.g., 75"
-            keyboardType="decimal-pad"
-            value={passabilityScore}
-            onChangeText={setPassabilityScore}
-            editable={!loading}
-          />
-          <Text style={styles.hint}>0 = impassable, 100 = easily drivable</Text>
-        </View>
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Slope (%)</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g., 8"
+                keyboardType="decimal-pad"
+                value={slopePct}
+                onChangeText={setSlopePct}
+                editable={!loading}
+              />
+              <Text style={styles.hint}>0% = flat, 25%+ = steep. Steeper slopes are harder to set up.</Text>
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Access Score (0-1)</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g., 0.7"
+                keyboardType="decimal-pad"
+                value={accessScore}
+                onChangeText={setAccessScore}
+                editable={!loading}
+              />
+              <Text style={styles.hint}>0 = poor road/parking access, 1 = excellent</Text>
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Signal Score (0-1)</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g., 0.6"
+                keyboardType="decimal-pad"
+                value={signalScore}
+                onChangeText={setSignalScore}
+                editable={!loading}
+              />
+              <Text style={styles.hint}>0 = no signal, 1 = excellent connectivity</Text>
+            </View>
+
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>Road Passability Score (0-100)</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="e.g., 75"
+                keyboardType="decimal-pad"
+                value={passabilityScore}
+                onChangeText={setPassabilityScore}
+                editable={!loading}
+              />
+              <Text style={styles.hint}>0 = impassable, 100 = easily drivable</Text>
+            </View>
+          </>
+        )}
       </View>
 
       <View style={styles.buttonGroup}>
@@ -316,6 +459,58 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#888',
     fontStyle: 'italic',
+  },
+  modeToggle: {
+    flexDirection: 'row',
+    backgroundColor: '#F0F0F0',
+    borderRadius: 8,
+    padding: 4,
+    marginBottom: 16,
+  },
+  modeButton: {
+    flex: 1,
+    paddingVertical: 8,
+    alignItems: 'center',
+    borderRadius: 6,
+  },
+  modeButtonActive: {
+    backgroundColor: '#1E88E5',
+  },
+  modeButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#666',
+  },
+  modeButtonTextActive: {
+    color: '#FFF',
+  },
+  infoText: {
+    fontSize: 13,
+    color: '#666',
+    marginBottom: 16,
+    lineHeight: 20,
+  },
+  locationRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginBottom: 12,
+  },
+  coordInput: {
+    flex: 1,
+  },
+  locationButton: {
+    backgroundColor: '#1E88E5',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: 8,
+    gap: 8,
+  },
+  locationButtonText: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '600',
   },
   buttonGroup: {
     flexDirection: 'row',
