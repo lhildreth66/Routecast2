@@ -476,7 +476,6 @@ export default function RouteScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [activeTab, setActiveTab] = useState<'alerts' | 'bridges'>('alerts');
   
   // Radar map state
   const [showRadarMap, setShowRadarMap] = useState(false);
@@ -526,11 +525,6 @@ export default function RouteScreen() {
         throw new Error('Missing required route fields');
       }
       setRouteData(data);
-      
-      // Auto-switch to Bridge Alerts tab if there are trucker warnings
-      if (data.trucker_warnings && Array.isArray(data.trucker_warnings) && data.trucker_warnings.length > 0) {
-        setActiveTab('bridges');
-      }
       
     } catch (e) {
       console.error('Error parsing route data:', e);
@@ -810,33 +804,30 @@ export default function RouteScreen() {
         </TouchableOpacity>
       )}
 
-      {/* Boondockers Pro Section */}
-      <TouchableOpacity 
-        style={styles.boondockersProSection}
-        onPress={() => router.push('/boondockers-pro')}
-      >
-        <View style={styles.boondockersProIcon}>
-          <Ionicons name="bonfire" size={24} color="#8b4513" />
-        </View>
-        <View style={styles.boondockersProContent}>
-          <Text style={styles.boondockersProTitle}>Boondockers Pro</Text>
-        </View>
-        <Ionicons name="chevron-forward" size={20} color="#71717a" />
-      </TouchableOpacity>
+      {/* Pro Features Row */}
+      <View style={styles.proFeaturesRow}>
+        {/* Boondockers Pro */}
+        <TouchableOpacity 
+          style={styles.proFeatureCard}
+          onPress={() => router.push('/boondockers-pro')}
+        >
+          <View style={[styles.proFeatureIcon, { backgroundColor: '#8b4513' }]}>
+            <Ionicons name="bonfire" size={20} color="#fff" />
+          </View>
+          <Text style={styles.proFeatureTitle}>Boondockers Pro</Text>
+        </TouchableOpacity>
 
-      {/* Tractor Trailer Pro Section */}
-      <TouchableOpacity 
-        style={styles.boondockersProSection}
-        onPress={() => router.push('/tractor-trailer-pro')}
-      >
-        <View style={styles.boondockersProIcon}>
-          <Ionicons name="bus" size={24} color="#3b82f6" />
-        </View>
-        <View style={styles.boondockersProContent}>
-          <Text style={styles.boondockersProTitle}>Tractor Trailer Pro</Text>
-        </View>
-        <Ionicons name="chevron-forward" size={20} color="#71717a" />
-      </TouchableOpacity>
+        {/* Tractor Trailer Pro */}
+        <TouchableOpacity 
+          style={styles.proFeatureCard}
+          onPress={() => router.push('/tractor-trailer-pro')}
+        >
+          <View style={[styles.proFeatureIcon, { backgroundColor: '#3b82f6' }]}>
+            <Ionicons name="bus" size={20} color="#fff" />
+          </View>
+          <Text style={styles.proFeatureTitle}>Tractor Trailer Pro</Text>
+        </TouchableOpacity>
+      </View>
 
       {/* Content */}
       <ScrollView 
@@ -873,6 +864,32 @@ export default function RouteScreen() {
             <Text style={styles.truckerAlertsButtonArrow}>›</Text>
           </TouchableOpacity>
         )}
+
+        {/* Tabs for Weather Alerts and Bridge Alerts */}
+        <View style={styles.tabsContainer}>
+          <TouchableOpacity
+            style={styles.tab}
+            onPress={() => router.push({
+              pathname: '/weather-alerts',
+              params: { routeData: JSON.stringify(routeData) }
+            })}
+          >
+            <Text style={styles.tabText}>
+              Weather Alerts {routeData.hazard_alerts && routeData.hazard_alerts.length > 0 && `(${routeData.hazard_alerts.length})`}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.tab}
+            onPress={() => router.push({
+              pathname: '/truckerAlerts',
+              params: { routeData: JSON.stringify(routeData) }
+            })}
+          >
+            <Text style={styles.tabText}>
+              Bridge Alerts {routeData.bridge_warnings && routeData.bridge_warnings.length > 0 && `(${routeData.bridge_warnings.length})`}
+            </Text>
+          </TouchableOpacity>
+        </View>
 
         {/* Road Conditions - Always Visible */}
         <Text style={styles.sectionTitle}>🛣️ Road Conditions Along Route</Text>
@@ -1003,186 +1020,6 @@ export default function RouteScreen() {
                 </TouchableOpacity>
               );
             })}
-
-        {/* Tabs for Weather Alerts and Bridge Alerts */}
-        <View style={styles.tabsContainer}>
-          <TouchableOpacity
-            style={[styles.tab, activeTab === 'alerts' && styles.tabActive]}
-            onPress={() => setActiveTab('alerts')}
-          >
-            <Text style={[styles.tabText, activeTab === 'alerts' && styles.tabTextActive]}>
-              Weather Alerts {routeData.hazard_alerts && routeData.hazard_alerts.length > 0 && `(${routeData.hazard_alerts.length})`}
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.tab, activeTab === 'bridges' && styles.tabActive]}
-            onPress={() => setActiveTab('bridges')}
-          >
-            <Text style={[styles.tabText, activeTab === 'bridges' && styles.tabTextActive]}>
-              Bridge Alerts {routeData.bridge_warnings && routeData.bridge_warnings.length > 0 && `(${routeData.bridge_warnings.length})`}
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Weather Alerts Tab Content */}
-        {activeTab === 'alerts' && (
-          <>
-            <Text style={styles.sectionSubtitle}>Tap any alert to see full details</Text>
-        
-        {routeData.hazard_alerts && routeData.hazard_alerts.length > 0 ? (
-          routeData.hazard_alerts.map((alert, index) => {
-            const isExpanded = expandedCards.has(index + 1000); // Use offset to differentiate from road cards
-            
-            return (
-              <TouchableOpacity 
-                    key={index} 
-                    style={[
-                      styles.alertCard,
-                      alert.severity === 'extreme' ? styles.alertExtreme :
-                      alert.severity === 'high' ? styles.alertHigh : styles.alertMedium,
-                      isExpanded && styles.alertCardExpanded
-                    ]}
-                    onPress={() => toggleCardExpand(index + 1000)}
-                    activeOpacity={0.8}
-                  >
-                    <View style={styles.alertHeader}>
-                      <Ionicons 
-                        name={
-                          alert.type === 'ice' ? 'snow' :
-                          alert.type === 'rain' ? 'rainy' :
-                          alert.type === 'wind' ? 'cloudy' :
-                          'warning'
-                        } 
-                        size={28} 
-                        color="#fff" 
-                      />
-                      <View style={styles.alertInfo}>
-                        <Text style={styles.alertCountdown}>{alert.countdown_text}</Text>
-                        <Text style={styles.alertMessage}>{alert.message}</Text>
-                      </View>
-                      <Ionicons 
-                        name={isExpanded ? "chevron-up" : "chevron-down"} 
-                        size={20} 
-                        color="#fff" 
-                      />
-                    </View>
-                    
-                    {/* Expanded Alert Details */}
-                    {isExpanded && (
-                      <View style={styles.alertExpandedContent}>
-                        <View style={styles.alertFullDescription}>
-                          <Text style={styles.alertFullTitle}>Full Alert Details:</Text>
-                          <Text style={styles.alertFullText}>
-                            {alert.full_description || alert.description || 
-                             `This ${alert.message || 'weather alert'} is active for your route area. ` +
-                             `Exercise caution and monitor local weather updates. ` +
-                             `Conditions may include reduced visibility, slippery roads, or other hazards.`}
-                          </Text>
-                        </View>
-                        
-                        {alert.instruction && (
-                          <View style={styles.alertInstructionBox}>
-                            <Text style={styles.alertInstructionTitle}>📋 What To Do:</Text>
-                            <Text style={styles.alertInstructionText}>{alert.instruction}</Text>
-                          </View>
-                        )}
-                        
-                        <View style={styles.alertAction}>
-                          <Ionicons name="checkmark-circle" size={16} color="#22c55e" />
-                          <Text style={styles.alertRec}>{alert.recommendation}</Text>
-                        </View>
-                      </View>
-                    )}
-                    
-                    {!isExpanded && (
-                      <>
-                        <View style={styles.alertAction}>
-                          <Ionicons name="checkmark-circle" size={16} color="#22c55e" />
-                          <Text style={styles.alertRec}>{alert.recommendation}</Text>
-                        </View>
-                        <View style={styles.alertMeta}>
-                          <Text style={styles.alertDistance}>📍 {Math.round(alert.distance_miles)} mi</Text>
-                          <Text style={styles.alertEta}>⏱ {alert.eta_minutes} min</Text>
-                        </View>
-                      </>
-                    )}
-                    
-                    {isExpanded && (
-                      <View style={styles.alertMeta}>
-                        <Text style={styles.alertDistance}>📍 {Math.round(alert.distance_miles)} mi away</Text>
-                        <Text style={styles.alertEta}>⏱ ETA: {alert.eta_minutes} min</Text>
-                      </View>
-                    )}
-                  </TouchableOpacity>
-                );
-              })
-            ) : (
-              <View style={styles.noAlerts}>
-                <Ionicons name="checkmark-circle" size={64} color="#22c55e" />
-                <Text style={styles.noAlertsTitle}>All Clear!</Text>
-                <Text style={styles.noAlertsText}>No significant hazards on your route</Text>
-              </View>
-          )}
-          </>
-        )}
-
-        {/* Bridge Alerts Tab Content */}
-        {activeTab === 'bridges' && (
-          <>
-            <Text style={styles.sectionSubtitle}>Low clearance bridges on your route</Text>
-        
-            {routeData.trucker_warnings && routeData.trucker_warnings.length > 0 ? (
-              routeData.trucker_warnings.map((warning, index) => {
-                const isBridgeExpanded = expandedCards.has(index + 2000); // Use different offset for bridge alerts
-                
-                return (
-                  <TouchableOpacity 
-                    key={index}
-                    style={[
-                      styles.bridgeAlertCard,
-                      isBridgeExpanded && styles.bridgeAlertCardExpanded
-                    ]}
-                    onPress={() => toggleCard(index + 2000)}
-                    activeOpacity={0.9}
-                  >
-                    <View style={styles.bridgeAlertHeader}>
-                      <View style={styles.bridgeAlertIconContainer}>
-                        <Text style={styles.bridgeAlertIcon}>🌉</Text>
-                      </View>
-                      <View style={styles.bridgeAlertInfo}>
-                        <Text style={styles.bridgeAlertTitle}>Low Clearance Bridge</Text>
-                        <Text style={styles.bridgeAlertSubtitle}>Bridge #{index + 1}</Text>
-                      </View>
-                      <Ionicons 
-                        name={isBridgeExpanded ? "chevron-up" : "chevron-down"} 
-                        size={20} 
-                        color="#eab308" 
-                      />
-                    </View>
-                    
-                    {isBridgeExpanded && (
-                      <View style={styles.bridgeAlertDetails}>
-                        <Text style={styles.bridgeAlertWarningText}>{warning}</Text>
-                        <View style={styles.bridgeAlertTip}>
-                          <Ionicons name="information-circle" size={16} color="#eab308" />
-                          <Text style={styles.bridgeAlertTipText}>
-                            Ensure your vehicle height is within safe limits before proceeding
-                          </Text>
-                        </View>
-                      </View>
-                    )}
-                  </TouchableOpacity>
-                );
-              })
-            ) : (
-              <View style={styles.noAlerts}>
-                <Ionicons name="checkmark-circle" size={64} color="#22c55e" />
-                <Text style={styles.noAlertsTitle}>All Clear!</Text>
-                <Text style={styles.noAlertsText}>No bridge height warnings on your route</Text>
-              </View>
-            )}
-          </>
-        )}
         
         <View style={styles.bottomPadding} />
       </ScrollView>
@@ -1434,6 +1271,35 @@ const styles = StyleSheet.create({
   boondockersProDesc: {
     fontSize: 12,
     color: '#a1a1aa',
+  },
+  proFeaturesRow: {
+    flexDirection: 'row',
+    gap: 12,
+    paddingHorizontal: 16,
+    marginBottom: 16,
+  },
+  proFeatureCard: {
+    flex: 1,
+    backgroundColor: '#1a1a1a',
+    borderRadius: 12,
+    padding: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#27272a',
+  },
+  proFeatureIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  proFeatureTitle: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   tabsContainer: {
     flexDirection: 'row',
