@@ -57,6 +57,12 @@
     },
     "ios": {
       "bundleIdentifier": "com.routecast.app"
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "7b6c21be-1c86-4aee-b78e-0be00853818f"
+      }
     }
   }
 }
