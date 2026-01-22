@@ -824,7 +824,19 @@ export default function RouteScreen() {
         <Ionicons name="chevron-forward" size={20} color="#71717a" />
       </TouchableOpacity>
 
-
+      {/* Tractor Trailer Pro Section */}
+      <TouchableOpacity 
+        style={styles.boondockersProSection}
+        onPress={() => router.push('/tractor-trailer-pro')}
+      >
+        <View style={styles.boondockersProIcon}>
+          <Ionicons name="bus" size={24} color="#3b82f6" />
+        </View>
+        <View style={styles.boondockersProContent}>
+          <Text style={styles.boondockersProTitle}>Tractor Trailer Pro</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={20} color="#71717a" />
+      </TouchableOpacity>
 
       {/* Content */}
       <ScrollView 
