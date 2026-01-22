@@ -26,7 +26,7 @@ export default function TruckStopsScreen() {
   const router = useRouter();
   const [latitude, setLatitude] = useState('');
   const [longitude, setLongitude] = useState('');
-  const [searchRadius, setSearchRadius] = useState('25');
+  const [searchRadius, setSearchRadius] = useState('15');
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [locationLoading, setLocationLoading] = useState(false);
@@ -83,6 +83,8 @@ export default function TruckStopsScreen() {
         latitude: parseFloat(latitude),
         longitude: parseFloat(longitude),
         radius_miles: parseInt(searchRadius, 10),
+      }, {
+        timeout: 25000, // 25 second timeout
       });
       setStops(resp.data.stops || []);
       if (resp.data.stops && resp.data.stops.length === 0) {

@@ -4427,7 +4427,7 @@ async def search_rv_dealerships(request: RVDealershipRequest):
 class TruckStopRequest(BaseModel):
     latitude: float
     longitude: float
-    radius_miles: int = 25
+    radius_miles: int = 15
 
 class TruckStop(BaseModel):
     name: str
@@ -4452,37 +4452,29 @@ async def search_truck_stops(request: TruckStopRequest):
     try:
         radius_meters = int(request.radius_miles * 1609.34)
         
+        # Simplified query focusing on major brands and HGV fuel stations
         overpass_query = f"""
-        [out:json][timeout:25];
+        [out:json][timeout:15];
         (
           node["amenity"="fuel"]["hgv"="yes"](around:{radius_meters},{request.latitude},{request.longitude});
-          node["amenity"="fuel"]["name"~"Flying J|Love's|TA Travel|Pilot|Petro"](around:{radius_meters},{request.latitude},{request.longitude});
-          node["highway"="services"]["truck"="yes"](around:{radius_meters},{request.latitude},{request.longitude});
-          way["amenity"="fuel"]["hgv"="yes"](around:{radius_meters},{request.latitude},{request.longitude});
-          way["amenity"="fuel"]["name"~"Flying J|Love's|TA Travel|Pilot|Petro"](around:{radius_meters},{request.latitude},{request.longitude});
+          node["amenity"="fuel"]["name"~"Flying J|Love's|TA|Pilot|Petro",i](around:{radius_meters},{request.latitude},{request.longitude});
         );
-        out body;
-        >;
-        out skel qt;
+        out center;
         """
         
-        async with httpx.AsyncClient(timeout=45.0) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post("https://overpass-api.de/api/interpreter", data=overpass_query)
             response.raise_for_status()
             data = response.json()
         
         stops = []
         for element in data.get('elements', []):
-            if element['type'] not in ['node', 'way']:
+            if element['type'] != 'node':
                 continue
             
             tags = element.get('tags', {})
-            if element['type'] == 'way':
-                lat = element.get('center', {}).get('lat') or (element.get('bounds', {}).get('minlat', 0) + element.get('bounds', {}).get('maxlat', 0)) / 2
-                lon = element.get('center', {}).get('lon') or (element.get('bounds', {}).get('minlon', 0) + element.get('bounds', {}).get('maxlon', 0)) / 2
-            else:
-                lat = element.get('lat', 0)
-                lon = element.get('lon', 0)
+            lat = element.get('lat', 0)
+            lon = element.get('lon', 0)
             
             distance = haversine_miles(request.latitude, request.longitude, lat, lon)
             
