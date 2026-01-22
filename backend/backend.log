@@ -1,11 +1,8 @@
 nohup: ignoring input
 INFO:     Will watch for changes in these directories: ['/workspaces/Routecast2/backend']
 INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
-INFO:     Started reloader process [72401] using WatchFiles
-WARNING:server:MongoDB initialization failed: Cannot run the event loop while another loop is running. Running without database.
-/workspaces/Routecast2/backend/server.py:86: RuntimeWarning: coroutine 'test_connection' was never awaited
-  db = None
-RuntimeWarning: Enable tracemalloc to get the object allocation traceback
-INFO:     Started server process [72433]
+INFO:     Started reloader process [76538] using WatchFiles
+INFO:     Started server process [76543]
 INFO:     Waiting for application startup.
+INFO:server:MongoDB connection successful
 INFO:     Application startup complete.

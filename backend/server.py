@@ -54,36 +54,23 @@ logger = logging.getLogger(__name__)
 mongo_url = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
 client = None
 db = None
-try:
-    temp_client = AsyncIOMotorClient(mongo_url, serverSelectionTimeoutMS=2000)
-    # Test connection synchronously during startup
-    import asyncio
-    async def test_connection():
-        try:
-            await temp_client.admin.command('ping')
-            return True
-        except Exception as e:
-            logger.warning(f"MongoDB connection failed: {e}. Running without database.")
-            return False
-    
-    # Run the test
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    connected = loop.run_until_complete(test_connection())
-    loop.close()
-    
-    if connected:
+
+# We'll connect on app startup instead of during module import
+async def connect_to_mongo():
+    global client, db
+    try:
+        temp_client = AsyncIOMotorClient(mongo_url, serverSelectionTimeoutMS=5000)
+        # Test connection
+        await temp_client.admin.command('ping')
         client = temp_client
         db = client[os.environ.get('DB_NAME', 'routecast_test')]
         logger.info("MongoDB connection successful")
-    else:
-        temp_client.close()
+        return True
+    except Exception as e:
+        logger.warning(f"MongoDB connection failed: {e}. Running without database.")
         client = None
         db = None
-except Exception as e:
-    logger.warning(f"MongoDB initialization failed: {e}. Running without database.")
-    client = None
-    db = None
+        return False
 
 # API Keys
 MAPBOX_ACCESS_TOKEN = os.environ.get('MAPBOX_ACCESS_TOKEN', '')
@@ -4446,6 +4433,10 @@ app.add_middleware(
 # Include routers in the main app
 app.include_router(geocode_router, prefix="/api/geocode")
 app.include_router(api_router)
+
+@app.on_event("startup")
+async def startup_db_client():
+    await connect_to_mongo()
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
