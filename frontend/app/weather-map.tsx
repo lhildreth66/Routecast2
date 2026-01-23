@@ -127,7 +127,7 @@ export default function WeatherMapScreen() {
                   [-100, 36], // Southwest
                   [-87, 47],  // Northeast (Iowa region)
                 ]}
-                image={{ uri: radarTimestamp.replace('{z}/{\x}/{y}', '5/8/11') }}
+                image={{ uri: radarTimestamp.replace('{z}/{x}/{y}', '5/8/11') }}
                 opacity={radarLayer.opacity}
               />
             )}
