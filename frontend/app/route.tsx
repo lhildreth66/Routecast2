@@ -937,63 +937,63 @@ export default function RouteScreen() {
                 condLabel = 'N/A';
                 condColor = '#6b7280';
                 condDesc = 'Weather data unavailable';
-                roadSurface = 'Check conditions locally';
+                roadSurface = 'Check local road conditions before traveling';
               } else {
                 // Road conditions based ONLY on weather - NO alerts here
                 if (temp <= 32 && (conditions.includes('rain') || conditions.includes('freezing') || conditions.includes('drizzle'))) {
                   condIcon = '🧊';
                   condLabel = 'ICY';
                   condColor = '#ef4444';
-                  condDesc = `Black ice likely`;
-                  roadSurface = `${temp}°F - Reduce speed significantly`;
+                  condDesc = `Freezing rain - Black ice forming`;
+                  roadSurface = `DANGEROUS: Road surfaces are icy at ${temp}°F. Bridges and overpasses freeze first. Reduce speed significantly, increase following distance.`;
                 } else if (temp <= 32 && conditions.includes('snow')) {
                   condIcon = '❄️';
                   condLabel = 'SNOW';
                   condColor = '#60a5fa';
-                  condDesc = `Snow-covered`;
-                  roadSurface = `${temp}°F - Use caution`;
+                  condDesc = `Active snowfall - accumulation likely`;
+                  roadSurface = `HAZARDOUS: Snow-covered road surfaces at ${temp}°F. Expect reduced traction, poor visibility, and potential lane markings obscured.`;
                 } else if (temp > 32 && temp <= 40 && conditions.includes('snow')) {
                   condIcon = '🌨️';
                   condLabel = 'SLUSH';
                   condColor = '#f59e0b';
-                  condDesc = `Slushy`;
-                  roadSurface = `${temp}°F - Reduced traction`;
+                  condDesc = `Wet snow - slushy conditions`;
+                  roadSurface = `CAUTION: Slushy road surfaces at ${temp}°F. Reduced traction, hydroplaning risk, slush buildup in wheel wells.`;
                 } else if (conditions.includes('fog') || conditions.includes('mist')) {
                   condIcon = '🌫️';
                   condLabel = 'FOG';
                   condColor = '#9ca3af';
-                  condDesc = 'Low visibility';
-                  roadSurface = 'Use low beams';
+                  condDesc = 'Dense fog - visibility under 1/4 mile';
+                  roadSurface = 'VISIBILITY HAZARD: Road may be obscured by fog. Use low beams only, reduce speed, use fog lines for guidance.';
                 } else if (conditions.includes('rain') || conditions.includes('shower') || conditions.includes('drizzle')) {
                   condIcon = '💧';
                   condLabel = 'WET';
                   condColor = '#3b82f6';
-                  condDesc = 'Wet roads';
-                  roadSurface = 'Watch for hydroplaning';
+                  condDesc = 'Active precipitation - wet pavement';
+                  roadSurface = 'WET ROADS: Road surfaces slippery when wet. Watch for hydroplaning above 45mph, increase braking distance, avoid sudden movements.';
                 } else if (conditions.includes('thunder') || conditions.includes('storm')) {
                   condIcon = '⛈️';
                   condLabel = 'STORM';
                   condColor = '#7c3aed';
-                  condDesc = 'Storm conditions';
-                  roadSurface = 'Heavy rain possible';
+                  condDesc = 'Severe weather - thunderstorms';
+                  roadSurface = 'SEVERE: Heavy rain reducing visibility, road flooding possible. Lightning hazard. Consider delaying travel or seeking shelter.';
                 } else if (windSpeed > 30) {
                   condIcon = '💨';
                   condLabel = 'WINDY';
                   condColor = '#f59e0b';
-                  condDesc = `Windy - ${windSpeed} mph`;
-                  roadSurface = 'Watch for crosswinds';
+                  condDesc = `High winds - ${windSpeed} mph gusts`;
+                  roadSurface = `WIND HAZARD: Strong crosswinds at ${windSpeed} mph. High-profile vehicles at risk, debris on roadways possible, maintain firm steering.`;
                 } else if (conditions.includes('cloud') || conditions.includes('overcast')) {
                   condIcon = '☁️';
                   condLabel = 'DRY';
                   condColor = '#6b7280';
                   condDesc = displayConditions;
-                  roadSurface = 'Normal driving conditions';
+                  roadSurface = isDaytime ? 'Road surfaces dry, normal driving conditions expected' : 'NIGHTTIME: Reduced visibility on dark roads. Use high beams when appropriate, watch for wildlife.';
                 } else if (conditions.includes('partly') || conditions.includes('sun') || conditions.includes('clear')) {
                   condIcon = isDaytime ? '☀️' : '🌙';
                   condLabel = 'DRY';
                   condColor = '#22c55e';
                   condDesc = displayConditions;
-                  roadSurface = 'Normal driving conditions';
+                  roadSurface = isDaytime ? 'Road surfaces dry, normal driving conditions expected' : 'NIGHTTIME: Clear skies but limited visibility. Use high beams on rural roads, watch for deer and wildlife.';
                 }
               }
               
