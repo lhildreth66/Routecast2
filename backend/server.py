@@ -2512,7 +2512,7 @@ async def forecast_solar_energy(request: SolarForecastRequest):
     logger.info(f"[PREMIUM] Solar forecast requested")
     
     # Check premium entitlement
-    require_premium(request.subscription_id, SOLAR_FORECAST)
+    # TESTING: Paywalls disabled - require_premium(request.subscription_id, SOLAR_FORECAST)
     
     # Call pure domain service
     try:
@@ -2572,7 +2572,7 @@ async def estimate_propane_usage(request: PropaneUsageRequest):
     logger.info(f"[PREMIUM] Propane usage estimate requested")
     
     # Check premium entitlement
-    require_premium(request.subscription_id, PROPANE_USAGE)
+    # TESTING: Paywalls disabled - require_premium(request.subscription_id, PROPANE_USAGE)
     
     # Call pure domain service
     try:
@@ -2649,7 +2649,7 @@ async def estimate_water_budget(request: WaterBudgetRequest):
     logger.info(f"[PREMIUM] Water budget estimate requested")
     
     # Check premium entitlement (no database check for testing)
-    require_premium(request.subscription_id, WATER_BUDGET)
+    # TESTING: Paywalls disabled - require_premium(request.subscription_id, WATER_BUDGET)
     
     # Call pure domain service
     try:
@@ -2825,7 +2825,7 @@ async def estimate_shade_blocking(request: TerrainShadeRequest):
 async def recommend_orientation(request: WindShelterRequest):
     """Recommend RV orientation for wind shelter based on local ridges and topography."""
     # Check premium subscription
-    require_premium(request.subscription_id, WIND_SHELTER)
+    # TESTING: Paywalls disabled - require_premium(request.subscription_id, WIND_SHELTER)
     
     # Call pure domain service
     try:
@@ -2926,7 +2926,7 @@ async def get_road_passability(request: RoadPassabilityRequest):
 async def predict_cell_probability(request: ConnectivityCellRequest):
     """Premium-gated cellular signal probability prediction (Task A7)."""
     # Premium gating
-    require_premium(request.subscription_id, CELL_STARLINK)
+    # TESTING: Paywalls disabled - require_premium(request.subscription_id, CELL_STARLINK)
 
     try:
         # Check if GPS coordinates provided (new approach)
@@ -2968,7 +2968,7 @@ async def predict_cell_probability(request: ConnectivityCellRequest):
 async def predict_starlink_risk(request: ConnectivityStarlinkRequest):
     """Premium-gated Starlink obstruction risk prediction (Task A7)."""
     # Premium gating
-    require_premium(request.subscription_id, CELL_STARLINK)
+    # TESTING: Paywalls disabled - require_premium(request.subscription_id, CELL_STARLINK)
 
     try:
         res = obstruction_risk(
@@ -3245,7 +3245,7 @@ async def calculate_campsite_index(request: CampsiteIndexRequest):
     logger.info(f"[PREMIUM] Campsite index calculation requested")
     
     # Check premium entitlement
-    require_premium(request.subscription_id, CAMPSITE_INDEX)
+    # TESTING: Paywalls disabled - require_premium(request.subscription_id, CAMPSITE_INDEX)
 
     try:
         factors = SiteFactors(
@@ -3278,7 +3278,7 @@ async def calculate_campsite_index_auto(request: CampsiteIndexAutoRequest):
     logger.info(f"[PREMIUM] Auto campsite index for lat={request.latitude}, lon={request.longitude}")
     
     # Check premium entitlement
-    require_premium(request.subscription_id, CAMPSITE_INDEX)
+    # TESTING: Paywalls disabled - require_premium(request.subscription_id, CAMPSITE_INDEX)
 
     try:
         # Fetch real data from various sources
@@ -3358,7 +3358,7 @@ async def build_claim_log_endpoint(request: ClaimLogRequest):
     Accepts hazard events and weather snapshot, returns structured ClaimLog JSON.
     """
     # Premium gating
-    require_premium(request.subscription_id, CLAIM_LOG)
+    # TESTING: Paywalls disabled - require_premium(request.subscription_id, CLAIM_LOG)
 
     try:
         hazards = _to_claim_hazards(request.hazards)
@@ -3400,7 +3400,7 @@ async def claim_log_pdf_endpoint(request: ClaimLogPdfRequest):
     Returns a PDF binary.
     """
     # Premium gating
-    require_premium(request.subscription_id, CLAIM_LOG)
+    # TESTING: Paywalls disabled - require_premium(request.subscription_id, CLAIM_LOG)
 
     try:
         # Determine source of ClaimLog
@@ -3465,7 +3465,7 @@ async def register_planned_trip(request: RegisterPlannedTripRequest):
     Backend will evaluate forecast and send smart delay notifications.
     """
     # Premium gating
-    require_premium(request.subscription_id, SMART_DELAY_ALERTS)
+    # TESTING: Paywalls disabled - require_premium(request.subscription_id, SMART_DELAY_ALERTS)
     
     try:
         # Validate subscription_id
@@ -3517,7 +3517,7 @@ async def register_push_token(request: RegisterPushTokenRequest):
     Stores the Expo push token so smart delay alerts can be sent to this device.
     """
     # Premium gating
-    require_premium(request.subscription_id, SMART_DELAY_ALERTS)
+    # TESTING: Paywalls disabled - require_premium(request.subscription_id, SMART_DELAY_ALERTS)
     
     try:
         # Validate subscription_id
@@ -3576,7 +3576,7 @@ async def check_notification(request: CheckNotificationRequest):
     Pro-only feature: Task E1
     """
     # Premium gating
-    require_premium(request.subscription_id, SMART_DELAY_ALERTS)
+    # TESTING: Paywalls disabled - require_premium(request.subscription_id, SMART_DELAY_ALERTS)
     
     try:
         # Validate subscription_id
@@ -3607,7 +3607,7 @@ async def check_notification(request: CheckNotificationRequest):
 @api_router.post("/pro/free-camping/search", response_model=FreeCampingResponse)
 async def search_free_camping(request: FreeCampingRequest):
     """Find free camping spots (BLM, National Forest, etc.) near given coordinates using OpenStreetMap data."""
-    require_premium(request.subscription_id, CAMPSITE_INDEX)  # Reuse campsite_index feature for now
+    # TESTING: Paywalls disabled - require_premium(request.subscription_id, CAMPSITE_INDEX)  # Reuse campsite_index feature for now
     
     try:
         # Convert miles to meters for Overpass API
@@ -3821,7 +3821,7 @@ async def search_free_camping(request: FreeCampingRequest):
 @api_router.post("/pro/dump-stations/search", response_model=DumpStationResponse)
 async def search_dump_stations(request: DumpStationRequest):
     """Find RV dump stations near given coordinates using OpenStreetMap data."""
-    require_premium(request.subscription_id, CAMPSITE_INDEX)  # Reuse campsite_index feature
+    # TESTING: Paywalls disabled - require_premium(request.subscription_id, CAMPSITE_INDEX)  # Reuse campsite_index feature
     
     try:
         # Convert miles to meters for Overpass API
@@ -4013,7 +4013,7 @@ async def search_dump_stations(request: DumpStationRequest):
 @api_router.post("/pro/last-chance/search", response_model=LastChanceResponse)
 async def search_last_chance_supplies(request: LastChanceRequest):
     """Find grocery stores, propane refill, and hardware stores near given coordinates using OpenStreetMap data."""
-    require_premium(request.subscription_id, CAMPSITE_INDEX)  # Reuse campsite_index feature
+    # TESTING: Paywalls disabled - require_premium(request.subscription_id, CAMPSITE_INDEX)  # Reuse campsite_index feature
     
     try:
         # Convert miles to meters for Overpass API
@@ -4235,7 +4235,7 @@ async def search_last_chance_supplies(request: LastChanceRequest):
 @api_router.post("/pro/rv-dealerships/search", response_model=RVDealershipResponse)
 async def search_rv_dealerships(request: RVDealershipRequest):
     """Find RV dealerships, service centers, and parts stores near given coordinates using OpenStreetMap data."""
-    require_premium(request.subscription_id, CAMPSITE_INDEX)  # Reuse campsite_index feature
+    # TESTING: Paywalls disabled - require_premium(request.subscription_id, CAMPSITE_INDEX)  # Reuse campsite_index feature
     
     try:
         # Convert miles to meters for Overpass API
@@ -4456,6 +4456,7 @@ class TruckStopRequest(BaseModel):
     latitude: float
     longitude: float
     radius_miles: int = 10  # Reduced to prevent timeout
+    subscription_id: Optional[str] = None
 
 class TruckStop(BaseModel):
     name: str
@@ -4477,6 +4478,7 @@ class TruckStopResponse(BaseModel):
 @api_router.post("/pro/truck-stops/search", response_model=TruckStopResponse)
 async def search_truck_stops(request: TruckStopRequest):
     """Find truck stops with fuel and amenities using static database."""
+    # TESTING: Paywalls disabled - require_premium(request.subscription_id, TRUCK_STOPS)
     try:
         # Load static truck stop database
         import json
@@ -4561,6 +4563,7 @@ class TruckParkingRequest(BaseModel):
     latitude: float
     longitude: float
     radius_miles: int = 15  # Reduce default radius to prevent timeout
+    subscription_id: Optional[str] = None
 
 class ParkingSpot(BaseModel):
     name: str
@@ -4580,6 +4583,7 @@ class TruckParkingResponse(BaseModel):
 @api_router.post("/pro/truck-parking/search", response_model=TruckParkingResponse)
 async def search_truck_parking(request: TruckParkingRequest):
     """Find truck parking including rest areas and safe parking zones."""
+    # TESTING: Paywalls disabled - require_premium(request.subscription_id, TRUCK_PARKING)
     try:
         radius_meters = int(request.radius_miles * 1609.34)
         
@@ -4890,6 +4894,7 @@ class TruckRestrictionRequest(BaseModel):
     latitude: float
     longitude: float
     radius_miles: int = 25
+    subscription_id: Optional[str] = None
 
 class TruckRestriction(BaseModel):
     name: str
@@ -4909,6 +4914,7 @@ class TruckRestrictionResponse(BaseModel):
 @api_router.post("/pro/truck-restrictions/search", response_model=TruckRestrictionResponse)
 async def search_truck_restrictions(request: TruckRestrictionRequest):
     """Find roads with truck restrictions using OpenStreetMap."""
+    # TESTING: Paywalls disabled - require_premium(request.subscription_id, TRUCK_RESTRICTIONS)
     try:
         radius_meters = int(request.radius_miles * 1609.34)
         
