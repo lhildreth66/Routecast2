@@ -908,7 +908,19 @@ export default function RouteScreen() {
               const temp = wp.weather?.temperature || 50;
               const conditions = (wp.weather?.conditions || 'Clear').toLowerCase();
               const actualConditions = wp.weather?.conditions || 'Clear';
+              const isDaytime = wp.weather?.is_daytime !== false; // Default to true if not specified
               const windSpeed = wp.weather?.wind_speed ? parseInt(wp.weather.wind_speed) : 0;
+              
+              // Adjust conditions text for nighttime
+              let displayConditions = actualConditions;
+              if (!isDaytime) {
+                // Replace daytime terms with nighttime equivalents
+                displayConditions = displayConditions
+                  .replace(/Sunny/gi, 'Clear')
+                  .replace(/Partly Cloudy/gi, 'Partly Cloudy Night')
+                  .replace(/Mostly Sunny/gi, 'Mostly Clear')
+                  .replace(/Mostly Cloudy/gi, 'Mostly Cloudy Night');
+              }
               
               // Check if weather data is missing
               const hasWeatherData = wp.weather && wp.weather.temperature !== null && wp.weather.conditions;
@@ -916,7 +928,7 @@ export default function RouteScreen() {
               let condIcon = '✓';
               let condLabel = 'DRY';
               let condColor = '#22c55e';
-              let condDesc = actualConditions; // Use actual conditions as default
+              let condDesc = displayConditions; // Use adjusted conditions
               let roadSurface = 'Normal driving conditions';
               
               // If no weather data, show warning
@@ -974,13 +986,13 @@ export default function RouteScreen() {
                   condIcon = '☁️';
                   condLabel = 'DRY';
                   condColor = '#6b7280';
-                  condDesc = actualConditions;
+                  condDesc = displayConditions;
                   roadSurface = 'Normal driving conditions';
                 } else if (conditions.includes('partly') || conditions.includes('sun') || conditions.includes('clear')) {
-                  condIcon = '☀️';
+                  condIcon = isDaytime ? '☀️' : '🌙';
                   condLabel = 'DRY';
                   condColor = '#22c55e';
-                  condDesc = actualConditions;
+                  condDesc = displayConditions;
                   roadSurface = 'Normal driving conditions';
                 }
               }
