@@ -1,0 +1,3 @@
+[submodule "external/weather-api"]
+	path = external/weather-api
+	url = https://github.com/lhildreth66/weather-api
