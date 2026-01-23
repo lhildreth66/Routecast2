@@ -631,59 +631,16 @@ export default function HomeScreen() {
     }
   };
 
-  const handleRecentRoute = async (route: SavedRoute) => {
-    // Fill in the route details
+  const handleRecentRoute = (route: SavedRoute) => {
+    // Fill in the route details only - user must press Check Route Weather to load
     setOrigin(route.origin);
     setDestination(route.destination);
     if (route.stops) {
       setStops(route.stops);
     }
     
-    // Automatically fetch weather for this route
-    setLoading(true);
+    // Clear any previous errors
     setError('');
-    
-    try {
-      const requestData: any = {
-        origin: route.origin.trim(),
-        destination: route.destination.trim(),
-        stops: route.stops || [],
-        vehicle_type: vehicleType,
-        trucker_mode: truckerMode,
-      };
-      
-      if (truckerMode && vehicleHeight) {
-        requestData.vehicle_height_ft = parseFloat(vehicleHeight);
-      }
-      
-      if (useCustomTime) {
-        requestData.departure_time = departureTime.toISOString();
-      }
-
-      const response = await axios.post(`${API_BASE}/api/route/weather`, requestData);
-      const data = response.data;
-
-      if (!data || !data.origin || !data.destination || !data.waypoints || !Array.isArray(data.waypoints)) {
-        setError('Weather route data is incomplete. Please try again.');
-        setLoading(false);
-        return;
-      }
-
-      await AsyncStorage.setItem('lastRoute', JSON.stringify(data));
-
-      router.push({
-        pathname: '/route',
-        params: { routeData: JSON.stringify(data) },
-      });
-    } catch (err: any) {
-      console.error('Error:', err);
-      setError(
-        err.response?.data?.detail ||
-        'Unable to fetch route weather. Please try again.'
-      );
-    } finally {
-      setLoading(false);
-    }
   };
 
   const addToFavorites = async () => {

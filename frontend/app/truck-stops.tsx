@@ -47,7 +47,10 @@ export default function TruckStopsScreen() {
         setLongitude(location.coords.longitude.toFixed(4));
       }
     } catch (err) {
-      console.log('Could not get current location');
+      console.log('Could not get current location:', err);
+      // Set default location (center of US) if location fails
+      setLatitude('39.8283');
+      setLongitude('-98.5795');
     }
   };
 
