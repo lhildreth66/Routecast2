@@ -4922,6 +4922,8 @@ class TruckRestriction(BaseModel):
     restriction: str
     value: Optional[str] = None
     details: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
 
 class TruckRestrictionResponse(BaseModel):
     restrictions: List[TruckRestriction]
@@ -4952,6 +4954,8 @@ async def search_truck_restrictions(request: TruckRestrictionRequest):
             data = response.json()
         
         restrictions = []
+        processed_locations = {}  # Cache geocoding results
+        
         for element in data.get('elements', []):
             if element['type'] != 'way':
                 continue
@@ -4967,6 +4971,29 @@ async def search_truck_restrictions(request: TruckRestrictionRequest):
             distance = haversine_miles(request.latitude, request.longitude, lat, lon)
             name = tags.get('name', tags.get('ref', 'Unnamed Road'))
             
+            # Reverse geocode to get city/state (cached by rounded coords)
+            loc_key = f"{round(lat, 2)},{round(lon, 2)}"
+            if loc_key not in processed_locations:
+                try:
+                    async with httpx.AsyncClient(timeout=5.0) as geo_client:
+                        geo_resp = await geo_client.get(
+                            f"https://nominatim.openstreetmap.org/reverse",
+                            params={'lat': lat, 'lon': lon, 'format': 'json'},
+                            headers={'User-Agent': 'Routecast/1.0'}
+                        )
+                        if geo_resp.status_code == 200:
+                            geo_data = geo_resp.json()
+                            address = geo_data.get('address', {})
+                            city = address.get('city') or address.get('town') or address.get('village') or address.get('county')
+                            state = address.get('state')
+                            processed_locations[loc_key] = (city, state)
+                        else:
+                            processed_locations[loc_key] = (None, None)
+                except:
+                    processed_locations[loc_key] = (None, None)
+            
+            city, state = processed_locations[loc_key]
+            
             # Check for weight restrictions
             if 'maxweight' in tags:
                 restrictions.append(TruckRestriction(
@@ -4978,6 +5005,8 @@ async def search_truck_restrictions(request: TruckRestrictionRequest):
                     restriction='Maximum weight limit',
                     value=tags.get('maxweight'),
                     details=f"This road has a weight restriction of {tags.get('maxweight')}",
+                    city=city,
+                    state=state,
                 ))
             
             # Check for height restrictions
@@ -4991,6 +5020,8 @@ async def search_truck_restrictions(request: TruckRestrictionRequest):
                     restriction='Maximum height limit',
                     value=tags.get('maxheight'),
                     details=f"This road has a height restriction of {tags.get('maxheight')}",
+                    city=city,
+                    state=state,
                 ))
             
             # Check for width restrictions
@@ -5004,6 +5035,8 @@ async def search_truck_restrictions(request: TruckRestrictionRequest):
                     restriction='Maximum width limit',
                     value=tags.get('maxwidth'),
                     details=f"This road has a width restriction of {tags.get('maxwidth')}",
+                    city=city,
+                    state=state,
                 ))
             
             # Check for truck bans
@@ -5016,6 +5049,8 @@ async def search_truck_restrictions(request: TruckRestrictionRequest):
                     longitude=lon,
                     restriction='No trucks allowed',
                     details='Heavy goods vehicles (trucks) are not permitted on this road',
+                    city=city,
+                    state=state,
                 ))
             
             # Check for hazmat restrictions
@@ -5028,6 +5063,8 @@ async def search_truck_restrictions(request: TruckRestrictionRequest):
                     longitude=lon,
                     restriction='Hazmat prohibited',
                     details='Hazardous materials transport not allowed on this road',
+                    city=city,
+                    state=state,
                 ))
             
             # Check for tunnel restrictions
@@ -5041,6 +5078,8 @@ async def search_truck_restrictions(request: TruckRestrictionRequest):
                     restriction='Tunnel height restriction',
                     value=tags.get('maxheight'),
                     details=f"Tunnel with height limit of {tags.get('maxheight')}",
+                    city=city,
+                    state=state,
                 ))
         
         restrictions.sort(key=lambda x: x.distance_miles)

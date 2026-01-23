@@ -16,6 +16,8 @@ interface TruckRestriction {
   restriction: string;
   value?: string;
   details?: string;
+  city?: string;
+  state?: string;
 }
 
 export default function TruckRestrictionsScreen() {
@@ -257,6 +259,11 @@ export default function TruckRestrictionsScreen() {
                     <Text style={styles.restrictionName} numberOfLines={1}>
                       {restriction.name || 'Unnamed Road'}
                     </Text>
+                    {(restriction.city || restriction.state) && (
+                      <Text style={styles.restrictionLocation} numberOfLines={1}>
+                        📍 {restriction.city}{restriction.city && restriction.state ? ', ' : ''}{restriction.state}
+                      </Text>
+                    )}
                     <View style={styles.restrictionMetaRow}>
                       <View style={[styles.typeBadge, { backgroundColor: `${color}20`, borderColor: color }]}>
                         <Text style={[styles.typeText, { color }]}>
@@ -443,6 +450,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#fff',
     marginBottom: 4,
+  },
+  restrictionLocation: {
+    fontSize: 12,
+    color: '#a1a1aa',
+    marginBottom: 6,
   },
   restrictionMetaRow: {
     flexDirection: 'row',
