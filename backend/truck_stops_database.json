@@ -1,0 +1,770 @@
+[
+  {
+    "name": "Pilot Flying J",
+    "brand": "Pilot Flying J",
+    "lat": 39.7392,
+    "lon": -104.9903,
+    "address": "Denver, CO",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Love's Travel Stop",
+    "brand": "Love's",
+    "lat": 39.8561,
+    "lon": -104.6737,
+    "address": "Denver, CO",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "TA Travel Center",
+    "brand": "TA",
+    "lat": 39.6880,
+    "lon": -105.1719,
+    "address": "Lakewood, CO",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers", "truck_wash"]
+  },
+  {
+    "name": "Pilot Flying J",
+    "brand": "Pilot Flying J",
+    "lat": 41.2565,
+    "lon": -95.9345,
+    "address": "Omaha, NE",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Love's Travel Stop",
+    "brand": "Love's",
+    "lat": 41.2924,
+    "lon": -96.1458,
+    "address": "Omaha, NE",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "TA Travel Center",
+    "brand": "TA",
+    "lat": 41.3167,
+    "lon": -96.0833,
+    "address": "Omaha, NE",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers", "truck_wash"]
+  },
+  {
+    "name": "Pilot Flying J",
+    "brand": "Pilot Flying J",
+    "lat": 41.8781,
+    "lon": -87.6298,
+    "address": "Chicago, IL",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Love's Travel Stop",
+    "brand": "Love's",
+    "lat": 41.9742,
+    "lon": -88.1477,
+    "address": "Chicago, IL",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Petro Stopping Center",
+    "brand": "Petro",
+    "lat": 41.5868,
+    "lon": -88.0826,
+    "address": "Joliet, IL",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers", "truck_wash", "repair"]
+  },
+  {
+    "name": "Pilot Flying J",
+    "brand": "Pilot Flying J",
+    "lat": 33.4484,
+    "lon": -112.0740,
+    "address": "Phoenix, AZ",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Love's Travel Stop",
+    "brand": "Love's",
+    "lat": 33.3833,
+    "lon": -111.7833,
+    "address": "Phoenix, AZ",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "TA Travel Center",
+    "brand": "TA",
+    "lat": 33.5387,
+    "lon": -112.1859,
+    "address": "Phoenix, AZ",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers", "truck_wash"]
+  },
+  {
+    "name": "Pilot Flying J",
+    "brand": "Pilot Flying J",
+    "lat": 34.0522,
+    "lon": -118.2437,
+    "address": "Los Angeles, CA",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Love's Travel Stop",
+    "brand": "Love's",
+    "lat": 34.1478,
+    "lon": -118.1445,
+    "address": "Pasadena, CA",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Petro Stopping Center",
+    "brand": "Petro",
+    "lat": 34.0195,
+    "lon": -117.4730,
+    "address": "Ontario, CA",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers", "truck_wash", "repair"]
+  },
+  {
+    "name": "Pilot Flying J",
+    "brand": "Pilot Flying J",
+    "lat": 36.1699,
+    "lon": -115.1398,
+    "address": "Las Vegas, NV",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Love's Travel Stop",
+    "brand": "Love's",
+    "lat": 36.2082,
+    "lon": -115.2913,
+    "address": "Las Vegas, NV",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "TA Travel Center",
+    "brand": "TA",
+    "lat": 36.0395,
+    "lon": -115.0394,
+    "address": "Las Vegas, NV",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers", "truck_wash"]
+  },
+  {
+    "name": "Pilot Flying J",
+    "brand": "Pilot Flying J",
+    "lat": 32.7767,
+    "lon": -96.7970,
+    "address": "Dallas, TX",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Love's Travel Stop",
+    "brand": "Love's",
+    "lat": 32.8207,
+    "lon": -96.8489,
+    "address": "Dallas, TX",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Petro Stopping Center",
+    "brand": "Petro",
+    "lat": 32.9484,
+    "lon": -96.6878,
+    "address": "Garland, TX",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers", "truck_wash", "repair"]
+  },
+  {
+    "name": "Pilot Flying J",
+    "brand": "Pilot Flying J",
+    "lat": 29.7604,
+    "lon": -95.3698,
+    "address": "Houston, TX",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Love's Travel Stop",
+    "brand": "Love's",
+    "lat": 29.8746,
+    "lon": -95.6371,
+    "address": "Houston, TX",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "TA Travel Center",
+    "brand": "TA",
+    "lat": 29.9511,
+    "lon": -95.3439,
+    "address": "Houston, TX",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers", "truck_wash"]
+  },
+  {
+    "name": "Pilot Flying J",
+    "brand": "Pilot Flying J",
+    "lat": 33.7490,
+    "lon": -84.3880,
+    "address": "Atlanta, GA",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Love's Travel Stop",
+    "brand": "Love's",
+    "lat": 33.6407,
+    "lon": -84.4277,
+    "address": "Atlanta, GA",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Petro Stopping Center",
+    "brand": "Petro",
+    "lat": 33.8121,
+    "lon": -84.3470,
+    "address": "Atlanta, GA",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers", "truck_wash", "repair"]
+  },
+  {
+    "name": "Pilot Flying J",
+    "brand": "Pilot Flying J",
+    "lat": 35.2271,
+    "lon": -80.8431,
+    "address": "Charlotte, NC",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Love's Travel Stop",
+    "brand": "Love's",
+    "lat": 35.1085,
+    "lon": -80.9320,
+    "address": "Charlotte, NC",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "TA Travel Center",
+    "brand": "TA",
+    "lat": 35.3499,
+    "lon": -80.7339,
+    "address": "Charlotte, NC",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers", "truck_wash"]
+  },
+  {
+    "name": "Pilot Flying J",
+    "brand": "Pilot Flying J",
+    "lat": 39.9526,
+    "lon": -75.1652,
+    "address": "Philadelphia, PA",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Love's Travel Stop",
+    "brand": "Love's",
+    "lat": 40.0094,
+    "lon": -75.1187,
+    "address": "Philadelphia, PA",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Petro Stopping Center",
+    "brand": "Petro",
+    "lat": 39.8678,
+    "lon": -75.2747,
+    "address": "Philadelphia, PA",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers", "truck_wash", "repair"]
+  },
+  {
+    "name": "Pilot Flying J",
+    "brand": "Pilot Flying J",
+    "lat": 40.7128,
+    "lon": -74.0060,
+    "address": "New York, NY",
+    "amenities": ["fuel", "parking", "restrooms", "food"]
+  },
+  {
+    "name": "Love's Travel Stop",
+    "brand": "Love's",
+    "lat": 40.7831,
+    "lon": -73.9712,
+    "address": "New York, NY",
+    "amenities": ["fuel", "parking", "restrooms", "food"]
+  },
+  {
+    "name": "TA Travel Center",
+    "brand": "TA",
+    "lat": 40.6782,
+    "lon": -73.9442,
+    "address": "Brooklyn, NY",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers", "truck_wash"]
+  },
+  {
+    "name": "Pilot Flying J",
+    "brand": "Pilot Flying J",
+    "lat": 42.3601,
+    "lon": -71.0589,
+    "address": "Boston, MA",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Love's Travel Stop",
+    "brand": "Love's",
+    "lat": 42.4668,
+    "lon": -71.1449,
+    "address": "Boston, MA",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Petro Stopping Center",
+    "brand": "Petro",
+    "lat": 42.2626,
+    "lon": -71.1843,
+    "address": "Boston, MA",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers", "truck_wash", "repair"]
+  },
+  {
+    "name": "Pilot Flying J",
+    "brand": "Pilot Flying J",
+    "lat": 47.6062,
+    "lon": -122.3321,
+    "address": "Seattle, WA",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Love's Travel Stop",
+    "brand": "Love's",
+    "lat": 47.5129,
+    "lon": -122.2090,
+    "address": "Seattle, WA",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "TA Travel Center",
+    "brand": "TA",
+    "lat": 47.4502,
+    "lon": -122.3088,
+    "address": "Tacoma, WA",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers", "truck_wash"]
+  },
+  {
+    "name": "Pilot Flying J",
+    "brand": "Pilot Flying J",
+    "lat": 45.5152,
+    "lon": -122.6784,
+    "address": "Portland, OR",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Love's Travel Stop",
+    "brand": "Love's",
+    "lat": 45.6387,
+    "lon": -122.4985,
+    "address": "Portland, OR",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Petro Stopping Center",
+    "brand": "Petro",
+    "lat": 45.4215,
+    "lon": -122.7945,
+    "address": "Portland, OR",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers", "truck_wash", "repair"]
+  },
+  {
+    "name": "Pilot Flying J",
+    "brand": "Pilot Flying J",
+    "lat": 38.5816,
+    "lon": -121.4944,
+    "address": "Sacramento, CA",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Love's Travel Stop",
+    "brand": "Love's",
+    "lat": 38.4747,
+    "lon": -121.3542,
+    "address": "Sacramento, CA",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "TA Travel Center",
+    "brand": "TA",
+    "lat": 38.6777,
+    "lon": -121.1686,
+    "address": "Sacramento, CA",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers", "truck_wash"]
+  },
+  {
+    "name": "Pilot Flying J",
+    "brand": "Pilot Flying J",
+    "lat": 37.7749,
+    "lon": -122.4194,
+    "address": "San Francisco, CA",
+    "amenities": ["fuel", "parking", "restrooms", "food"]
+  },
+  {
+    "name": "Love's Travel Stop",
+    "brand": "Love's",
+    "lat": 37.9577,
+    "lon": -122.3477,
+    "address": "Oakland, CA",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Petro Stopping Center",
+    "brand": "Petro",
+    "lat": 37.3382,
+    "lon": -121.8863,
+    "address": "San Jose, CA",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers", "truck_wash", "repair"]
+  },
+  {
+    "name": "Pilot Flying J",
+    "brand": "Pilot Flying J",
+    "lat": 35.4676,
+    "lon": -97.5164,
+    "address": "Oklahoma City, OK",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Love's Travel Stop",
+    "brand": "Love's",
+    "lat": 35.3495,
+    "lon": -97.4781,
+    "address": "Oklahoma City, OK",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "TA Travel Center",
+    "brand": "TA",
+    "lat": 35.5889,
+    "lon": -97.6505,
+    "address": "Oklahoma City, OK",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers", "truck_wash"]
+  },
+  {
+    "name": "Pilot Flying J",
+    "brand": "Pilot Flying J",
+    "lat": 35.1495,
+    "lon": -90.0490,
+    "address": "Memphis, TN",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Love's Travel Stop",
+    "brand": "Love's",
+    "lat": 35.2046,
+    "lon": -89.9773,
+    "address": "Memphis, TN",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Petro Stopping Center",
+    "brand": "Petro",
+    "lat": 35.0456,
+    "lon": -89.8507,
+    "address": "Memphis, TN",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers", "truck_wash", "repair"]
+  },
+  {
+    "name": "Pilot Flying J",
+    "brand": "Pilot Flying J",
+    "lat": 36.1627,
+    "lon": -86.7816,
+    "address": "Nashville, TN",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Love's Travel Stop",
+    "brand": "Love's",
+    "lat": 36.2745,
+    "lon": -86.6957,
+    "address": "Nashville, TN",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "TA Travel Center",
+    "brand": "TA",
+    "lat": 36.0823,
+    "lon": -86.6703,
+    "address": "Nashville, TN",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers", "truck_wash"]
+  },
+  {
+    "name": "Pilot Flying J",
+    "brand": "Pilot Flying J",
+    "lat": 38.2527,
+    "lon": -85.7585,
+    "address": "Louisville, KY",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Love's Travel Stop",
+    "brand": "Love's",
+    "lat": 38.1781,
+    "lon": -85.8784,
+    "address": "Louisville, KY",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Petro Stopping Center",
+    "brand": "Petro",
+    "lat": 38.3289,
+    "lon": -85.6739,
+    "address": "Louisville, KY",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers", "truck_wash", "repair"]
+  },
+  {
+    "name": "Pilot Flying J",
+    "brand": "Pilot Flying J",
+    "lat": 39.1031,
+    "lon": -84.5120,
+    "address": "Cincinnati, OH",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Love's Travel Stop",
+    "brand": "Love's",
+    "lat": 39.2014,
+    "lon": -84.6712,
+    "address": "Cincinnati, OH",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "TA Travel Center",
+    "brand": "TA",
+    "lat": 39.0481,
+    "lon": -84.3987,
+    "address": "Cincinnati, OH",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers", "truck_wash"]
+  },
+  {
+    "name": "Pilot Flying J",
+    "brand": "Pilot Flying J",
+    "lat": 39.9612,
+    "lon": -82.9988,
+    "address": "Columbus, OH",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Love's Travel Stop",
+    "brand": "Love's",
+    "lat": 40.0823,
+    "lon": -83.0185,
+    "address": "Columbus, OH",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Petro Stopping Center",
+    "brand": "Petro",
+    "lat": 39.9831,
+    "lon": -82.8861,
+    "address": "Columbus, OH",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers", "truck_wash", "repair"]
+  },
+  {
+    "name": "Pilot Flying J",
+    "brand": "Pilot Flying J",
+    "lat": 41.4993,
+    "lon": -81.6944,
+    "address": "Cleveland, OH",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Love's Travel Stop",
+    "brand": "Love's",
+    "lat": 41.3778,
+    "lon": -81.8553,
+    "address": "Cleveland, OH",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "TA Travel Center",
+    "brand": "TA",
+    "lat": 41.6299,
+    "lon": -81.5219,
+    "address": "Cleveland, OH",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers", "truck_wash"]
+  },
+  {
+    "name": "Pilot Flying J",
+    "brand": "Pilot Flying J",
+    "lat": 42.3314,
+    "lon": -83.0458,
+    "address": "Detroit, MI",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Love's Travel Stop",
+    "brand": "Love's",
+    "lat": 42.2394,
+    "lon": -83.6133,
+    "address": "Detroit, MI",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Petro Stopping Center",
+    "brand": "Petro",
+    "lat": 42.4668,
+    "lon": -82.9404,
+    "address": "Detroit, MI",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers", "truck_wash", "repair"]
+  },
+  {
+    "name": "Pilot Flying J",
+    "brand": "Pilot Flying J",
+    "lat": 43.0389,
+    "lon": -87.9065,
+    "address": "Milwaukee, WI",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Love's Travel Stop",
+    "brand": "Love's",
+    "lat": 42.9634,
+    "lon": -87.9984,
+    "address": "Milwaukee, WI",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "TA Travel Center",
+    "brand": "TA",
+    "lat": 43.1677,
+    "lon": -88.0147,
+    "address": "Milwaukee, WI",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers", "truck_wash"]
+  },
+  {
+    "name": "Pilot Flying J",
+    "brand": "Pilot Flying J",
+    "lat": 44.9778,
+    "lon": -93.2650,
+    "address": "Minneapolis, MN",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Love's Travel Stop",
+    "brand": "Love's",
+    "lat": 45.0628,
+    "lon": -93.3517,
+    "address": "Minneapolis, MN",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Petro Stopping Center",
+    "brand": "Petro",
+    "lat": 44.8441,
+    "lon": -93.2983,
+    "address": "Minneapolis, MN",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers", "truck_wash", "repair"]
+  },
+  {
+    "name": "Pilot Flying J",
+    "brand": "Pilot Flying J",
+    "lat": 38.6270,
+    "lon": -90.1994,
+    "address": "St. Louis, MO",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Love's Travel Stop",
+    "brand": "Love's",
+    "lat": 38.7391,
+    "lon": -90.4074,
+    "address": "St. Louis, MO",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "TA Travel Center",
+    "brand": "TA",
+    "lat": 38.5303,
+    "lon": -90.3709,
+    "address": "St. Louis, MO",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers", "truck_wash"]
+  },
+  {
+    "name": "Pilot Flying J",
+    "brand": "Pilot Flying J",
+    "lat": 39.0997,
+    "lon": -94.5786,
+    "address": "Kansas City, MO",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Love's Travel Stop",
+    "brand": "Love's",
+    "lat": 39.2348,
+    "lon": -94.4166,
+    "address": "Kansas City, MO",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Petro Stopping Center",
+    "brand": "Petro",
+    "lat": 38.9806,
+    "lon": -94.6708,
+    "address": "Kansas City, MO",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers", "truck_wash", "repair"]
+  },
+  {
+    "name": "Pilot Flying J",
+    "brand": "Pilot Flying J",
+    "lat": 35.0844,
+    "lon": -106.6504,
+    "address": "Albuquerque, NM",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Love's Travel Stop",
+    "brand": "Love's",
+    "lat": 34.9989,
+    "lon": -106.5573,
+    "address": "Albuquerque, NM",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "TA Travel Center",
+    "brand": "TA",
+    "lat": 35.1983,
+    "lon": -106.5344,
+    "address": "Albuquerque, NM",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers", "truck_wash"]
+  },
+  {
+    "name": "Pilot Flying J",
+    "brand": "Pilot Flying J",
+    "lat": 40.7608,
+    "lon": -111.8910,
+    "address": "Salt Lake City, UT",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Love's Travel Stop",
+    "brand": "Love's",
+    "lat": 40.6916,
+    "lon": -111.9391,
+    "address": "Salt Lake City, UT",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Petro Stopping Center",
+    "brand": "Petro",
+    "lat": 40.8798,
+    "lon": -111.9298,
+    "address": "Salt Lake City, UT",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers", "truck_wash", "repair"]
+  },
+  {
+    "name": "Pilot Flying J",
+    "brand": "Pilot Flying J",
+    "lat": 43.6150,
+    "lon": -116.2023,
+    "address": "Boise, ID",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "Love's Travel Stop",
+    "brand": "Love's",
+    "lat": 43.5813,
+    "lon": -116.5588,
+    "address": "Boise, ID",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers"]
+  },
+  {
+    "name": "TA Travel Center",
+    "brand": "TA",
+    "lat": 43.7477,
+    "lon": -116.3537,
+    "address": "Boise, ID",
+    "amenities": ["fuel", "parking", "restrooms", "food", "showers", "truck_wash"]
+  }
+]
