@@ -4455,7 +4455,7 @@ def haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float
 class TruckStopRequest(BaseModel):
     latitude: float
     longitude: float
-    radius_miles: int = 15
+    radius_miles: int = 10  # Reduced to prevent timeout
 
 class TruckStop(BaseModel):
     name: str
@@ -4480,17 +4480,14 @@ async def search_truck_stops(request: TruckStopRequest):
     try:
         radius_meters = int(request.radius_miles * 1609.34)
         
-        # Simplified query - prioritize truck stops, fall back to all fuel
+        # Ultra-simplified query - only major truck stop brands
         overpass_query = f"""
-        [out:json][timeout:15];
-        (
-          node["amenity"="fuel"]["hgv"="yes"](around:{radius_meters},{request.latitude},{request.longitude});
-          node["amenity"="fuel"]["name"~"Flying J|Love's|TA|Pilot|Petro",i](around:{radius_meters},{request.latitude},{request.longitude});
-        );
+        [out:json][timeout:10];
+        node["amenity"="fuel"]["name"~"Flying J|Love's|TA|Pilot|Petro",i](around:{radius_meters},{request.latitude},{request.longitude});
         out body;
         """
         
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=20.0) as client:
             response = await client.post("https://overpass-api.de/api/interpreter", data=overpass_query)
             response.raise_for_status()
             data = response.json()
