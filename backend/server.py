@@ -4480,18 +4480,17 @@ async def search_truck_stops(request: TruckStopRequest):
     try:
         radius_meters = int(request.radius_miles * 1609.34)
         
-        # Expanded query to include all fuel stations, prioritizing truck-friendly ones
+        # Simplified query - prioritize truck stops, fall back to all fuel
         overpass_query = f"""
-        [out:json][timeout:25];
+        [out:json][timeout:15];
         (
           node["amenity"="fuel"]["hgv"="yes"](around:{radius_meters},{request.latitude},{request.longitude});
-          node["amenity"="fuel"]["name"~"Flying J|Love's|TA|Pilot|Petro|Truck|Travel",i](around:{radius_meters},{request.latitude},{request.longitude});
-          node["amenity"="fuel"](around:{radius_meters},{request.latitude},{request.longitude});
+          node["amenity"="fuel"]["name"~"Flying J|Love's|TA|Pilot|Petro",i](around:{radius_meters},{request.latitude},{request.longitude});
         );
         out body;
         """
         
-        async with httpx.AsyncClient(timeout=45.0) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post("https://overpass-api.de/api/interpreter", data=overpass_query)
             response.raise_for_status()
             data = response.json()
