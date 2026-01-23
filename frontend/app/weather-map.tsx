@@ -8,14 +8,12 @@ import {
   Switch,
   ScrollView,
   ActivityIndicator,
+  Dimensions,
 } from 'react-native';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import MapLibreGL from '@rnmapbox/maps';
+import MapView, { Overlay, Polygon, PROVIDER_GOOGLE } from 'react-native-maps';
 import { WeatherLayerManager, LAYER_PRESETS } from './services/WeatherLayerManager';
-
-// Configure MapLibre (no API key needed!)
-MapLibreGL.setConnected(true);
 
 export default function WeatherMapScreen() {
   const [layerManager] = useState(() => new WeatherLayerManager());
@@ -67,6 +65,28 @@ export default function WeatherMapScreen() {
   const radarLayer = layers.find(l => l.id === 'radar-precipitation');
   const alertsLayer = layers.find(l => l.id === 'severe-alerts');
 
+  // Calculate bounds for alert polygons
+  const getAlertPolygons = () => {
+    if (!alertsData?.features) return [];
+    
+    return alertsData.features.map((feature: any, index: number) => {
+      if (feature.geometry?.type === 'Polygon') {
+        const coordinates = feature.geometry.coordinates[0].map((coord: number[]) => ({
+          latitude: coord[1],
+          longitude: coord[0],
+        }));
+        
+        const severity = feature.properties?.severity || 'Minor';
+        const fillColor = severity === 'Extreme' ? '#8B000080' :
+                         severity === 'Severe' ? '#FF450080' :
+                         severity === 'Moderate' ? '#FFA50080' : '#FFD70080';
+        
+        return { coordinates, fillColor, strokeColor: '#FF0000', key: `alert-${index}` };
+      }
+      return null;
+    }).filter(Boolean);
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
@@ -88,74 +108,41 @@ export default function WeatherMapScreen() {
             <Text style={styles.loadingText}>Loading weather data...</Text>
           </View>
         ) : (
-          <MapLibreGL.MapView
+          <MapView
             style={styles.map}
-            styleURL="https://demotiles.maplibre.org/style.json"
+            provider={PROVIDER_GOOGLE}
+            initialRegion={{
+              latitude: 41.5,
+              longitude: -93.5,
+              latitudeDelta: 8,
+              longitudeDelta: 8,
+            }}
+            showsUserLocation={true}
+            showsMyLocationButton={true}
           >
-            <MapLibreGL.Camera
-              zoomLevel={5}
-              centerCoordinate={[-93.5, 41.5]} // Iowa center
-              animationDuration={1000}
-            />
-
-            {/* Radar Layer */}
+            {/* Radar Layer Overlay */}
             {radarLayer?.visible && radarTimestamp && (
-              <MapLibreGL.RasterSource
-                id="radar-source"
-                tileUrlTemplates={[radarTimestamp]}
-                tileSize={256}
-              >
-                <MapLibreGL.RasterLayer
-                  id="radar-layer"
-                  sourceID="radar-source"
-                  style={{
-                    rasterOpacity: radarLayer.opacity,
-                  }}
-                />
-              </MapLibreGL.RasterSource>
+              <Overlay
+                bounds={[
+                  [-100, 36], // Southwest
+                  [-87, 47],  // Northeast (Iowa region)
+                ]}
+                image={{ uri: radarTimestamp.replace('{z}/{\x}/{y}', '5/8/11') }}
+                opacity={radarLayer.opacity}
+              />
             )}
 
-            {/* Severe Weather Alerts Layer */}
-            {alertsLayer?.visible && alertsData?.features && (
-              <MapLibreGL.ShapeSource
-                id="alerts-source"
-                shape={alertsData}
-              >
-                <MapLibreGL.FillLayer
-                  id="alerts-fill"
-                  sourceID="alerts-source"
-                  style={{
-                    fillColor: [
-                      'match',
-                      ['get', 'severity'],
-                      'Extreme', '#8B0000',
-                      'Severe', '#FF4500',
-                      'Moderate', '#FFA500',
-                      'Minor', '#FFD700',
-                      '#FFD700',
-                    ],
-                    fillOpacity: alertsLayer.opacity,
-                  }}
-                />
-                <MapLibreGL.LineLayer
-                  id="alerts-outline"
-                  sourceID="alerts-source"
-                  style={{
-                    lineColor: '#FF0000',
-                    lineWidth: 2,
-                    lineOpacity: 0.8,
-                  }}
-                />
-              </MapLibreGL.ShapeSource>
-            )}
-
-            {/* User Location */}
-            <MapLibreGL.UserLocation
-              animated={true}
-              androidRenderMode="compass"
-              showsUserHeadingIndicator={true}
-            />
-          </MapLibreGL.MapView>
+            {/* Severe Weather Alert Polygons */}
+            {alertsLayer?.visible && getAlertPolygons().map((alert: any) => (
+              <Polygon
+                key={alert.key}
+                coordinates={alert.coordinates}
+                fillColor={alert.fillColor}
+                strokeColor={alert.strokeColor}
+                strokeWidth={2}
+              />
+            ))}
+          </MapView>
         )}
       </View>
 
