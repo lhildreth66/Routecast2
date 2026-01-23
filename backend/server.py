@@ -1246,7 +1246,7 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
     
     # Sort by distance and deduplicate similar alerts
     alerts.sort(key=lambda x: x.distance_miles)
-    return alerts[:10]  # Return top 10 alerts
+    return alerts  # Return all alerts along route
 
 async def find_rest_stops(route_geometry: str, waypoints_weather: List[WaypointWeather]) -> List[RestStop]:
     """Find rest stops, gas stations along the route with weather at arrival."""
