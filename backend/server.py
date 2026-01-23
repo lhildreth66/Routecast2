@@ -5330,7 +5330,7 @@ app.add_middleware(
 
 # Include routers in the main app
 app.include_router(geocode_router, prefix="/api/geocode")
-app.include_router(radar_router, prefix="/api/radar")  # Weather radar & alerts
+app.include_router(radar_router, prefix="/api")  # Radar router already has /radar prefix
 app.include_router(api_router)
 
 @app.on_event("startup")
