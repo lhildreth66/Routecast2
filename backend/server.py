@@ -4616,7 +4616,7 @@ async def search_truck_parking(request: TruckParkingRequest):
         out body;
         """
         
-        async with httpx.AsyncClient(timeout:30.0) as client:
+        async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post("https://overpass-api.de/api/interpreter", data=overpass_query)
             response.raise_for_status()
             data = response.json()
