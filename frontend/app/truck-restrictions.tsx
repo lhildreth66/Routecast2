@@ -39,7 +39,9 @@ export default function TruckRestrictionsScreen() {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission Required', 'Location permission is needed to find nearby restrictions.');
+        // Set default location instead of showing alert and returning empty
+        setLatitude('39.8283');
+        setLongitude('-98.5795');
         setLocationLoading(false);
         return;
       }
@@ -48,8 +50,11 @@ export default function TruckRestrictionsScreen() {
       setLongitude(location.coords.longitude.toFixed(6));
       setLocationLoading(false);
     } catch (err: any) {
+      console.log('Could not get current location:', err);
+      // Set default location (center of US) if location fails
+      setLatitude('39.8283');
+      setLongitude('-98.5795');
       setLocationLoading(false);
-      Alert.alert('Location Error', err.message || 'Unable to get your location.');
     }
   };
 
