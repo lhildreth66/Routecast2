@@ -735,7 +735,7 @@ export default function RouteScreen() {
           <Ionicons name="arrow-back" size={24} color="#fff" />
           <Text style={styles.backText}>Back</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => setShowRadarMap(true)} style={styles.radarBtn}>
+        <TouchableOpacity onPress={() => router.push('/radar-map')} style={styles.radarBtn}>
           <Ionicons name="radio-outline" size={18} color="#22c55e" />
           <Text style={styles.radarBtnText}>Radar</Text>
         </TouchableOpacity>

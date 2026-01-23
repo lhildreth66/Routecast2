@@ -34,6 +34,7 @@ from claim_log_pdf import export_claim_log_to_pdf
 from notifications import NotificationService, ExpoPushClient
 from notifications.smart_delay import SmartDelayOptimizer
 from common.features import SMART_DELAY_ALERTS
+from radar_alerts import radar_router  # Weather radar & alerts integration
 
 # Google Gemini for chat
 try:
@@ -5302,6 +5303,7 @@ app.add_middleware(
 
 # Include routers in the main app
 app.include_router(geocode_router, prefix="/api/geocode")
+app.include_router(radar_router, prefix="/api/radar")  # Weather radar & alerts
 app.include_router(api_router)
 
 @app.on_event("startup")
