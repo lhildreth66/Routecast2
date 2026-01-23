@@ -32,31 +32,26 @@ export default function TruckRestrictionsScreen() {
   const [expandedRestrictions, setExpandedRestrictions] = useState<Set<number>>(new Set());
   const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    getCurrentLocation();
-  }, []);
-
-  const getCurrentLocation = async () => {
+  const useCurrentLocation = async () => {
     setLocationLoading(true);
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        // Set default location instead of showing alert and returning empty
-        setLatitude('39.8283');
-        setLongitude('-98.5795');
+        Alert.alert('Location Permission Required', 'Please enable location permissions.');
         setLocationLoading(false);
         return;
       }
-      const location = await Location.getCurrentPositionAsync({});
-      setLatitude(location.coords.latitude.toFixed(6));
-      setLongitude(location.coords.longitude.toFixed(6));
+
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
+      setLatitude(location.coords.latitude.toFixed(4));
+      setLongitude(location.coords.longitude.toFixed(4));
       setLocationLoading(false);
+      Alert.alert('Location Updated', 'Your current location has been set.');
     } catch (err: any) {
-      console.log('Could not get current location:', err);
-      // Set default location (center of US) if location fails
-      setLatitude('39.8283');
-      setLongitude('-98.5795');
       setLocationLoading(false);
+      Alert.alert('Location Error', err.message || 'Unable to get your location.');
     }
   };
 
@@ -196,7 +191,7 @@ export default function TruckRestrictionsScreen() {
 
             <TouchableOpacity
               style={styles.locationButton}
-              onPress={getCurrentLocation}
+              onPress={useCurrentLocation}
               disabled={locationLoading}
             >
               {locationLoading ? (
