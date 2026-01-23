@@ -866,7 +866,7 @@ export default function RouteScreen() {
           </TouchableOpacity>
         )}
 
-        {/* Tabs for Weather Alerts and Bridge Alerts */}
+        {/* Tabs for Weather Alerts, Bridge Alerts, and Weather Radar */}
         <View style={styles.tabsContainer}>
           <TouchableOpacity
             style={styles.tab}
@@ -888,6 +888,14 @@ export default function RouteScreen() {
           >
             <Text style={styles.tabText}>
               Bridge Alerts {routeData.bridge_warnings && routeData.bridge_warnings.length > 0 && `(${routeData.bridge_warnings.length})`}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.tab}
+            onPress={() => router.push('/radar-map')}
+          >
+            <Text style={styles.tabText}>
+              Weather Radar
             </Text>
           </TouchableOpacity>
         </View>
