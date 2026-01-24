@@ -264,6 +264,10 @@ class WeatherAlert(BaseModel):
     event: str
     description: str
     areas: Optional[str] = None
+    onset: Optional[str] = None
+    expires: Optional[str] = None
+    effective: Optional[str] = None
+    ends: Optional[str] = None
 
 class PackingSuggestion(BaseModel):
     item: str
@@ -900,17 +904,57 @@ async def get_noaa_alerts(lat: float, lon: float) -> List[WeatherAlert]:
     try:
         raw_alerts = await get_providers().alerts.get_alerts(lat, lon)
         alerts: List[WeatherAlert] = []
+        now = datetime.utcnow()
+        
         for alert in raw_alerts:
-            alerts.append(
-                WeatherAlert(
-                    id=alert.get('id', str(uuid.uuid4())),
-                    headline=alert.get('headline', 'Weather Alert'),
-                    severity=alert.get('severity', 'Unknown'),
-                    event=alert.get('event', 'Weather Event'),
-                    description=alert.get('description', '')[:500],
-                    areas=alert.get('areas'),
+            # Parse timestamps to filter active alerts
+            onset_str = alert.get('onset')
+            expires_str = alert.get('expires')
+            effective_str = alert.get('effective')
+            ends_str = alert.get('ends')
+            
+            # Determine if alert is currently active
+            is_active = True
+            try:
+                # Use onset or effective as start time
+                start_time = None
+                if onset_str:
+                    start_time = datetime.fromisoformat(onset_str.replace('Z', '+00:00'))
+                elif effective_str:
+                    start_time = datetime.fromisoformat(effective_str.replace('Z', '+00:00'))
+                
+                # Use expires or ends as end time
+                end_time = None
+                if expires_str:
+                    end_time = datetime.fromisoformat(expires_str.replace('Z', '+00:00'))
+                elif ends_str:
+                    end_time = datetime.fromisoformat(ends_str.replace('Z', '+00:00'))
+                
+                # Only include alerts that are active NOW or within next 2 hours
+                if start_time and end_time:
+                    # Filter to alerts starting within last 2 hours and not yet expired
+                    time_since_start = (now - start_time).total_seconds() / 3600  # hours
+                    is_expired = now > end_time
+                    is_active = time_since_start <= 2 and not is_expired
+            except:
+                # If timestamp parsing fails, include the alert
+                pass
+            
+            if is_active:
+                alerts.append(
+                    WeatherAlert(
+                        id=alert.get('id', str(uuid.uuid4())),
+                        headline=alert.get('headline', 'Weather Alert'),
+                        severity=alert.get('severity', 'Unknown'),
+                        event=alert.get('event', 'Weather Event'),
+                        description=alert.get('description', '')[:500],
+                        areas=alert.get('areas'),
+                        onset=onset_str,
+                        expires=expires_str,
+                        effective=effective_str,
+                        ends=ends_str,
+                    )
                 )
-            )
         return alerts
     except Exception as e:
         logger.error(f"Alerts provider error for {lat},{lon}: {e}")

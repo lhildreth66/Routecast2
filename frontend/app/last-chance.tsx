@@ -29,6 +29,7 @@ export default function LastChanceScreen() {
   const [longitude, setLongitude] = useState('-111.03');
   const [searchRadius, setSearchRadius] = useState('75'); // miles - large radius for "last chance"
   const [loading, setLoading] = useState(false);
+  const [locationLoading, setLocationLoading] = useState(true);
   const [supplies, setSupplies] = useState<SupplyPoint[]>([]);
   const [error, setError] = useState<string>('');
   const [expandedSupplies, setExpandedSupplies] = useState(new Set<number>());
@@ -38,7 +39,7 @@ export default function LastChanceScreen() {
   useEffect(() => {
     (async () => {
       try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
+        const { status} = await Location.requestForegroundPermissionsAsync();
         if (status === 'granted') {
           const location = await Location.getCurrentPositionAsync({});
           setLatitude(location.coords.latitude.toFixed(4));
@@ -46,6 +47,8 @@ export default function LastChanceScreen() {
         }
       } catch (err) {
         console.log('Could not get current location, using defaults');
+      } finally {
+        setLocationLoading(false);
       }
     })();
   }, []);
@@ -141,12 +144,14 @@ export default function LastChanceScreen() {
         <View style={styles.card}>
           <Text style={styles.title}>🏪 Last Chance Supplies</Text>
           <Text style={styles.subtitle}>Find grocery, propane, and hardware stores before going remote</Text>
-          <Text style={styles.infoNote}>💡 Tip: The store name will typically appear in Google Maps when you navigate to the location.</Text>
+          <Text style={styles.infoNote}>💡 TIP: If a result shows "Name" or is missing a title, don't worry—tap Navigate and Google Maps will display the business name in directions. We use free map data to keep costs (and pricing) low.</Text>
 
-          <TouchableOpacity onPress={useCurrentLocation} style={styles.locationButton}>
-            <Ionicons name="locate" size={18} color="#f59e0b" />
-            <Text style={styles.locationButtonText}>Use Current Location</Text>
-          </TouchableOpacity>
+          {locationLoading && (
+            <View style={styles.loadingLocationBox}>
+              <ActivityIndicator size="small" color="#f59e0b" />
+              <Text style={styles.loadingLocationText}>Determining your current location...</Text>
+            </View>
+          )}
 
           <View style={styles.inputRow}>
             <Text style={styles.label}>Latitude</Text>
@@ -465,6 +470,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#f59e0b',
+  },
+  loadingLocationBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#3f3f46',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+    gap: 8,
+  },
+  loadingLocationText: {
+    fontSize: 14,
+    color: '#9ca3af',
+    fontStyle: 'italic',
   },
   inputRow: {
     marginBottom: 16,

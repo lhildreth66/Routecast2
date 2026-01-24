@@ -33,7 +33,7 @@ export default function FreeCampingScreen() {
   const [searchRadius, setSearchRadius] = useState('25'); // miles
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [locationLoading, setLocationLoading] = useState(false);
+  const [locationLoading, setLocationLoading] = useState(true);
   const [spots, setSpots] = useState<CampingSpot[]>([]);
   const [error, setError] = useState<string>('');
   const [expandedSpots, setExpandedSpots] = useState(new Set<number>());
@@ -51,6 +51,8 @@ export default function FreeCampingScreen() {
       } catch (err) {
         // Silently fail and use default coordinates
         console.log('Could not get current location, using defaults');
+      } finally {
+        setLocationLoading(false);
       }
     })();
   }, []);
@@ -165,22 +167,14 @@ export default function FreeCampingScreen() {
         <View style={styles.card}>
           <Text style={styles.title}>🏕️ Free Camping Finder</Text>
           <Text style={styles.subtitle}>Discover BLM land, National Forest dispersed camping, and other free spots</Text>
-          <Text style={styles.infoNote}>💡 Tip: The campsite name will typically appear in Google Maps when you navigate to the location.</Text>
+          <Text style={styles.infoNote}>💡 TIP: If a result shows "Name" or is missing a title, don't worry—tap Navigate and Google Maps will display the business name in directions. We use free map data to keep costs (and pricing) low.</Text>
 
-          <TouchableOpacity 
-            onPress={useCurrentLocation} 
-            style={styles.locationButton}
-            disabled={locationLoading}
-          >
-            {locationLoading ? (
+          {locationLoading && (
+            <View style={styles.loadingLocationBox}>
               <ActivityIndicator size="small" color="#06b6d4" />
-            ) : (
-              <>
-                <Ionicons name="locate" size={18} color="#06b6d4" />
-                <Text style={styles.locationButtonText}>Use Current Location</Text>
-              </>
-            )}
-          </TouchableOpacity>
+              <Text style={styles.loadingLocationText}>Determining your current location...</Text>
+            </View>
+          )}
 
           <View style={styles.inputRow}>
             <Text style={styles.label}>Latitude</Text>
@@ -478,6 +472,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#06b6d4',
+  },
+  loadingLocationBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#3f3f46',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+    gap: 8,
+  },
+  loadingLocationText: {
+    fontSize: 14,
+    color: '#9ca3af',
+    fontStyle: 'italic',
   },
   inputRow: {
     marginBottom: 16,

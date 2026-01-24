@@ -197,7 +197,7 @@ class NOAAAlertsProvider(AlertsProvider):
                     return []
                 data = response.json()
                 alerts: List[Dict[str, Any]] = []
-                for feature in data.get("features", [])[:5]:
+                for feature in data.get("features", []):
                     props = feature.get("properties", {})
                     alerts.append(
                         {
@@ -207,6 +207,10 @@ class NOAAAlertsProvider(AlertsProvider):
                             "event": props.get("event", "Weather Event"),
                             "description": props.get("description", "")[:500],
                             "areas": props.get("areaDesc"),
+                            "onset": props.get("onset"),
+                            "expires": props.get("expires"),
+                            "effective": props.get("effective"),
+                            "ends": props.get("ends"),
                         }
                     )
                 return alerts

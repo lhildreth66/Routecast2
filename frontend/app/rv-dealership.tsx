@@ -141,7 +141,14 @@ export default function RVDealershipScreen() {
         <View style={styles.card}>
           <Text style={styles.title}>🚐 Nearest RV Dealerships</Text>
           <Text style={styles.subtitle}>Find RV dealerships, service centers, and parts within 10 miles</Text>
-          <Text style={styles.infoNote}>💡 Tip: The business name will typically appear in Google Maps when you navigate to the location.</Text>
+          <Text style={styles.infoNote}>💡 TIP: If a result shows "Name" or is missing a title, don't worry—tap Navigate and Google Maps will display the business name in directions. We use free map data to keep costs (and pricing) low.</Text>
+
+          {locationLoading && (
+            <View style={styles.loadingLocationBox}>
+              <ActivityIndicator size="small" color="#ec4899" />
+              <Text style={styles.loadingLocationText}>Determining your current location...</Text>
+            </View>
+          )}
 
           <TouchableOpacity 
             onPress={refreshLocation} 
@@ -392,6 +399,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#ec4899',
+  },
+  loadingLocationBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#3f3f46',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+    gap: 8,
+  },
+  loadingLocationText: {
+    fontSize: 14,
+    color: '#9ca3af',
+    fontStyle: 'italic',
   },
   errorBox: {
     flexDirection: 'row',

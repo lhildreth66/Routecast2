@@ -940,7 +940,14 @@ export default function RouteScreen() {
                 roadSurface = 'Check local road conditions before traveling';
               } else {
                 // Road conditions based ONLY on weather - NO alerts here
-                if (temp <= 32 && (conditions.includes('rain') || conditions.includes('freezing') || conditions.includes('drizzle'))) {
+                // Check for sleet, freezing rain, ice pellets first (most dangerous)
+                if (conditions.includes('sleet') || conditions.includes('ice pellets') || conditions.includes('freezing rain') || conditions.includes('wintry mix')) {
+                  condIcon = '🧊';
+                  condLabel = 'ICY';
+                  condColor = '#ef4444';
+                  condDesc = `Sleet/Ice pellets - Extremely hazardous`;
+                  roadSurface = `DANGEROUS: Road surfaces covered in ice at ${temp}°F. Sleet creates immediate black ice. Avoid travel if possible, reduce speed to 25mph or less.`;
+                } else if (temp <= 32 && (conditions.includes('rain') || conditions.includes('freezing') || conditions.includes('drizzle'))) {
                   condIcon = '🧊';
                   condLabel = 'ICY';
                   condColor = '#ef4444';
@@ -987,13 +994,13 @@ export default function RouteScreen() {
                   condLabel = 'DRY';
                   condColor = '#6b7280';
                   condDesc = displayConditions;
-                  roadSurface = isDaytime ? 'Road surfaces dry, normal driving conditions expected' : 'NIGHTTIME: Reduced visibility on dark roads. Use high beams when appropriate, watch for wildlife.';
+                  roadSurface = 'Road surfaces dry, normal driving conditions expected';
                 } else if (conditions.includes('partly') || conditions.includes('sun') || conditions.includes('clear')) {
                   condIcon = isDaytime ? '☀️' : '🌙';
                   condLabel = 'DRY';
                   condColor = '#22c55e';
                   condDesc = displayConditions;
-                  roadSurface = isDaytime ? 'Road surfaces dry, normal driving conditions expected' : 'NIGHTTIME: Clear skies but limited visibility. Use high beams on rural roads, watch for deer and wildlife.';
+                  roadSurface = 'Road surfaces dry, normal driving conditions expected';
                 }
               }
               
