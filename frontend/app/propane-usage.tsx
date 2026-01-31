@@ -13,7 +13,6 @@ export default function PropaneUsageScreen() {
   const [nightsTempF, setNightsTempF] = useState('32,35,38');
 
   const [loading, setLoading] = useState(false);
-  const [premiumModalVisible, setPremiumModalVisible] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string>('');
 
@@ -22,28 +21,16 @@ export default function PropaneUsageScreen() {
     setResult(null);
     setError('');
     try {
-      // TESTING: Paywall disabled
-      // const guard = await requirePro();
-      // if (!guard.allowed) {
-      //   setPremiumModalVisible(true);
-      //   return;
-      // }
-
       const temps = nightsTempF.split(',').map(t => parseInt(t.trim(), 10)).filter(t => !isNaN(t));
       const resp = await axios.post(`${API_BASE}/api/pro/propane-usage`, {
         furnace_btu: parseInt(furnaceBtu, 10),
         duty_cycle_pct: parseFloat(dutyCyclePct),
         nights_temp_f: temps,
-        subscription_id: 'test', // TESTING: Bypass premium check
       });
       setResult(resp.data);
     } catch (err: any) {
       console.error('Propane calculation error:', err);
-      if (err?.response?.status === 402 || err?.response?.status === 403) {
-        setPremiumModalVisible(true);
-      } else {
-        setError(err?.response?.data?.detail || err?.message || 'Failed to calculate propane usage');
-      }
+      setError(err?.response?.data?.detail || err?.message || 'Failed to calculate propane usage');
     } finally {
       setLoading(false);
     }
@@ -120,8 +107,6 @@ export default function PropaneUsageScreen() {
           )}
         </View>
       </ScrollView>
-
-      <Paywall visible={premiumModalVisible} onClose={() => setPremiumModalVisible(false)} onPurchaseComplete={async () => { await refresh(); setPremiumModalVisible(false); }} />
     </SafeAreaView>
   );
 }

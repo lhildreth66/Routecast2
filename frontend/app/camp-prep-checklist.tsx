@@ -6,7 +6,6 @@ import { Ionicons } from '@expo/vector-icons';
 
 export default function CampPrepChecklistScreen() {
   const router = useRouter();
-  const [premiumModalVisible, setPremiumModalVisible] = useState(false);
 
   const [checklist, setChecklist] = useState([
     { id: 1, text: 'Fresh water tank filled', checked: false },
@@ -22,16 +21,6 @@ export default function CampPrepChecklistScreen() {
   ]);
 
   const [newItemText, setNewItemText] = useState('');
-
-  React.useEffect(() => {
-    // TESTING: Paywall disabled
-    // (async () => {
-    //   const guard = await requirePro();
-    //   if (!guard.allowed) {
-    //     setPremiumModalVisible(true);
-    //   }
-    // })();
-  }, []);
 
   const toggleItem = (id: number) => {
     setChecklist(prev => prev.map(item => item.id === id ? { ...item, checked: !item.checked } : item));
@@ -98,8 +87,6 @@ export default function CampPrepChecklistScreen() {
           ))}
         </View>
       </ScrollView>
-
-      <Paywall visible={premiumModalVisible} onClose={() => setPremiumModalVisible(false)} onPurchaseComplete={async () => { await refresh(); setPremiumModalVisible(false); }} />
     </SafeAreaView>
   );
 }

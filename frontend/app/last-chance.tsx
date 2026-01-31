@@ -79,7 +79,6 @@ export default function LastChanceScreen() {
         latitude: parseFloat(latitude),
         longitude: parseFloat(longitude),
         radius_miles: parseInt(searchRadius, 10),
-        subscription_id: 'test',
       });
       setSupplies(resp.data.supplies || []);
     } catch (err: any) {

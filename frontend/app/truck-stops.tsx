@@ -83,12 +83,10 @@ export default function TruckStopsScreen() {
     setStops([]);
     setError('');
     try {
-      const subscriptionId = await AsyncStorage.getItem('routecast_subscription_id');
       const resp = await axios.post(`${API_BASE}/api/pro/truck-stops/search`, {
         latitude: parseFloat(latitude),
         longitude: parseFloat(longitude),
         radius_miles: parseInt(searchRadius, 10),
-        subscription_id: subscriptionId,
       }, {
         timeout: 25000, // 25 second timeout
       });

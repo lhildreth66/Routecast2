@@ -28,8 +28,6 @@ export default function ConnectivityScreen() {
   const [cellResultData, setCellResultData] = useState<any>(null);
   const [starlinkResult, setStarlinkResult] = useState<string | null>(null);
   const [starlinkResultData, setStarlinkResultData] = useState<any>(null);
-  const [premiumModalVisible, setPremiumModalVisible] = useState(false);
-  const [premiumMessage, setPremiumMessage] = useState('');
 
   const useCurrentLocation = async () => {
     try {
@@ -53,19 +51,10 @@ export default function ConnectivityScreen() {
     setCellResult(null);
     setCellResultData(null);
     try {
-      // TESTING: Paywall disabled
-      // const entitled = await hasBoondockingPro();
-      // if (!entitled) {
-      //   setPremiumMessage('Upgrade to Routecast Pro to predict cellular signal strength.');
-      //   setPremiumModalVisible(true);
-      //   return;
-      // }
-
       const payload = {
         carrier,
         lat: parseFloat(latitude),
         lon: parseFloat(longitude),
-        subscription_id: 'test', // TESTING: Bypass premium check
       };
 
       try {
@@ -75,14 +64,6 @@ export default function ConnectivityScreen() {
         setCellResult(`${d.bar_estimate} probability: ${(d.probability * 100).toFixed(0)}%. ${d.explanation}`);
       } catch (err: any) {
         console.error('Cell prediction error:', err);
-        const status = err?.response?.status;
-        const code = err?.response?.data?.code || err?.response?.data?.detail?.code;
-        const msg = err?.response?.data?.message || err?.response?.data?.detail?.message;
-        if ((status === 402 || status === 403) && code === 'PREMIUM_LOCKED') {
-          setPremiumMessage(msg || 'Upgrade to Routecast Pro to predict cellular signal.');
-          setPremiumModalVisible(true);
-          return;
-        }
         // Show actual error details for debugging
         const errorDetail = err?.response?.data?.detail || err?.message || 'Unknown error';
         setCellResult(`Error: ${errorDetail}`);
@@ -97,18 +78,9 @@ export default function ConnectivityScreen() {
     setStarlinkResult(null);
     setStarlinkResultData(null);
     try {
-      // TESTING: Paywall disabled
-      // const entitled = await hasBoondockingPro();
-      // if (!entitled) {
-      //   setPremiumMessage('Upgrade to Routecast Pro to predict Starlink obstruction risk.');
-      //   setPremiumModalVisible(true);
-      //   return;
-      // }
-
       const payload = {
         horizonSouthDeg: parseInt(horizonSouth || '0', 10),
         canopyPct: parseInt(canopyPct || '0', 10),
-        subscription_id: 'test', // TESTING: Bypass premium check
       };
 
       try {
@@ -119,14 +91,6 @@ export default function ConnectivityScreen() {
         setStarlinkResult(`${d.risk_level} risk (score: ${d.obstruction_score}). ${d.explanation}${reasons ? `; ${reasons}` : ''}`);
       } catch (err: any) {
         console.error('Starlink prediction error:', err);
-        const status = err?.response?.status;
-        const code = err?.response?.data?.code || err?.response?.data?.detail?.code;
-        const msg = err?.response?.data?.message || err?.response?.data?.detail?.message;
-        if ((status === 402 || status === 403) && code === 'PREMIUM_LOCKED') {
-          setPremiumMessage(msg || 'Upgrade to Routecast Pro to predict Starlink risk.');
-          setPremiumModalVisible(true);
-          return;
-        }
         // Show actual error details for debugging
         const errorDetail = err?.response?.data?.detail || err?.message || 'Unknown error';
         setStarlinkResult(`Error: ${errorDetail}`);
@@ -289,12 +253,6 @@ export default function ConnectivityScreen() {
           )}
         </View>
       </ScrollView>
-
-        <PaywallModal
-          visible={premiumModalVisible}
-          message={premiumMessage}
-          onClose={() => setPremiumModalVisible(false)}
-        />
       </SafeAreaView>
     </View>
   );

@@ -70,7 +70,6 @@ export default function RVDealershipScreen() {
         latitude: lat,
         longitude: lon,
         radius_miles: 10,
-        subscription_id: 'test',
       });
       setDealerships(resp.data.dealerships || []);
       if (resp.data.dealerships?.length === 0) {

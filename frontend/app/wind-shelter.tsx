@@ -6,9 +6,6 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { API_BASE } from './apiConfig';
-import { Paywall } from './billing/paywall';
-import { requirePro } from './billing/guard';
-import { useEntitlementsContext } from './billing/EntitlementsProvider';
 
 export default function WindShelterScreen() {
   const router = useRouter();
@@ -18,11 +15,8 @@ export default function WindShelterScreen() {
   const [gustSpeed, setGustSpeed] = useState('25'); // mph
 
   const [loading, setLoading] = useState(false);
-  const [premiumModalVisible, setPremiumModalVisible] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string>('');
-
-  const { refresh } = useEntitlementsContext();
 
   const useCurrentLocation = async () => {
     try {
@@ -46,26 +40,14 @@ export default function WindShelterScreen() {
     setResult(null);
     setError('');
     try {
-      // TESTING: Paywall disabled
-      // const guard = await requirePro();
-      // if (!guard.allowed) {
-      //   setPremiumModalVisible(true);
-      //   return;
-      // }
-
       const resp = await axios.post(`${API_BASE}/api/pro/wind-shelter/orientation`, {
         predominant_dir_deg: parseInt(windDirection, 10),
         gust_mph: parseInt(gustSpeed, 10),
-        subscription_id: 'test', // TESTING: Bypass premium check
       });
       setResult(resp.data);
     } catch (err: any) {
       console.error('Wind shelter error:', err);
-      if (err?.response?.status === 402 || err?.response?.status === 403) {
-        setPremiumModalVisible(true);
-      } else {
-        setError(err?.response?.data?.detail || err?.message || 'Failed to calculate wind shelter');
-      }
+      setError(err?.response?.data?.detail || err?.message || 'Failed to calculate wind shelter');
     } finally {
       setLoading(false);
     }
@@ -180,8 +162,6 @@ export default function WindShelterScreen() {
           )}
         </View>
       </ScrollView>
-
-      <Paywall visible={premiumModalVisible} onClose={() => setPremiumModalVisible(false)} onPurchaseComplete={async () => { await refresh(); setPremiumModalVisible(false); }} />
     </SafeAreaView>
   );
 }

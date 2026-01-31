@@ -80,12 +80,10 @@ export default function TruckParkingScreen() {
     setSpots([]);
     setError('');
     try {
-      const subscriptionId = await AsyncStorage.getItem('routecast_subscription_id');
       const resp = await axios.post(`${API_BASE}/api/pro/truck-parking/search`, {
         latitude: parseFloat(latitude),
         longitude: parseFloat(longitude),
         radius_miles: parseInt(searchRadius, 10),
-        subscription_id: subscriptionId,
       });
       setSpots(resp.data.spots || []);
       if (resp.data.spots && resp.data.spots.length === 0) {

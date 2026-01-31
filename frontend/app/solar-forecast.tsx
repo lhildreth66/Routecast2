@@ -15,7 +15,6 @@ export default function SolarForecastScreen() {
   const [numPanels, setNumPanels] = useState('2');
 
   const [loading, setLoading] = useState(false);
-  const [premiumModalVisible, setPremiumModalVisible] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string>('');
 
@@ -41,13 +40,6 @@ export default function SolarForecastScreen() {
     setResult(null);
     setError('');
     try {
-      // TESTING: Paywall disabled
-      // const guard = await requirePro();
-      // if (!guard.allowed) {
-      //   setPremiumModalVisible(true);
-      //   return;
-      // }
-
       // Generate next 7 days
       const dates = [];
       for (let i = 0; i < 7; i++) {
@@ -65,17 +57,12 @@ export default function SolarForecastScreen() {
         panel_watts: totalWatts,
         shade_pct: 10, // Default 10% shade
         cloud_cover: Array(7).fill(30), // Default 30% cloud cover
-        subscription_id: 'test', // TESTING: Bypass premium check
       });
       setResult(resp.data);
     } catch (err: any) {
       console.error('Solar forecast error:', err);
       console.error('Response:', err?.response?.data);
-      if (err?.response?.status === 402 || err?.response?.status === 403) {
-        setPremiumModalVisible(true);
-      } else {
-        setError(err?.response?.data?.detail || err?.message || 'Failed to calculate solar forecast');
-      }
+      setError(err?.response?.data?.detail || err?.message || 'Failed to calculate solar forecast');
     } finally {
       setLoading(false);
     }
@@ -199,8 +186,6 @@ export default function SolarForecastScreen() {
           )}
         </View>
       </ScrollView>
-
-      <Paywall visible={premiumModalVisible} onClose={() => setPremiumModalVisible(false)} onPurchaseComplete={async () => { await refresh(); setPremiumModalVisible(false); }} />
     </SafeAreaView>
   );
 }

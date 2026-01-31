@@ -48,8 +48,6 @@ export default function ClaimLogScreen() {
 
   const [loading, setLoading] = useState(false);
   const [preview, setPreview] = useState<ClaimLogPreview | null>(null);
-  const [premiumModalVisible, setPremiumModalVisible] = useState(false);
-  const [premiumMessage, setPremiumMessage] = useState('Upgrade to Routecast Pro to generate claim logs.');
 
   const buildPayload = () => ({
     routeId,
@@ -77,31 +75,16 @@ export default function ClaimLogScreen() {
         precip_in: parseFloat(precipIn),
       },
     },
-    subscription_id: undefined,
   });
-
-  const handlePremiumLock = () => {
-    setPremiumMessage('Upgrade to Routecast Pro to generate claim logs.');
-    setPremiumModalVisible(true);
-  };
 
   const generatePreview = async () => {
     setLoading(true);
     setPreview(null);
     try {
-      const entitled = await hasBoondockingPro();
-      if (!entitled) {
-        handlePremiumLock();
-        return;
-      }
       const payload = buildPayload();
       const res = await axios.post(`${API_BASE}/pro/claim-log/build`, payload);
       setPreview(res.data);
     } catch (err: any) {
-      if (err?.response?.status === 402) {
-        handlePremiumLock();
-        return;
-      }
       const msg = err?.response?.data?.detail || err?.message || 'Failed to build claim log';
       Alert.alert('Error', msg);
     } finally {
@@ -112,11 +95,6 @@ export default function ClaimLogScreen() {
   const downloadPdf = async () => {
     setLoading(true);
     try {
-      const entitled = await hasBoondockingPro();
-      if (!entitled) {
-        handlePremiumLock();
-        return;
-      }
       const payload = buildPayload();
       const res = await axios.post(`${API_BASE}/pro/claim-log/pdf`, payload, { responseType: 'arraybuffer' });
       const base64 = Buffer.from(res.data, 'binary').toString('base64');
@@ -127,10 +105,6 @@ export default function ClaimLogScreen() {
         dialogTitle: 'Routecast Claim Log',
       });
     } catch (err: any) {
-      if (err?.response?.status === 402) {
-        handlePremiumLock();
-        return;
-      }
       const msg = err?.response?.data?.detail || err?.message || 'Failed to generate PDF';
       Alert.alert('Error', msg);
     } finally {
@@ -213,11 +187,6 @@ export default function ClaimLogScreen() {
         )}
       </ScrollView>
 
-      <PaywallModal
-        visible={premiumModalVisible}
-        message={premiumMessage}
-        onClose={() => setPremiumModalVisible(false)}
-      />
     </SafeAreaView>
   );
 }

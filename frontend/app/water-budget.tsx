@@ -15,7 +15,6 @@ export default function WaterBudgetScreen() {
   const [showersPerWeek, setShowersPerWeek] = useState('2');
 
   const [loading, setLoading] = useState(false);
-  const [premiumModalVisible, setPremiumModalVisible] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string>('');
 
@@ -24,13 +23,6 @@ export default function WaterBudgetScreen() {
     setResult(null);
     setError('');
     try {
-      // TESTING: Paywall disabled
-      // const guard = await requirePro();
-      // if (!guard.allowed) {
-      //   setPremiumModalVisible(true);
-      //   return;
-      // }
-
       const resp = await axios.post(`${API_BASE}/api/pro/water-budget`, {
         fresh_gal: parseInt(freshGallons, 10),
         gray_gal: parseInt(grayGallons, 10),
@@ -38,16 +30,11 @@ export default function WaterBudgetScreen() {
         people: parseInt(numPeople, 10),
         showers_per_week: parseFloat(showersPerWeek),
         hot_days: false, // Could add a toggle for this
-        subscription_id: 'test', // TESTING: Bypass premium check
       });
       setResult(resp.data);
     } catch (err: any) {
       console.error('Water budget calculation error:', err);
-      if (err?.response?.status === 402 || err?.response?.status === 403) {
-        setPremiumModalVisible(true);
-      } else {
-        setError(err?.response?.data?.detail || err?.message || 'Failed to calculate water budget');
-      }
+      setError(err?.response?.data?.detail || err?.message || 'Failed to calculate water budget');
     } finally {
       setLoading(false);
     }
@@ -171,8 +158,6 @@ export default function WaterBudgetScreen() {
           )}
         </View>
       </ScrollView>
-
-      <Paywall visible={premiumModalVisible} onClose={() => setPremiumModalVisible(false)} onPurchaseComplete={async () => { await refresh(); setPremiumModalVisible(false); }} />
     </SafeAreaView>
   );
 }

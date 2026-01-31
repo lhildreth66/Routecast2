@@ -6,9 +6,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { API_BASE } from './apiConfig';
-import { Paywall } from './billing/paywall';
-import { requirePro } from './billing/guard';
-import { useEntitlementsContext } from './billing/EntitlementsProvider';
 
 // Entitlement sourced from AsyncStorage key 'entitlements.boondockingPro'
 
@@ -20,30 +17,20 @@ export default function RoadPassabilityScreen() {
   const [soil, setSoil] = useState<'sand'|'loam'|'clay'>('clay');
 
   const [loading, setLoading] = useState(false);
-  const [premiumModalVisible, setPremiumModalVisible] = useState(false);
 
   const [resultText, setResultText] = useState<string | null>(null);
   const [result, setResult] = useState<any>(null);
-
-  const { refresh } = useEntitlementsContext();
 
   const runAssessment = async () => {
     setLoading(true);
     setResultText(null);
     setResult(null);
     try {
-      const guard = await requirePro();
-      if (!guard.allowed) {
-        setPremiumModalVisible(true);
-        return;
-      }
-
       const payload = {
         precip72hIn: parseFloat(precip || '0'),
         slopePct: parseFloat(slope || '0'),
         minTempF: parseInt(temp || '0', 10),
         soilType: soil,
-        subscription_id: 'test', // TESTING: Bypass premium check
       };
 
       try {
@@ -51,13 +38,6 @@ export default function RoadPassabilityScreen() {
         setResult(resp.data);
       } catch (err: any) {
         console.error('Road passability error:', err);
-        const status = err?.response?.status;
-        const code = err?.response?.data?.code || err?.response?.data?.detail?.code;
-        const msg = err?.response?.data?.message || err?.response?.data?.detail?.message;
-        if ((status === 402 || status === 403) && code === 'PREMIUM_LOCKED') {
-          setPremiumModalVisible(true);
-          return;
-        }
         setResultText('Unable to assess passability right now.');
       }
     } finally {
@@ -188,15 +168,6 @@ export default function RoadPassabilityScreen() {
           )}
         </View>
       </ScrollView>
-
-        <Paywall
-          visible={premiumModalVisible}
-          onClose={() => setPremiumModalVisible(false)}
-          onPurchaseComplete={async () => {
-            await refresh();
-            setPremiumModalVisible(false);
-          }}
-        />
       </SafeAreaView>
     </View>
   );

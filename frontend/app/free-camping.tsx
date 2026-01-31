@@ -99,7 +99,6 @@ export default function FreeCampingScreen() {
         latitude: parseFloat(latitude),
         longitude: parseFloat(longitude),
         radius_miles: parseInt(searchRadius, 10),
-        subscription_id: 'test',
       });
       setSpots(resp.data.spots || []);
       if (resp.data.spots && resp.data.spots.length === 0) {

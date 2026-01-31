@@ -14,8 +14,6 @@ import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
 import * as Location from 'expo-location';
 import { API_BASE } from './apiConfig';
-import PaywallModal from './components/PaywallModal';
-import { hasBoondockingPro } from './utils/entitlements';
 
 interface CampsiteIndexResult {
   score: number;
@@ -47,9 +45,6 @@ export default function CampsiteIndexScreen() {
 
   const [result, setResult] = useState<CampsiteIndexResult | null>(null);
   const [loading, setLoading] = useState(false);
-  const [showPaywall, setShowPaywall] = useState(false);
-  const [premiumMessage, setPremiumMessage] = useState('');
-  const [isPro, setIsPro] = useState(false);
 
   useEffect(() => {
     // Get current location on mount
@@ -65,14 +60,6 @@ export default function CampsiteIndexScreen() {
         console.log('Could not get current location');
       }
     })();
-    
-    // TESTING: Paywall disabled
-    // const checkPro = async () => {
-    //   const pro = await hasBoondockingPro();
-    //   setIsPro(pro);
-    // };
-    // checkPro();
-    setIsPro(true); // Always set to true for testing
   }, []);
 
   const useCurrentLocation = async () => {
@@ -109,13 +96,6 @@ export default function CampsiteIndexScreen() {
   };
 
   const calculateScore = async () => {
-    // TESTING: Paywall disabled
-    // if (!isPro) {
-    //   setPremiumMessage('Upgrade to Routecast Pro to calculate Campsite Index scores.');
-    //   setShowPaywall(true);
-    //   return;
-    // }
-
     if (useAutoMode && (!latitude || !longitude)) {
       Alert.alert('Location Required', 'Please enter coordinates or use current location.');
       return;
@@ -130,7 +110,6 @@ export default function CampsiteIndexScreen() {
         response = await axios.post(`${API_BASE}/api/pro/campsite-index/auto`, {
           latitude: parseFloat(latitude),
           longitude: parseFloat(longitude),
-          subscription_id: 'test',
         });
       } else {
         // Manual mode: use user inputs
@@ -141,18 +120,12 @@ export default function CampsiteIndexScreen() {
           access_score: parseFloat(accessScore),
           signal_score: parseFloat(signalScore),
           road_passability_score: parseFloat(passabilityScore),
-          subscription_id: 'test',
         });
       }
 
       setResult(response.data);
     } catch (error: any) {
       console.error('Campsite index error:', error);
-      if (error?.response?.status === 402) {
-        setPremiumMessage('Upgrade to Routecast Pro to calculate Campsite Index scores.');
-        setShowPaywall(true);
-        return;
-      }
       Alert.alert('Error', error?.response?.data?.detail || error?.message || 'Failed to calculate campsite index');
     } finally {
       setLoading(false);
@@ -378,12 +351,6 @@ export default function CampsiteIndexScreen() {
           )}
         </View>
       )}
-
-      <PaywallModal
-        visible={showPaywall}
-        message={premiumMessage}
-        onClose={() => setShowPaywall(false)}
-      />
     </ScrollView>
   );
 }

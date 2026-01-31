@@ -14,7 +14,6 @@ export default function TerrainShadeScreen() {
   const [date, setDate] = useState('2026-06-15');
 
   const [loading, setLoading] = useState(false);
-  const [premiumModalVisible, setPremiumModalVisible] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string>('');
 
@@ -39,26 +38,16 @@ export default function TerrainShadeScreen() {
     setLoading(true);
     setResult(null);
     try {
-      // TESTING: Paywall disabled
-      // const guard = await requirePro();
-      // if (!guard.allowed) {
-      //   setPremiumModalVisible(true);
-      //   return;
-      // }
-
       const resp = await axios.post(`${API_BASE}/api/pro/terrain/sun-path`, {
         latitude: parseFloat(latitude),
         longitude: parseFloat(longitude),
         date: date,
         tree_canopy_pct: 0,
         horizon_obstruction_deg: 0,
-        subscription_id: 'test', // TESTING: Bypass premium check
       });
       setResult(resp.data);
     } catch (err: any) {
-      if (err?.response?.status === 402 || err?.response?.status === 403) {
-        setPremiumModalVisible(true);
-      }
+      setError(err?.response?.data?.detail || err?.message || 'Failed to analyze terrain shade');
     } finally {
       setLoading(false);
     }
@@ -163,8 +152,6 @@ export default function TerrainShadeScreen() {
           )}
         </View>
       </ScrollView>
-
-      <Paywall visible={premiumModalVisible} onClose={() => setPremiumModalVisible(false)} onPurchaseComplete={async () => { await refresh(); setPremiumModalVisible(false); }} />
     </SafeAreaView>
   );
 }
