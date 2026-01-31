@@ -56,18 +56,27 @@ export default function RadarMapScreen() {
         });
       }
 
-      // Fetch alerts from our backend (not directly from NWS)
-      const response = await axios.get(`${API_BASE}/api/radar/alerts/map`);
-      setAlerts(response.data.alerts || []);
+      // Fetch alerts from backend if available
+      if (API_BASE) {
+        try {
+          const response = await axios.get(`${API_BASE}/api/radar/alerts/map`);
+          setAlerts(response.data.alerts || []);
+        } catch (alertErr: any) {
+          console.warn('Failed to load weather alerts, continuing without alerts:', alertErr);
+          // Continue without alerts - map will still work
+        }
+      } else {
+        console.warn('Backend URL not configured, radar map will work without weather alerts');
+      }
     } catch (err: any) {
       console.error('Error loading radar data:', err);
-      setError('Failed to load weather radar data');
+      setError('Failed to load location data');
     } finally {
       setLoading(false);
     }
   };
 
-  // Generate self-contained Leaflet map HTML
+  // Generate self-contained Leaflet map HTML with alerts and radar
   const generateMapHTML = () => {
     const alertsJSON = JSON.stringify(alerts);
     const userLoc = userLocation ? JSON.stringify(userLocation) : 'null';
@@ -186,21 +195,50 @@ export default function RadarMapScreen() {
   </div>
   
   <script>
-    const alerts = ${alertsJSON};
-    const userLocation = ${userLoc};
-    
-    // Initialize map
-    const map = L.map('map', {
-      zoomControl: true,
-      attributionControl: true,
-    }).setView(userLocation ? [userLocation.lat, userLocation.lon] : [39.8283, -98.5795], userLocation ? 8 : 4);
-    
-    // Add dark base layer
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      attribution: '&copy; OpenStreetMap, &copy; CARTO',
-      subdomains: 'abcd',
-      maxZoom: 20
-    }).addTo(map);
+    try {
+      // Send console messages to React Native
+      const originalLog = console.log;
+      const originalError = console.error;
+      const originalWarn = console.warn;
+      
+      console.log = function(...args) {
+        window.ReactNativeWebView?.postMessage(JSON.stringify({ type: 'log', message: args.join(' ') }));
+        originalLog.apply(console, args);
+      };
+      console.error = function(...args) {
+        window.ReactNativeWebView?.postMessage(JSON.stringify({ type: 'error', message: args.join(' ') }));
+        originalError.apply(console, args);
+      };
+      console.warn = function(...args) {
+        window.ReactNativeWebView?.postMessage(JSON.stringify({ type: 'warn', message: args.join(' ') }));
+        originalWarn.apply(console, args);
+      };
+      
+      console.log('WebView script started');
+      console.log('API_BASE:', '${API_BASE}');
+      
+      const alerts = ${alertsJSON};
+      const userLocation = ${userLoc};
+      
+      console.log('Alerts loaded:', alerts.length);
+      console.log('User location:', userLocation);
+      
+      // Initialize map
+      const map = L.map('map', {
+        zoomControl: true,
+        attributionControl: true,
+      }).setView(userLocation ? [userLocation.lat, userLocation.lon] : [39.8283, -98.5795], userLocation ? 8 : 4);
+      
+      console.log('Map initialized');
+      
+      // Add dark base layer
+      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+        attribution: '&copy; OpenStreetMap, &copy; CARTO',
+        subdomains: 'abcd',
+        maxZoom: 20
+      }).addTo(map);
+      
+      console.log('Base layer added');
     
     // Add user location marker
     if (userLocation) {
@@ -263,11 +301,32 @@ export default function RadarMapScreen() {
         // Show radar
         btn.textContent = 'Loading...';
         try {
-          const response = await fetch('${API_BASE}/api/radar/tiles');
-          const data = await response.json();
+          // Try backend first if available
+          const apiBase = '${API_BASE}';
+          let tileUrl = null;
           
-          if (data.tile_url) {
-            radarLayer = L.tileLayer(data.tile_url, {
+          if (apiBase) {
+            try {
+              const response = await fetch(apiBase + '/api/radar/tiles');
+              const data = await response.json();
+              tileUrl = data.tile_url;
+            } catch (backendErr) {
+              console.warn('Backend radar unavailable, falling back to direct RainViewer');
+            }
+          }
+          
+          // Fallback to RainViewer directly if backend unavailable
+          if (!tileUrl) {
+            const rainResponse = await fetch('https://api.rainviewer.com/public/weather-maps.json');
+            const rainData = await rainResponse.json();
+            if (rainData.radar && rainData.radar.past && rainData.radar.past.length > 0) {
+              const latest = rainData.radar.past[rainData.radar.past.length - 1];
+              tileUrl = 'https://tilecache.rainviewer.com' + latest.path + '/512/{z}/{x}/{y}/2/1_1.png';
+            }
+          }
+          
+          if (tileUrl) {
+            radarLayer = L.tileLayer(tileUrl, {
               opacity: 0.7,
               attribution: 'RainViewer'
             }).addTo(map);
@@ -282,6 +341,10 @@ export default function RadarMapScreen() {
           btn.textContent = '🌧️ Radar (Error)';
         }
       }
+    }
+    } catch (err) {
+      console.error('WebView script error:', err.message, err.stack);
+      window.ReactNativeWebView?.postMessage(JSON.stringify({ type: 'error', message: 'Script error: ' + err.message }));
     }
   </script>
 </body>
@@ -340,19 +403,48 @@ export default function RadarMapScreen() {
         </TouchableOpacity>
       </View>
 
-      <WebView
-        source={{ html: generateMapHTML() }}
-        style={styles.webview}
-        javaScriptEnabled={true}
-        domStorageEnabled={true}
-        startInLoadingState={true}
-        scalesPageToFit={true}
-        originWhitelist={['*']}
-      />
+      {/* Platform-specific rendering: iframe for web, WebView for native */}
+      {Platform.OS === 'web' ? (
+        <iframe
+          srcDoc={generateMapHTML()}
+          style={{
+            width: '100%',
+            flex: 1,
+            border: 'none',
+          }}
+          title="Weather Radar Map"
+        />
+      ) : (
+        <WebView
+          source={{ 
+            html: generateMapHTML(),
+            baseUrl: 'https://routecastweather.com'
+          }}
+          style={styles.webview}
+          javaScriptEnabled={true}
+          domStorageEnabled={true}
+          startInLoadingState={true}
+          scalesPageToFit={true}
+          originWhitelist={['*']}
+          allowFileAccessFromFileURLs={true}
+          allowUniversalAccessFromFileURLs={true}
+          mixedContentMode="always"
+          onError={(syntheticEvent) => {
+            const { nativeEvent } = syntheticEvent;
+            console.error('WebView error:', nativeEvent);
+          }}
+          onMessage={(event) => {
+            console.log('WebView message:', event.nativeEvent.data);
+          }}
+          onLoadEnd={() => {
+            console.log('WebView loaded successfully');
+          }}
+        />
+      )}
 
       <View style={styles.footer}>
         <Text style={styles.footerText}>
-          🌧️ Radar & {alerts.length} active alert{alerts.length !== 1 ? 's' : ''} • Live NWS data
+          🌧️ Radar {alerts.length > 0 ? `& ${alerts.length} active alert${alerts.length !== 1 ? 's' : ''}` : '(alerts unavailable)'} • {API_BASE ? 'Live NWS data' : 'Limited mode - backend not connected'}
         </Text>
       </View>
     </SafeAreaView>
