@@ -6,8 +6,6 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { API_BASE } from './apiConfig';
-import PaywallModal from './components/PaywallModal';
-import { hasBoondockingPro } from './utils/entitlements';
 
 type ConnectivityTab = 'cell' | 'starlink';
 

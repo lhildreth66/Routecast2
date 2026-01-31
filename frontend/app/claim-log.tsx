@@ -15,8 +15,6 @@ import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { Buffer } from 'buffer';
 import { API_BASE } from './apiConfig';
-import PaywallModal from './components/PaywallModal';
-import { hasBoondockingPro } from './utils/entitlements';
 
 interface ClaimLogPreview {
   schema_version: string;

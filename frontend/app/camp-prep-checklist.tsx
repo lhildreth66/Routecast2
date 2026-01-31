@@ -3,14 +3,10 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, TextInput } from 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { Paywall } from './billing/paywall';
-import { requirePro } from './billing/guard';
-import { useEntitlementsContext } from './billing/EntitlementsProvider';
 
 export default function CampPrepChecklistScreen() {
   const router = useRouter();
   const [premiumModalVisible, setPremiumModalVisible] = useState(false);
-  const { refresh } = useEntitlementsContext();
 
   const [checklist, setChecklist] = useState([
     { id: 1, text: 'Fresh water tank filled', checked: false },

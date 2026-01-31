@@ -6,9 +6,6 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { API_BASE } from './apiConfig';
-import { Paywall } from './billing/paywall';
-import { requirePro } from './billing/guard';
-import { useEntitlementsContext } from './billing/EntitlementsProvider';
 
 export default function TerrainShadeScreen() {
   const router = useRouter();
@@ -20,8 +17,6 @@ export default function TerrainShadeScreen() {
   const [premiumModalVisible, setPremiumModalVisible] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string>('');
-
-  const { refresh } = useEntitlementsContext();
 
   const useCurrentLocation = async () => {
     try {

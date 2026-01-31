@@ -5,9 +5,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { API_BASE } from './apiConfig';
-import { Paywall } from './billing/paywall';
-import { requirePro } from './billing/guard';
-import { useEntitlementsContext } from './billing/EntitlementsProvider';
 
 export default function WaterBudgetScreen() {
   const router = useRouter();
@@ -21,8 +18,6 @@ export default function WaterBudgetScreen() {
   const [premiumModalVisible, setPremiumModalVisible] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string>('');
-
-  const { refresh } = useEntitlementsContext();
 
   const calculate = async () => {
     setLoading(true);
