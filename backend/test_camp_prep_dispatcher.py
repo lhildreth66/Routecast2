@@ -106,7 +106,7 @@ class TestPremiumGating:
         assert response.premium.locked is True
         assert response.error == "premium_locked"
         assert response.payload is None
-        assert "Boondocking Pro" in response.human
+        assert "premium subscription" in response.human
     
     def test_power_forecast_unlocked_with_subscription(self):
         response = dispatch("/power-forecast", subscription_id="test_sub")

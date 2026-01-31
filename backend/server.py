@@ -2555,7 +2555,7 @@ async def forecast_solar_energy(request: SolarForecastRequest):
     """
     Forecast daily solar energy generation for a boondocking location.
     
-    PREMIUM FEATURE - Requires active Boondocking Pro subscription.
+    PREMIUM FEATURE - Requires active subscription.
     
     Args:
         lat: Latitude (-90 to 90)
@@ -2617,7 +2617,7 @@ async def estimate_propane_usage(request: PropaneUsageRequest):
     """
     Estimate daily propane consumption for RV boondocking.
     
-    PREMIUM FEATURE - Requires active Boondocking Pro subscription.
+    PREMIUM FEATURE - Requires active subscription.
     
     Args:
         furnace_btu: Furnace heating capacity in BTU (e.g., 20000, 30000)
@@ -2685,7 +2685,7 @@ async def estimate_water_budget(request: WaterBudgetRequest):
     """
     Estimate days remaining before water tanks run out during boondocking.
     
-    PREMIUM FEATURE - Requires active Boondocking Pro subscription.
+    PREMIUM FEATURE - Requires active subscription.
     
     Water usage model:
     - Fresh water: 2 gal/person/day for drinking & cooking
@@ -4494,7 +4494,7 @@ async def search_rv_dealerships(request: RVDealershipRequest):
         )
 
 
-# ==================== TRACTOR TRAILER PRO ENDPOINTS ====================
+# ==================== TRACTOR TRAILER ENDPOINTS ====================
 
 # Helper function for distance calculations
 def haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -5140,7 +5140,7 @@ async def search_truck_restrictions(request: TruckRestrictionRequest):
         raise HTTPException(status_code=500, detail=f"Error searching truck restrictions: {str(e)}")
 
 
-# ===== TRACTOR TRAILER PRO ALERTS (Keep existing synthetic route analysis) =====
+# ===== TRACTOR TRAILER ALERTS (Keep existing synthetic route analysis) =====
 class TruckAlertRequest(BaseModel):
     """Request for truck alerts along a route"""
     route_polyline: str = Field(..., description="Encoded polyline of the route")

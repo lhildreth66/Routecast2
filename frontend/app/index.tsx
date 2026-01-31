@@ -100,7 +100,7 @@ export default function HomeScreen() {
   const [isListening, setIsListening] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(false);
   
-  // Boondockers Pro Chat
+  // Off-Grid Chat
   const [showCampPrep, setShowCampPrep] = useState(false);
   
   // Calendar integration
@@ -1429,7 +1429,7 @@ export default function HomeScreen() {
         </Modal>
       )}
 
-      {/* Boondockers Pro Modal */}
+      {/* Off-Grid Modal */}
       {showCampPrep && (
         <Modal
           visible={showCampPrep}

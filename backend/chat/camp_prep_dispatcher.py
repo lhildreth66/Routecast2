@@ -110,10 +110,8 @@ def _handle_prep_checklist(args: Dict[str, Any], subscription_id: Optional[str])
         "🔒 Assess wind shelter",
     ]
     
-    human = "Camp prep checklist generated. "
-    if not has_premium:
-        human += "Upgrade to Boondocking Pro to unlock detailed simulations."
-        checklist.extend(premium_items)
+    human = "Camp prep checklist generated."
+    checklist.extend(premium_items)
     
     return DispatchResponse(
         mode="camp_prep",
@@ -131,7 +129,7 @@ def _handle_power_forecast(args: Dict[str, Any], subscription_id: Optional[str])
         return DispatchResponse(
             mode="camp_prep",
             command="/power-forecast",
-            human="This is a Boondocking Pro feature. Upgrade to unlock solar power forecasting.",
+            human="This feature requires a premium subscription. Upgrade to unlock solar power forecasting.",
             payload=None,
             premium=premium,
             error="premium_locked",
@@ -194,7 +192,7 @@ def _handle_propane_usage(args: Dict[str, Any], subscription_id: Optional[str]) 
         return DispatchResponse(
             mode="camp_prep",
             command="/propane-usage",
-            human="This is a Boondocking Pro feature. Upgrade to unlock propane usage forecasting.",
+            human="This feature requires a premium subscription. Upgrade to unlock propane usage forecasting.",
             payload=None,
             premium=premium,
             error="premium_locked",
@@ -249,7 +247,7 @@ def _handle_water_plan(args: Dict[str, Any], subscription_id: Optional[str]) -> 
         return DispatchResponse(
             mode="camp_prep",
             command="/water-plan",
-            human="This is a Boondocking Pro feature. Upgrade to unlock water budget planning.",
+            human="This feature requires a premium subscription. Upgrade to unlock water budget planning.",
             payload=None,
             premium=premium,
             error="premium_locked",
@@ -300,7 +298,7 @@ def _handle_terrain_shade(args: Dict[str, Any], subscription_id: Optional[str]) 
         return DispatchResponse(
             mode="camp_prep",
             command="/terrain-shade",
-            human="This is a Boondocking Pro feature. Upgrade to unlock terrain shade analysis.",
+            human="This feature requires a premium subscription. Upgrade to unlock terrain shade analysis.",
             payload=None,
             premium=premium,
             error="premium_locked",
@@ -365,7 +363,7 @@ def _handle_wind_shelter(args: Dict[str, Any], subscription_id: Optional[str]) -
         return DispatchResponse(
             mode="camp_prep",
             command="/wind-shelter",
-            human="This is a Boondocking Pro feature. Upgrade to unlock wind shelter assessment.",
+            human="This feature requires a premium subscription. Upgrade to unlock wind shelter assessment.",
             payload=None,
             premium=premium,
             error="premium_locked",
@@ -423,7 +421,7 @@ def _handle_road_sim(args: Dict[str, Any], subscription_id: Optional[str]) -> Di
         return DispatchResponse(
             mode="camp_prep",
             command="/road-sim",
-            human="This is a Boondocking Pro feature. Upgrade to unlock road passability simulation.",
+            human="This feature requires a premium subscription. Upgrade to unlock road passability simulation.",
             payload=None,
             premium=premium,
             error="premium_locked",
@@ -475,7 +473,7 @@ def _handle_cell_starlink(args: Dict[str, Any], subscription_id: Optional[str]) 
         return DispatchResponse(
             mode="camp_prep",
             command="/cell-starlink",
-            human="This is a Boondocking Pro feature. Upgrade to unlock connectivity predictions.",
+            human="This feature requires a premium subscription. Upgrade to unlock connectivity predictions.",
             payload=None,
             premium=premium,
             error="premium_locked",
@@ -522,7 +520,7 @@ def _handle_camp_index(args: Dict[str, Any], subscription_id: Optional[str]) -> 
         return DispatchResponse(
             mode="camp_prep",
             command="/camp-index",
-            human="This is a Boondocking Pro feature. Upgrade to unlock campsite scoring.",
+            human="This feature requires a premium subscription. Upgrade to unlock campsite scoring.",
             payload=None,
             premium=premium,
             error="premium_locked",
@@ -576,7 +574,7 @@ def _handle_claim_log(args: Dict[str, Any], subscription_id: Optional[str]) -> D
         return DispatchResponse(
             mode="camp_prep",
             command="/claim-log",
-            human="This is a Boondocking Pro feature. Upgrade to unlock insurance claim log generation.",
+            human="This feature requires a premium subscription. Upgrade to unlock insurance claim log generation.",
             payload=None,
             premium=premium,
             error="premium_locked",

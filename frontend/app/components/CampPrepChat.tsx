@@ -58,7 +58,7 @@ export default function CampPrepChat({ onClose }: CampPrepChatProps) {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'assistant',
-      text: '🏕️ Welcome to Boondockers Pro!\n\nYour all-in-one campsite planning assistant. Type a command or ask questions about your camping setup, resource planning, and site conditions.',
+      text: '🏕️ Welcome to Off-Grid!\n\nYour all-in-one campsite planning assistant. Type a command or ask questions about your camping setup, resource planning, and site conditions.',
     },
   ]);
   const [input, setInput] = useState('');
@@ -86,7 +86,7 @@ export default function CampPrepChat({ onClose }: CampPrepChatProps) {
             ...prev,
             {
               role: 'assistant',
-              text: 'This command requires Boondocking Pro. Unlock to continue.',
+              text: 'This command requires a premium subscription. Unlock to continue.',
               premium: { required: true, locked: true, feature: 'camp_prep' },
               error: 'premium_locked',
             },
@@ -177,7 +177,7 @@ export default function CampPrepChat({ onClose }: CampPrepChatProps) {
       {/* Header */}
       <View style={styles.header}>
         <View>
-          <Text style={styles.headerTitle}>🏕️ Boondockers Pro</Text>
+          <Text style={styles.headerTitle}>🏕️ Off-Grid</Text>
           <Text style={styles.headerSubtitle}>Premium campsite planning tools</Text>
         </View>
         <TouchableOpacity onPress={onClose} style={styles.closeButton}>
@@ -216,7 +216,7 @@ export default function CampPrepChat({ onClose }: CampPrepChatProps) {
             {msg.premium?.locked && (
               <View style={styles.premiumLockBanner}>
                 <Text style={styles.premiumLockText}>
-                  🔒 Upgrade to Boondocking Pro to unlock this feature
+                  🔒 Upgrade to premium to unlock this feature
                 </Text>
               </View>
             )}

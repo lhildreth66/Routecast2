@@ -36,16 +36,16 @@ export default function BoondockersProScreen() {
           <Ionicons name="arrow-back" size={24} color="#fff" />
           <Text style={styles.backText}>Back</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Boondockers Pro</Text>
+        <Text style={styles.headerTitle}>Off-Grid</Text>
         <View style={styles.placeholder} />
       </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         <View style={styles.intro}>
           <Ionicons name="bonfire" size={48} color="#8b4513" />
-          <Text style={styles.introTitle}>Boondockers Pro</Text>
-          <Text style={styles.introDesc}>
-            Boondockers Pro helps you prepare for off-grid travel with utilities tracking, checklists, and smart trip tools—all in one place.
+          <Text style={styles.introTitle}>Off-Grid</Text>
+          <Text style={styles.introText}>
+            Off-Grid helps you prepare for off-grid travel with utilities tracking, checklists, and smart trip tools—all in one place.
           </Text>
         </View>
 

@@ -807,7 +807,7 @@ export default function RouteScreen() {
 
       {/* Pro Features Row */}
       <View style={styles.proFeaturesRow}>
-        {/* Boondockers Pro */}
+        {/* Off-Grid */}
         <TouchableOpacity 
           style={styles.proFeatureCard}
           onPress={() => router.push('/boondockers-pro')}
@@ -815,10 +815,10 @@ export default function RouteScreen() {
           <View style={[styles.proFeatureIcon, { backgroundColor: '#8b4513' }]}>
             <Ionicons name="bonfire" size={20} color="#fff" />
           </View>
-          <Text style={styles.proFeatureTitle}>Boondockers Pro</Text>
+          <Text style={styles.proFeatureTitle}>Off-Grid</Text>
         </TouchableOpacity>
 
-        {/* Tractor Trailer Pro */}
+        {/* Tractor Trailer */}
         <TouchableOpacity 
           style={styles.proFeatureCard}
           onPress={() => router.push('/tractor-trailer-pro')}
@@ -826,7 +826,7 @@ export default function RouteScreen() {
           <View style={[styles.proFeatureIcon, { backgroundColor: '#3b82f6' }]}>
             <Ionicons name="bus" size={20} color="#fff" />
           </View>
-          <Text style={styles.proFeatureTitle}>Tractor Trailer Pro</Text>
+          <Text style={styles.proFeatureTitle}>Tractor Trailer</Text>
         </TouchableOpacity>
       </View>
 

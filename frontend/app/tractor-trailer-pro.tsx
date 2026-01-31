@@ -71,7 +71,7 @@ export default function TractorTrailerProScreen() {
           <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>
-          <Text style={styles.title}>🚛 Tractor Trailer Pro</Text>
+          <Text style={styles.title}>🚛 Tractor Trailer</Text>
           <Text style={styles.subtitle}>Professional tools for commercial drivers</Text>
         </View>
 

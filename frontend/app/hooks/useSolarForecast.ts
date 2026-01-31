@@ -34,7 +34,7 @@ export interface UseSolarForecastReturn {
  * Hook for forecasting daily solar energy generation
  * 
  * Features:
- * - Premium-gated: requires active Boondocking Pro subscription
+ * - Premium-gated: requires active premium subscription
  * - Pure deterministic calculations
  * - Accounts for latitude, season, cloud cover, and shade
  * - Returns Wh/day estimates for multi-day forecasts
@@ -101,7 +101,7 @@ export const useSolarForecast = (): UseSolarForecastReturn => {
       if (data.is_premium_locked) {
         setError(
           data.premium_message ||
-          'This feature requires Boondocking Pro. Upgrade to unlock.'
+          'This feature requires a premium subscription.'
         );
       }
 

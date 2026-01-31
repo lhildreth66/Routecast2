@@ -2,7 +2,7 @@
  * useTerrainShade - React Hook for Terrain Shade Estimation
  *
  * Custom hook for calling the solar path and shade blocking API endpoints.
- * Calculates sunlight availability and shade factor for boondocking locations.
+ * Calculates sunlight availability and shade factor for camping locations.
  */
 
 import { useState } from 'react';
