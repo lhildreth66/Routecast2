@@ -30,8 +30,6 @@ import {
 } from 'react-native';
 import { useTerrainShade } from '../hooks/useTerrainShade';
 import { useWindShelter } from '../hooks/useWindShelter';
-import { usePremium } from '../hooks/usePremium';
-import PaywallModal from './PaywallModal';
 
 const COLORS = {
   primary: '#fbbf24',      // Amber (sun)
@@ -62,7 +60,6 @@ const TerrainShelterScreen: React.FC = () => {
   // Hooks
   const { estimate: estimateShade, loading: shadeLoading, result: shadeResult } = useTerrainShade();
   const { estimate: estimateWind, loading: windLoading, result: windResult } = useWindShelter();
-  const { subscriptionId } = usePremium?.() || { subscriptionId: null };
 
   // Terrain Shade State
   const [latitude, setLatitude] = useState('40.7128');
@@ -83,8 +80,6 @@ const TerrainShelterScreen: React.FC = () => {
 
   // UI State
   const [activeTab, setActiveTab] = useState<'shade' | 'wind'>('shade');
-  const [showPaywall, setShowPaywall] = useState(false);
-  const [paywallFeature, setPaywallFeature] = useState<'shade' | 'wind'>('shade');
 
   // Handle terrain shade estimation
   const handleEstimateShade = async () => {
@@ -102,7 +97,6 @@ const TerrainShelterScreen: React.FC = () => {
       date,
       tree_canopy_pct: canopyPct,
       horizon_obstruction_deg: obstructionDeg,
-      subscription_id: subscriptionId || undefined,
     });
 
     if (response?.is_premium_locked) {
@@ -127,7 +121,6 @@ const TerrainShelterScreen: React.FC = () => {
         strength: r.strength as 'low' | 'med' | 'high',
         name: r.name,
       })),
-      subscription_id: subscriptionId || undefined,
     });
 
     if (response?.is_premium_locked) {
@@ -580,11 +573,6 @@ const TerrainShelterScreen: React.FC = () => {
       </ScrollView>
 
       {/* Paywall Modal */}
-      <PaywallModal
-        visible={showPaywall}
-        onClose={() => setShowPaywall(false)}
-        feature={`Terrain Shelter (${paywallFeature === 'shade' ? 'Solar Analysis' : 'Wind Optimization'})`}
-      />
     </View>
   );
 };

@@ -21,14 +21,10 @@ import {
   Alert,
 } from 'react-native';
 import { useRoadPassability } from '../hooks/useRoadPassability';
-import { usePremium } from '../hooks/usePremium';
-import PaywallModal from './PaywallModal';
 
 const RoadPassabilityScreen: React.FC = () => {
   const { assess, loading, error, result, clearResult } =
     useRoadPassability();
-  const { isPremium, subscriptionId } = usePremium();
-  const [showPaywall, setShowPaywall] = useState(false);
 
   // Example soil type options
   const soilTypes = ['clay', 'sand', 'rocky', 'loam'];
@@ -46,7 +42,6 @@ const RoadPassabilityScreen: React.FC = () => {
         slope_pct: slopePct,
         min_temp_f: minTempF,
         soil_type: selectedSoilType,
-        subscription_id: subscriptionId || undefined,
       });
 
       // Handle premium lock
@@ -334,10 +329,6 @@ const RoadPassabilityScreen: React.FC = () => {
       )}
 
       {/* Paywall Modal */}
-      <PaywallModal
-        visible={showPaywall}
-        onClose={() => setShowPaywall(false)}
-      />
     </ScrollView>
   );
 };

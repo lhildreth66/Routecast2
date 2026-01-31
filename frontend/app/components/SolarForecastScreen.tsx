@@ -16,13 +16,9 @@ import {
   Alert,
 } from 'react-native';
 import { useSolarForecast } from '../hooks/useSolarForecast';
-import { usePremium } from '../hooks/usePremium';
-import PaywallModal from './PaywallModal';
 
 const SolarForecastScreen: React.FC = () => {
   const { forecast, loading, error, result, clearResult } = useSolarForecast();
-  const { isPremium, subscriptionId } = usePremium();
-  const [showPaywall, setShowPaywall] = useState(false);
 
   // Example input values - Arizona boondocking location
   const [latitude, setLatitude] = useState(34.05);
@@ -43,7 +39,6 @@ const SolarForecastScreen: React.FC = () => {
         panel_watts: panelWatts,
         shade_pct: shadePct,
         cloud_cover: cloudCover,
-        subscription_id: subscriptionId || undefined,
       });
 
       // Handle premium lock
@@ -232,8 +227,6 @@ const SolarForecastScreen: React.FC = () => {
         <View style={styles.spacer} />
       </ScrollView>
 
-      {/* Paywall Modal */}
-      <PaywallModal visible={showPaywall} onClose={() => setShowPaywall(false)} />
     </>
   );
 };

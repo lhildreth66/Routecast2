@@ -29,8 +29,6 @@ import {
   Dimensions,
 } from 'react-native';
 import { useWaterBudget } from '../hooks/useWaterBudget';
-import { usePremium } from '../hooks/usePremium'; // Assuming this exists for subscription info
-import PaywallModal from './PaywallModal'; // Premium paywall UI
 
 const COLORS = {
   primary: '#22c55e',      // Green
@@ -47,7 +45,6 @@ const COLORS = {
 const WaterBudgetScreen: React.FC = () => {
   // Hooks
   const { estimate, loading, error, result, clearResult } = useWaterBudget();
-  const { subscriptionId } = usePremium?.() || { subscriptionId: null };
 
   // State for inputs
   const [freshGal, setFreshGal] = useState(40);
@@ -56,7 +53,6 @@ const WaterBudgetScreen: React.FC = () => {
   const [people, setPeople] = useState(2);
   const [showersPerWeek, setShowersPerWeek] = useState(2);
   const [isHotDays, setIsHotDays] = useState(false);
-  const [showPaywall, setShowPaywall] = useState(false);
 
   // Tank presets (typical RV capacities in gallons)
   const FRESH_PRESETS = [
@@ -89,7 +85,6 @@ const WaterBudgetScreen: React.FC = () => {
       people,
       showers_per_week: showersPerWeek,
       hot_days: isHotDays,
-      subscription_id: subscriptionId || undefined,
     });
 
     // Handle premium paywall
@@ -401,12 +396,6 @@ const WaterBudgetScreen: React.FC = () => {
       )}
 
       {/* Premium Paywall Modal */}
-      <PaywallModal
-        visible={showPaywall}
-        onClose={() => setShowPaywall(false)}
-        feature="Water Budget Planner"
-        description="Plan water usage for your boondocking trips"
-      />
     </ScrollView>
   );
 };
