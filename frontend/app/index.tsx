@@ -25,7 +25,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import { format } from 'date-fns';
 import { API_BASE } from './apiConfig';
-import { devToggleProEntitlement } from './utils/entitlements';
 import CampPrepChat from './components/CampPrepChat';
 
 // Vehicle types for safety scoring
@@ -732,7 +731,7 @@ export default function HomeScreen() {
     setDevTapCount(newCount);
     if (newCount >= 5) {
       setDevTapCount(0);
-      devToggleProEntitlement();
+      // Dev entitlement toggle removed - all features now free
     }
     // Reset counter after 2 seconds of inactivity
     setTimeout(() => {
