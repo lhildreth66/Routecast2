@@ -10,9 +10,6 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_BASE } from '../apiConfig';
-import { requirePro } from '../billing/guard';
-import { useEntitlementsContext } from '../billing/EntitlementsProvider';
-import { Paywall } from '../billing/paywall';
 
 interface CampPrepChatProps {
   onClose: () => void;
@@ -63,14 +60,6 @@ export default function CampPrepChat({ onClose }: CampPrepChatProps) {
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
-  const [showPaywall, setShowPaywall] = useState(false);
-
-  const { refresh } = useEntitlementsContext();
-
-  const isPremiumCommand = (command: string): boolean => {
-    const normalized = command.trim().split(/\s+/)[0];
-    return normalized !== '/prep-checklist';
-  };
 
   const sendCommand = async (command: string) => {
     setMessages((prev) => [...prev, { role: 'user', text: command }]);
@@ -78,22 +67,6 @@ export default function CampPrepChat({ onClose }: CampPrepChatProps) {
     setLoading(true);
 
     try {
-      if (isPremiumCommand(command)) {
-        const guard = await requirePro();
-        if (!guard.allowed) {
-          setShowPaywall(true);
-          setMessages((prev) => [
-            ...prev,
-            {
-              role: 'assistant',
-              text: 'This command requires a premium subscription. Unlock to continue.',
-              premium: { required: true, locked: true, feature: 'camp_prep' },
-              error: 'premium_locked',
-            },
-          ]);
-          return;
-        }
-      }
 
       const subscriptionId = await AsyncStorage.getItem('routecast_subscription_id');
 
@@ -250,15 +223,6 @@ export default function CampPrepChat({ onClose }: CampPrepChatProps) {
           <Text style={styles.sendButtonText}>Send</Text>
         </TouchableOpacity>
       </View>
-
-      <Paywall
-        visible={showPaywall}
-        onClose={() => setShowPaywall(false)}
-        onPurchaseComplete={async () => {
-          await refresh();
-          setShowPaywall(false);
-        }}
-      />
     </View>
   );
 }
