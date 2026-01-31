@@ -26,8 +26,6 @@ import {
   Dimensions,
 } from 'react-native';
 import { usePropaneUsage } from '../hooks/usePropaneUsage';
-import { usePremium } from '../hooks/usePremium'; // Assuming this exists for subscription info
-import PaywallModal from './PaywallModal'; // Premium paywall UI
 
 const COLORS = {
   primary: '#22c55e',      // Green
@@ -44,7 +42,6 @@ const COLORS = {
 const PropaneUsageScreen: React.FC = () => {
   // Hooks
   const { estimate, loading, error, result, clearResult } = usePropaneUsage();
-  const { subscriptionId } = usePremium?.() || { subscriptionId: null };
 
   // State for inputs
   const [furnaceBTU, setFurnaceBTU] = useState(20000);
@@ -52,7 +49,6 @@ const PropaneUsageScreen: React.FC = () => {
   const [people, setPeople] = useState(2);
   const [nights, setNights] = useState<number[]>([35, 35, 35]);
   const [tempInput, setTempInput] = useState('35');
-  const [showPaywall, setShowPaywall] = useState(false);
 
   // Furnace preset options
   const FURNACE_PRESETS = [
@@ -98,16 +94,10 @@ const PropaneUsageScreen: React.FC = () => {
       duty_cycle_pct: dutyCyclePct,
       nights_temp_f: nights,
       people,
-      subscription_id: subscriptionId || undefined,
     });
 
     if (!response) {
       Alert.alert('Error', error || 'Failed to estimate propane usage');
-      return;
-    }
-
-    if (response.is_premium_locked) {
-      setShowPaywall(true);
       return;
     }
 
@@ -145,7 +135,7 @@ const PropaneUsageScreen: React.FC = () => {
       </View>
 
       {/* Error Display */}
-      {error && !result?.is_premium_locked && (
+      {error && (
         <View style={styles.errorBox}>
           <Text style={styles.errorText}>⚠️ {error}</Text>
         </View>
@@ -298,7 +288,7 @@ const PropaneUsageScreen: React.FC = () => {
       </View>
 
       {/* Results Section */}
-      {result && !result.is_premium_locked && result.daily_lbs && (
+      {result && result.daily_lbs && (
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>📊 Daily Breakdown</Text>
 
@@ -358,16 +348,6 @@ const PropaneUsageScreen: React.FC = () => {
         >
           <Text style={styles.estimateButtonText}>📊 Estimate Propane Usage</Text>
         </TouchableOpacity>
-      )}
-
-      {/* Paywall Modal */}
-      {showPaywall && (
-        <PaywallModal
-          isVisible={showPaywall}
-          onClose={() => setShowPaywall(false)}
-          feature="Propane Usage"
-          message="Get accurate propane consumption estimates for any furnace and trip duration."
-        />
       )}
     </ScrollView>
   );
