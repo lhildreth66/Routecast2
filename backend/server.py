@@ -1275,8 +1275,15 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                 location_name=location_name
             ))
             
-        # Weather alerts from NOAA
+        # Weather alerts from NOAA - deduplicate by alert ID and event type
+        seen_alert_ids = set()
         for alert in wp.alerts:
+            # Create a unique key for this alert (id + event type + location)
+            alert_key = f"{getattr(alert, 'id', '')}:{alert.event}:{location_name}"
+            if alert_key in seen_alert_ids:
+                continue  # Skip duplicate alerts
+            seen_alert_ids.add(alert_key)
+            
             severity_map = {"Extreme": "extreme", "Severe": "high", "Moderate": "medium"}
             alerts.append(HazardAlert(
                 type="alert",
@@ -1289,9 +1296,21 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                 location_name=location_name
             ))
     
-    # Sort by distance and deduplicate similar alerts
-    alerts.sort(key=lambda x: x.distance_miles)
-    return alerts  # Return all alerts along route
+    # Deduplicate by message content (second level deduplication)
+    seen_messages = set()
+    unique_alerts = []
+    for alert in alerts:
+        message_key = f"{alert.type}:{alert.message}"
+        if message_key not in seen_messages:
+            seen_messages.add(message_key)
+            unique_alerts.append(alert)
+    
+    # Sort by severity (most critical first), then by distance
+    severity_order = {"extreme": 0, "high": 1, "medium": 2, "low": 3}
+    unique_alerts.sort(key=lambda x: (severity_order.get(x.severity, 3), x.distance_miles))
+    
+    # Limit to 10 most important alerts to avoid overwhelming users
+    return unique_alerts[:10]
 
 async def find_rest_stops(route_geometry: str, waypoints_weather: List[WaypointWeather]) -> List[RestStop]:
     """Find rest stops, gas stations along the route with weather at arrival."""

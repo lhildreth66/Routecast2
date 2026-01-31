@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator, ScrollView, Alert } from 'react-native';
 import axios from 'axios';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -14,23 +14,51 @@ export default function TerrainShadeScreen() {
   const [date, setDate] = useState('2026-06-15');
 
   const [loading, setLoading] = useState(false);
+  const [locationLoading, setLocationLoading] = useState(true);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string>('');
 
-  const useCurrentLocation = async () => {
+  useEffect(() => {
+    getCurrentLocation();
+  }, []);
+
+  const getCurrentLocation = async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === 'granted') {
+        const location = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+        setLatitude(location.coords.latitude.toFixed(4));
+        setLongitude(location.coords.longitude.toFixed(4));
+      }
+    } catch (err) {
+      console.log('Could not get current location:', err);
+    } finally {
+      setLocationLoading(false);
+    }
+  };
+
+  const refreshLocation = async () => {
+    setLocationLoading(true);
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission Denied', 'Location permission is required to use current location.');
+        Alert.alert('Permission Denied', 'Location permission is required.');
+        setLocationLoading(false);
         return;
       }
 
-      const location = await Location.getCurrentPositionAsync({});
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
       setLatitude(location.coords.latitude.toFixed(4));
       setLongitude(location.coords.longitude.toFixed(4));
-      Alert.alert('Location Updated', `Using current position: ${location.coords.latitude.toFixed(4)}, ${location.coords.longitude.toFixed(4)}`);
+      Alert.alert('Location Updated', `Refreshed to: ${location.coords.latitude.toFixed(4)}, ${location.coords.longitude.toFixed(4)}`);
     } catch (err) {
-      Alert.alert('Error', 'Failed to get current location');
+      Alert.alert('Error', 'Failed to refresh location');
+    } finally {
+      setLocationLoading(false);
     }
   };
 
@@ -68,14 +96,14 @@ export default function TerrainShadeScreen() {
           <View style={styles.locationInfo}>
             <Ionicons name="location" size={16} color="#fbbf24" />
             <Text style={styles.locationText}>
-              Analyzing: {latitude}, {longitude}
+              {locationLoading ? 'Getting location...' : `Analyzing: ${latitude}, ${longitude}`}
             </Text>
+            {!locationLoading && (
+              <TouchableOpacity onPress={refreshLocation} style={styles.refreshBtn}>
+                <Ionicons name="refresh" size={18} color="#fbbf24" />
+              </TouchableOpacity>
+            )}
           </View>
-
-          <TouchableOpacity onPress={useCurrentLocation} style={styles.locationButton}>
-            <Ionicons name="locate" size={18} color="#fbbf24" />
-            <Text style={styles.locationButtonText}>Use Current Location</Text>
-          </TouchableOpacity>
 
           <View style={styles.inputRow}>
             <Text style={styles.label}>Latitude</Text>
@@ -165,7 +193,8 @@ const styles = StyleSheet.create({
   title: { color: '#fff', fontSize: 20, fontWeight: '800' },
   subtitle: { color: '#d4d4d8', fontSize: 14 },
   locationInfo: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#111827', padding: 10, borderRadius: 8 },
-  locationText: { color: '#d4d4d8', fontSize: 12 },
+  locationText: { color: '#d4d4d8', fontSize: 12, flex: 1 },
+  refreshBtn: { padding: 4 },
   locationButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#1f2937', paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#fbbf24' },
   locationButtonText: { color: '#fbbf24', fontWeight: '600', fontSize: 14 },
   inputRow: { gap: 6 },
