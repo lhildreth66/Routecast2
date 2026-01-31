@@ -62,7 +62,6 @@ export default function WindShelterScreen() {
       setLocationLoading(false);
     }
   };
-  };
 
   const calculate = async () => {
     setLoading(true);
