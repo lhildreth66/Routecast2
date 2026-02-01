@@ -876,7 +876,7 @@ export default function RouteScreen() {
             })}
           >
             <Text style={styles.tabText}>
-              Weather Alerts {routeData.hazard_alerts && routeData.hazard_alerts.length > 0 && `(${routeData.hazard_alerts.length})`}
+              Weather Alerts{routeData.hazard_alerts && routeData.hazard_alerts.length > 0 && ` (${routeData.hazard_alerts.length})`}
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -887,7 +887,7 @@ export default function RouteScreen() {
             })}
           >
             <Text style={styles.tabText}>
-              Bridge Alerts {routeData.bridge_warnings && routeData.bridge_warnings.length > 0 && `(${routeData.bridge_warnings.length})`}
+              Bridge Alerts{routeData.bridge_warnings && routeData.bridge_warnings.length > 0 && ` (${routeData.bridge_warnings.length})`}
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
