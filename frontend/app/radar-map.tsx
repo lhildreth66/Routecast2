@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   SafeAreaView,
   Platform,
+  Alert,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { router } from 'expo-router';
@@ -36,6 +37,7 @@ export default function RadarMapScreen() {
   const [alerts, setAlerts] = useState<AlertFeature[]>([]);
   const [userLocation, setUserLocation] = useState<{ lat: number; lon: number } | null>(null);
   const [error, setError] = useState('');
+  const [webViewError, setWebViewError] = useState('');
 
   useEffect(() => {
     loadData();
@@ -432,12 +434,31 @@ export default function RadarMapScreen() {
           onError={(syntheticEvent) => {
             const { nativeEvent } = syntheticEvent;
             console.error('WebView error:', nativeEvent);
+            setWebViewError(`WebView Error: ${JSON.stringify(nativeEvent)}`);
+            Alert.alert('Map Load Error', `Failed to load map: ${nativeEvent.description || 'Unknown error'}`);
           }}
           onMessage={(event) => {
-            console.log('WebView message:', event.nativeEvent.data);
+            const msg = event.nativeEvent.data;
+            console.log('WebView message:', msg);
+            try {
+              const parsed = JSON.parse(msg);
+              if (parsed.type === 'error') {
+                setWebViewError(`Map Script Error: ${parsed.message}`);
+                Alert.alert('Map Error', parsed.message);
+              }
+            } catch (e) {
+              // Not JSON, just log it
+              console.log('WebView non-JSON message:', msg);
+            }
           }}
           onLoadEnd={() => {
             console.log('WebView loaded successfully');
+            setWebViewError('');
+          }}
+          onHttpError={(syntheticEvent) => {
+            const { nativeEvent } = syntheticEvent;
+            console.error('WebView HTTP error:', nativeEvent);
+            setWebViewError(`HTTP Error: ${nativeEvent.statusCode} - ${nativeEvent.url}`);
           }}
         />
       )}
@@ -446,6 +467,9 @@ export default function RadarMapScreen() {
         <Text style={styles.footerText}>
           🌧️ Radar {alerts.length > 0 ? `& ${alerts.length} active alert${alerts.length !== 1 ? 's' : ''}` : '(alerts unavailable)'} • {API_BASE ? 'Live NWS data' : 'Limited mode - backend not connected'}
         </Text>
+        {webViewError ? (
+          <Text style={styles.errorText}>⚠️ {webViewError}</Text>
+        ) : null}
       </View>
     </SafeAreaView>
   );
