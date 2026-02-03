@@ -24,49 +24,41 @@ jobs:
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Setup Java (required for Android builds)
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Setup Expo and EAS
-        run: |
-          npm install -g eas-cli
-          npm install -g expo-cli
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
 
       - name: Install dependencies
         working-directory: frontend
         run: npm ci
 
-      - name: Build Android (local, free)
+      - name: Expo prebuild (generates Android project)
         working-directory: frontend
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-        run: |
-          eas build --local --platform android --profile production --non-interactive
+        run: npx expo prebuild --platform android --clean
 
-      - name: Find generated AAB
-        id: find-aab
-        run: |
-          AAB_PATH=$(find . -name "*.aab" -type f | head -n 1)
-          echo "aab_path=$AAB_PATH" >> $GITHUB_OUTPUT
-          echo "Found AAB at: $AAB_PATH"
+      - name: Build APK with Gradle
+        working-directory: frontend/android
+        run: ./gradlew assembleRelease
 
-      - name: Upload AAB artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: android-release-${{ github.sha }}
-          path: ${{ steps.find-aab.aab_path }}
+          name: android-app-${{ github.sha }}
+          path: frontend/android/app/build/outputs/apk/release/app-release.apk
           retention-days: 30
 
       - name: Build summary
         run: |
           echo "## Build Complete ✅" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Platform:** Android" >> $GITHUB_STEP_SUMMARY
-          echo "**Profile:** Production" >> $GITHUB_STEP_SUMMARY
+          echo "**Platform:** Android APK" >> $GITHUB_STEP_SUMMARY
+          echo "**Build Method:** Gradle (100% FREE)" >> $GITHUB_STEP_SUMMARY
           echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
-          echo "**AAB:** ${{ steps.find-aab.outputs.aab_path }}" >> $GITHUB_STEP_SUMMARY
+          echo "**APK:** frontend/android/app/build/outputs/apk/release/app-release.apk" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "Download the artifact from the Actions tab above." >> $GITHUB_STEP_SUMMARY
