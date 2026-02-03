@@ -2611,4 +2611,4 @@ const styles = StyleSheet.create({
     color: '#d4d4d8',
     fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
     lineHeight: 16,
-  },
+  },});
