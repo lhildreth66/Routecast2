@@ -81,275 +81,39 @@ export default function RadarMapScreen() {
     const alertsJSON = JSON.stringify(alerts);
     const userLoc = userLocation ? JSON.stringify(userLocation) : 'null';
 
-    return `
+    // TEST: Simple HTML first to verify WebView works
+    const testHtml = `
 <!DOCTYPE html>
 <html>
 <head>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { height: 100%; width: 100%; overflow: hidden; }
-    #map { height: 100%; width: 100%; background: #1a1a1a; }
-    .leaflet-container { background: #1a1a1a; }
-    .legend {
-      position: absolute;
-      bottom: 10px;
-      left: 10px;
-      background: rgba(26, 26, 26, 0.95);
+    body { 
+      margin: 0; 
+      padding: 20px; 
+      background: #1a1a1a; 
       color: #fff;
-      padding: 10px;
-      border-radius: 8px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-      z-index: 1000;
       font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-      font-size: 11px;
     }
-    .legend-title {
-      font-weight: bold;
-      margin-bottom: 6px;
-      font-size: 12px;
-      color: #eab308;
-    }
-    .legend-item {
-      display: flex;
-      align-items: center;
-      margin: 4px 0;
-    }
-    .legend-color {
-      width: 16px;
-      height: 12px;
-      margin-right: 6px;
-      border-radius: 3px;
-      border: 1px solid rgba(255,255,255,0.3);
-    }
-    .alert-popup {
-      min-width: 200px;
-      max-width: 280px;
-      background: #27272a;
-      color: #fff;
-      border-radius: 8px;
-      padding: 12px;
-    }
-    .alert-popup h3 {
-      margin: 0 0 8px 0;
-      font-size: 14px;
-      color: #eab308;
-    }
-    .alert-popup p {
-      margin: 4px 0;
-      font-size: 12px;
-      color: #d4d4d8;
-    }
-    .radar-toggle {
-      position: absolute;
-      top: 10px;
-      right: 10px;
-      background: rgba(26, 26, 26, 0.95);
-      color: #eab308;
-      padding: 8px 14px;
-      border-radius: 6px;
-      font-size: 12px;
-      font-weight: 600;
-      cursor: pointer;
-      z-index: 1000;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.4);
-      border: 1px solid #eab308;
-    }
-    .radar-toggle.active {
-      background: #eab308;
-      color: #1a1a1a;
-    }
+    h1 { color: #eab308; }
   </style>
 </head>
 <body>
-  <div id="map"></div>
-  <div class="radar-toggle" onclick="toggleRadar()" id="radarBtn">🌧️ Radar</div>
-  <div class="legend">
-    <div class="legend-title">Weather Alerts</div>
-    <div class="legend-item">
-      <div class="legend-color" style="background: #FF69B4;"></div>
-      <span>Snow/Winter</span>
-    </div>
-    <div class="legend-item">
-      <div class="legend-color" style="background: #0000FF;"></div>
-      <span>Ice/Cold</span>
-    </div>
-    <div class="legend-item">
-      <div class="legend-color" style="background: #228B22;"></div>
-      <span>Rain/Flood</span>
-    </div>
-    <div class="legend-item">
-      <div class="legend-color" style="background: #FFA500;"></div>
-      <span>Thunderstorm</span>
-    </div>
-    <div class="legend-item">
-      <div class="legend-color" style="background: #FF0000;"></div>
-      <span>Tornado</span>
-    </div>
-    <div class="legend-item">
-      <div class="legend-color" style="background: #DC143C;"></div>
-      <span>Hurricane</span>
-    </div>
-  </div>
-  
+  <h1>WebView Test</h1>
+  <p>If you see this, WebView is working!</p>
+  <p>Alerts: ${alerts.length}</p>
+  <p>Location: ${userLoc}</p>
   <script>
-    try {
-      // Send console messages to React Native
-      const originalLog = console.log;
-      const originalError = console.error;
-      const originalWarn = console.warn;
-      
-      console.log = function(...args) {
-        window.ReactNativeWebView?.postMessage(JSON.stringify({ type: 'log', message: args.join(' ') }));
-        originalLog.apply(console, args);
-      };
-      console.error = function(...args) {
-        window.ReactNativeWebView?.postMessage(JSON.stringify({ type: 'error', message: args.join(' ') }));
-        originalError.apply(console, args);
-      };
-      console.warn = function(...args) {
-        window.ReactNativeWebView?.postMessage(JSON.stringify({ type: 'warn', message: args.join(' ') }));
-        originalWarn.apply(console, args);
-      };
-      
-      console.log('WebView script started');
-      console.log('API_BASE:', '${API_BASE}');
-      
-      const alerts = ${alertsJSON};
-      const userLocation = ${userLoc};
-      
-      console.log('Alerts loaded:', alerts.length);
-      console.log('User location:', userLocation);
-      
-      // Initialize map
-      const map = L.map('map', {
-        zoomControl: true,
-        attributionControl: true,
-      }).setView(userLocation ? [userLocation.lat, userLocation.lon] : [39.8283, -98.5795], userLocation ? 8 : 4);
-      
-      console.log('Map initialized');
-      
-      // Add dark base layer
-      L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        attribution: '&copy; OpenStreetMap, &copy; CARTO',
-        subdomains: 'abcd',
-        maxZoom: 20
-      }).addTo(map);
-      
-      console.log('Base layer added');
-    
-    // Add user location marker
-    if (userLocation) {
-      L.circleMarker([userLocation.lat, userLocation.lon], {
-        radius: 8,
-        color: '#eab308',
-        fillColor: '#eab308',
-        fillOpacity: 0.8,
-        weight: 2
-      }).addTo(map).bindPopup('<b style="color:#eab308">Your Location</b>');
-    }
-    
-    // Add alert polygons
-    alerts.forEach(alert => {
-      if (alert.geometry && alert.geometry.coordinates) {
-        const style = {
-          color: alert.color,
-          weight: 2,
-          opacity: 0.8,
-          fillColor: alert.color,
-          fillOpacity: 0.3
-        };
-        
-        try {
-          const layer = L.geoJSON(alert.geometry, { style }).addTo(map);
-          
-          const popupContent = \`
-            <div class="alert-popup">
-              <h3>\${alert.event}</h3>
-              <p><strong>Severity:</strong> \${alert.severity}</p>
-              <p><strong>Areas:</strong> \${alert.areas.slice(0, 3).join(', ')}</p>
-              <p><strong>Expires:</strong> \${alert.expires ? new Date(alert.expires).toLocaleString() : 'Unknown'}</p>
-            </div>
-          \`;
-          
-          layer.bindPopup(popupContent);
-        } catch (e) {
-          console.error('Failed to add alert layer:', e);
-        }
-      }
-    });
-    
-    // Radar layer
-    let radarLayer = null;
-    let radarVisible = false;
-    
-    async function toggleRadar() {
-      const btn = document.getElementById('radarBtn');
-      
-      if (radarVisible) {
-        // Hide radar
-        if (radarLayer) {
-          map.removeLayer(radarLayer);
-          radarLayer = null;
-        }
-        radarVisible = false;
-        btn.classList.remove('active');
-        btn.textContent = '🌧️ Radar';
-      } else {
-        // Show radar
-        btn.textContent = 'Loading...';
-        try {
-          // Try backend first if available
-          const apiBase = '${API_BASE}';
-          let tileUrl = null;
-          
-          if (apiBase) {
-            try {
-              const response = await fetch(apiBase + '/api/radar/tiles');
-              const data = await response.json();
-              tileUrl = data.tile_url;
-            } catch (backendErr) {
-              console.warn('Backend radar unavailable, falling back to direct RainViewer');
-            }
-          }
-          
-          // Fallback to RainViewer directly if backend unavailable
-          if (!tileUrl) {
-            const rainResponse = await fetch('https://api.rainviewer.com/public/weather-maps.json');
-            const rainData = await rainResponse.json();
-            if (rainData.radar && rainData.radar.past && rainData.radar.past.length > 0) {
-              const latest = rainData.radar.past[rainData.radar.past.length - 1];
-              tileUrl = 'https://tilecache.rainviewer.com' + latest.path + '/512/{z}/{x}/{y}/2/1_1.png';
-            }
-          }
-          
-          if (tileUrl) {
-            radarLayer = L.tileLayer(tileUrl, {
-              opacity: 0.7,
-              attribution: 'RainViewer'
-            }).addTo(map);
-            radarVisible = true;
-            btn.classList.add('active');
-            btn.textContent = '🌧️ Radar ON';
-          } else {
-            btn.textContent = '🌧️ Radar (N/A)';
-          }
-        } catch (e) {
-          console.error('Failed to load radar:', e);
-          btn.textContent = '🌧️ Radar (Error)';
-        }
-      }
-    }
-    } catch (err) {
-      console.error('WebView script error:', err.message, err.stack);
-      window.ReactNativeWebView?.postMessage(JSON.stringify({ type: 'error', message: 'Script error: ' + err.message }));
-    }
+    window.ReactNativeWebView?.postMessage(JSON.stringify({ type: 'log', message: 'WebView loaded and running' }));
   </script>
 </body>
 </html>
     `;
+
+    console.log('MAP HTML LENGTH:', testHtml.length);
+    console.log('MAP HTML PREVIEW:', testHtml.substring(0, 200));
+    
+    return testHtml;
   };
 
   if (loading) {
