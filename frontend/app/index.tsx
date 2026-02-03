@@ -16,6 +16,7 @@ import {
   Linking,
   Animated,
 } from 'react-native';
+import Constants from 'expo-constants';
 import * as Calendar from 'expo-calendar';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -127,6 +128,10 @@ export default function HomeScreen() {
 
   // Dev-only: long-press gesture counter for Pro entitlement toggle (5 taps)
   const [devTapCount, setDevTapCount] = useState(0);
+  
+  // Debug panel
+  const [showDebugPanel, setShowDebugPanel] = useState(false);
+  const [debugInfo, setDebugInfo] = useState('');
 
   // Check for speech recognition support on web
   useEffect(() => {
@@ -189,6 +194,32 @@ export default function HomeScreen() {
       }
     } catch (e) {
       console.log('No cached route');
+    }
+  };
+
+  // Debug function to test backend connectivity
+  const testBackendConnection = async () => {
+    setDebugInfo('Testing backend connection...');
+    try {
+      const startTime = Date.now();
+      console.log('[DEBUG] Testing connection to:', API_BASE);
+      
+      const response = await axios.get(`${API_BASE}/health`, {
+        timeout: 10000,
+      });
+      
+      const duration = Date.now() - startTime;
+      const info = `✅ Backend Connected!\n\nAPI_BASE: ${API_BASE}\nStatus: ${response.status}\nResponse Time: ${duration}ms\nBackend: ${JSON.stringify(response.data, null, 2)}`;
+      
+      console.log('[DEBUG] Success:', info);
+      setDebugInfo(info);
+      Alert.alert('Backend Test Success', info);
+    } catch (err: any) {
+      const errorInfo = `❌ Backend Connection Failed!\n\nAPI_BASE: ${API_BASE}\nError: ${err.message}\nCode: ${err.code || 'N/A'}\nURL: ${err.config?.url || 'N/A'}`;
+      
+      console.error('[DEBUG] Failed:', errorInfo);
+      setDebugInfo(errorInfo);
+      Alert.alert('Backend Test Failed', errorInfo);
     }
   };
 
@@ -903,6 +934,56 @@ export default function HomeScreen() {
                   />
                 </TouchableOpacity>
               </View>
+
+              {/* Debug Panel - Shows API connection status */}
+              <TouchableOpacity 
+                style={styles.debugToggle}
+                onPress={() => setShowDebugPanel(!showDebugPanel)}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="bug" size={16} color="#9ca3af" />
+                <Text style={styles.debugToggleText}>
+                  {showDebugPanel ? 'Hide Debug Info' : 'Show Debug Info'}
+                </Text>
+              </TouchableOpacity>
+
+              {showDebugPanel && (
+                <View style={styles.debugPanel}>
+                  <Text style={styles.debugTitle}>🔍 Debug Information</Text>
+                  
+                  <View style={styles.debugRow}>
+                    <Text style={styles.debugLabel}>API Base URL:</Text>
+                    <Text style={styles.debugValue}>{API_BASE || '(not set)'}</Text>
+                  </View>
+                  
+                  <View style={styles.debugRow}>
+                    <Text style={styles.debugLabel}>App Version:</Text>
+                    <Text style={styles.debugValue}>
+                      {require('expo-constants').default.expoConfig?.version || 'unknown'}
+                    </Text>
+                  </View>
+                  
+                  <View style={styles.debugRow}>
+                    <Text style={styles.debugLabel}>Platform:</Text>
+                    <Text style={styles.debugValue}>{Platform.OS}</Text>
+                  </View>
+
+                  <TouchableOpacity 
+                    style={styles.testButton}
+                    onPress={testBackendConnection}
+                    activeOpacity={0.7}
+                  >
+                    <Ionicons name="flash" size={18} color="#1a1a1a" />
+                    <Text style={styles.testButtonText}>Test Backend Connection</Text>
+                  </TouchableOpacity>
+
+                  {debugInfo ? (
+                    <View style={styles.debugResult}>
+                      <Text style={styles.debugResultText}>{debugInfo}</Text>
+                    </View>
+                  ) : null}
+                </View>
+              )}
 
               {/* App Description */}
               <View style={styles.descriptionBox}>
@@ -2457,4 +2538,77 @@ const styles = StyleSheet.create({
     color: '#60a5fa',
     fontWeight: '600',
   },
-});
+  debugToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: '#3f3f46',
+    borderRadius: 8,
+    marginBottom: 12,
+  },
+  debugToggleText: {
+    fontSize: 12,
+    color: '#9ca3af',
+    fontWeight: '600',
+  },
+  debugPanel: {
+    backgroundColor: '#1e1e1e',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#3f3f46',
+  },
+  debugTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#eab308',
+    marginBottom: 12,
+  },
+  debugRow: {
+    marginBottom: 8,
+  },
+  debugLabel: {
+    fontSize: 11,
+    color: '#9ca3af',
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  debugValue: {
+    fontSize: 12,
+    color: '#d4d4d8',
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+  },
+  testButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#eab308',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    marginTop: 12,
+  },
+  testButtonText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#1a1a1a',
+  },
+  debugResult: {
+    marginTop: 12,
+    padding: 12,
+    backgroundColor: '#27272a',
+    borderRadius: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: '#eab308',
+  },
+  debugResultText: {
+    fontSize: 11,
+    color: '#d4d4d8',
+    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+    lineHeight: 16,
+  },
