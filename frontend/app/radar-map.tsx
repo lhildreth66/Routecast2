@@ -86,6 +86,18 @@ export default function RadarMapScreen() {
 <html>
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <script>
+    window.onerror = function(msg, url, line, col, error) {
+      window.ReactNativeWebView.postMessage(JSON.stringify({
+        type: 'error',
+        message: msg,
+        line: line,
+        col: col,
+        error: error ? error.stack : 'no stack'
+      }));
+      return false;
+    };
+  </script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><` + `/script>
   <style>
