@@ -55,7 +55,7 @@ export default function TruckStopsScreen() {
     }
   };
 
-  const useCurrentLocation = async () => {
+  const refreshLocation = async () => {
     setLocationLoading(true);
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
@@ -71,7 +71,7 @@ export default function TruckStopsScreen() {
       setLatitude(location.coords.latitude.toFixed(4));
       setLongitude(location.coords.longitude.toFixed(4));
       setLocationLoading(false);
-      Alert.alert('Location Updated', 'Your current location has been set.');
+      Alert.alert('Location Updated', `Refreshed to: ${location.coords.latitude.toFixed(4)}, ${location.coords.longitude.toFixed(4)}`);
     } catch (err: any) {
       setLocationLoading(false);
       Alert.alert('Location Error', err.message || 'Unable to get your location.');
@@ -146,43 +146,42 @@ export default function TruckStopsScreen() {
         </View>
 
         <View style={styles.formContainer}>
-          <TouchableOpacity
-            style={styles.locationButton}
-            onPress={useCurrentLocation}
-            disabled={locationLoading}
-          >
-            {locationLoading ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <>
-                <Ionicons name="locate" size={20} color="#fff" />
-                <Text style={styles.locationButtonText}>Use Current Location</Text>
-              </>
-            )}
-          </TouchableOpacity>
+          <View style={styles.locationRow}>
+            <View style={styles.inputRow}>
+              <Text style={styles.label}>Latitude</Text>
+              <TextInput
+                value={latitude}
+                onChangeText={setLatitude}
+                keyboardType="numeric"
+                style={styles.input}
+                placeholder="e.g., 34.05"
+                placeholderTextColor="#9ca3af"
+              />
+            </View>
 
-          <View style={styles.inputRow}>
-            <Text style={styles.label}>Latitude</Text>
-            <TextInput
-              value={latitude}
-              onChangeText={setLatitude}
-              keyboardType="numeric"
-              style={styles.input}
-              placeholder="e.g., 34.05"
-              placeholderTextColor="#9ca3af"
-            />
-          </View>
+            <View style={styles.inputRow}>
+              <Text style={styles.label}>Longitude</Text>
+              <TextInput
+                value={longitude}
+                onChangeText={setLongitude}
+                keyboardType="numeric"
+                style={styles.input}
+                placeholder="e.g., -111.03"
+                placeholderTextColor="#9ca3af"
+              />
+            </View>
 
-          <View style={styles.inputRow}>
-            <Text style={styles.label}>Longitude</Text>
-            <TextInput
-              value={longitude}
-              onChangeText={setLongitude}
-              keyboardType="numeric"
-              style={styles.input}
-              placeholder="e.g., -111.03"
-              placeholderTextColor="#9ca3af"
-            />
+            <TouchableOpacity
+              style={styles.refreshButton}
+              onPress={refreshLocation}
+              disabled={locationLoading}
+            >
+              {locationLoading ? (
+                <ActivityIndicator size="small" color="#eab308" />
+              ) : (
+                <Ionicons name="refresh" size={20} color="#eab308" />
+              )}
+            </TouchableOpacity>
           </View>
 
           <View style={styles.inputRow}>

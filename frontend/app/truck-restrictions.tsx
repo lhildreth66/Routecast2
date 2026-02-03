@@ -32,7 +32,26 @@ export default function TruckRestrictionsScreen() {
   const [expandedRestrictions, setExpandedRestrictions] = useState<Set<number>>(new Set());
   const [refreshing, setRefreshing] = useState(false);
 
-  const useCurrentLocation = async () => {
+  useEffect(() => {
+    getCurrentLocation();
+  }, []);
+
+  const getCurrentLocation = async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === 'granted') {
+        const location = await Location.getCurrentPositionAsync({});
+        setLatitude(location.coords.latitude.toFixed(4));
+        setLongitude(location.coords.longitude.toFixed(4));
+      }
+    } catch (err) {
+      console.log('Could not get current location:', err);
+      setLatitude('39.8283');
+      setLongitude('-98.5795');
+    }
+  };
+
+  const refreshLocation = async () => {
     setLocationLoading(true);
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
@@ -48,7 +67,7 @@ export default function TruckRestrictionsScreen() {
       setLatitude(location.coords.latitude.toFixed(4));
       setLongitude(location.coords.longitude.toFixed(4));
       setLocationLoading(false);
-      Alert.alert('Location Updated', 'Your current location has been set.');
+      Alert.alert('Location Updated', `Refreshed to: ${location.coords.latitude.toFixed(4)}, ${location.coords.longitude.toFixed(4)}`);
     } catch (err: any) {
       setLocationLoading(false);
       Alert.alert('Location Error', err.message || 'Unable to get your location.');
@@ -177,6 +196,20 @@ export default function TruckRestrictionsScreen() {
               />
             </View>
 
+            <TouchableOpacity
+              style={styles.refreshButton}
+              onPress={refreshLocation}
+              disabled={locationLoading}
+            >
+              {locationLoading ? (
+                <ActivityIndicator size="small" color="#eab308" />
+              ) : (
+                <Ionicons name="refresh" size={20} color="#eab308" />
+              )}
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.inputWrapper}>
             <View style={styles.inputGroup}>
               <Text style={styles.label}>Search Radius (miles)</Text>
               <TextInput
@@ -188,21 +221,6 @@ export default function TruckRestrictionsScreen() {
                 keyboardType="number-pad"
               />
             </View>
-
-            <TouchableOpacity
-              style={styles.locationButton}
-              onPress={useCurrentLocation}
-              disabled={locationLoading}
-            >
-              {locationLoading ? (
-                <ActivityIndicator color="#fff" />
-              ) : (
-                <>
-                  <Ionicons name="locate" size={18} color="#fff" />
-                  <Text style={styles.locationButtonText}>Use Current Location</Text>
-                </>
-              )}
-            </TouchableOpacity>
 
             <TouchableOpacity
               style={styles.searchButton}
