@@ -491,8 +491,10 @@ export default function HomeScreen() {
     try {
       const response = await axios.get(`${API_BASE}/api/routes/favorites`);
       setFavoriteRoutes(response.data);
-    } catch (err) {
-      console.log('Error fetching favorites:', err);
+      console.log('Loaded favorites:', response.data.length);
+    } catch (err: any) {
+      console.log('Error fetching favorites:', err.response?.data || err.message);
+      setFavoriteRoutes([]); // Set empty array on error
     }
   };
 
