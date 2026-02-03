@@ -95,12 +95,75 @@ export default function PropaneUsageScreen() {
 
           {result && (
             <View style={styles.resultBox}>
-              <Text style={styles.resultText}>
-                {result.advisory || 'Calculation complete'}
-              </Text>
+              <Text style={styles.resultTitle}>📊 Propane Usage Estimate</Text>
+              
+              {result.advisory && (
+                <Text style={styles.advisoryText}>{result.advisory}</Text>
+              )}
+              
               {result.daily_lbs && (
-                <Text style={styles.resultText}>
-                  Daily usage: {result.daily_lbs.map((d: number) => d.toFixed(1)).join(', ')} lbs/day
+                <View style={styles.usageSection}>
+                  <Text style={styles.sectionLabel}>Daily Usage (Typical):</Text>
+                  {result.daily_lbs.map((lbs: number, idx: number) => (
+                    <Text key={idx} style={styles.usageValue}>
+                      Night {idx + 1}: {lbs.toFixed(1)} lbs/day
+                    </Text>
+                  ))}
+                </View>
+              )}
+              
+              {result.daily_lbs_best && result.daily_lbs_worst && (
+                <View style={styles.rangesSection}>
+                  <Text style={styles.sectionLabel}>📈 Best/Worst Case Ranges:</Text>
+                  {result.daily_lbs_best.map((best: number, idx: number) => (
+                    <Text key={idx} style={styles.rangeText}>
+                      Night {idx + 1}: {best.toFixed(1)} - {result.daily_lbs_worst[idx].toFixed(1)} lbs/day
+                    </Text>
+                  ))}
+                </View>
+              )}
+              
+              {result.tank_status && (
+                <View style={[styles.tankStatus, { 
+                  backgroundColor: result.tank_status === 'comfortable' ? '#065f4620' : 
+                                   result.tank_status === 'borderline' ? '#78350f20' : '#7f1d1d20',
+                  borderColor: result.tank_status === 'comfortable' ? '#059669' : 
+                               result.tank_status === 'borderline' ? '#d97706' : '#dc2626'
+                }]}>
+                  <Text style={[styles.tankLabel, {
+                    color: result.tank_status === 'comfortable' ? '#10b981' : 
+                           result.tank_status === 'borderline' ? '#f59e0b' : '#ef4444'
+                  }]}>
+                    {result.tank_status === 'comfortable' ? '✅ Tank Comfortable' :
+                     result.tank_status === 'borderline' ? '⚠️ Tank Borderline' : '🚨 High Risk'}
+                  </Text>
+                  {result.tank_explanation && (
+                    <Text style={styles.tankExplanation}>{result.tank_explanation}</Text>
+                  )}
+                </View>
+              )}
+              
+              {result.cold_weather_warnings && result.cold_weather_warnings.length > 0 && (
+                <View style={styles.warningsSection}>
+                  <Text style={styles.warningTitle}>⚠️ Cold Weather Warnings:</Text>
+                  {result.cold_weather_warnings.map((warning: string, idx: number) => (
+                    <Text key={idx} style={styles.warningText}>• {warning}</Text>
+                  ))}
+                </View>
+              )}
+              
+              {result.assumptions_used && result.assumptions_used.length > 0 && (
+                <View style={styles.assumptionsSection}>
+                  <Text style={styles.assumptionTitle}>💡 Assumptions:</Text>
+                  {result.assumptions_used.map((assumption: string, idx: number) => (
+                    <Text key={idx} style={styles.assumptionText}>• {assumption}</Text>
+                  ))}
+                </View>
+              )}
+              
+              {result.ai_used && (
+                <Text style={styles.aiIndicator}>
+                  ✨ Enhanced with AI ({result.fallback_level || 'full_ai'})
                 </Text>
               )}
             </View>
@@ -126,6 +189,22 @@ const styles = StyleSheet.create({
   buttonText: { color: '#1a1a1a', fontWeight: '800' },
   errorBox: { backgroundColor: '#7f1d1d', borderRadius: 8, padding: 12 },
   errorText: { color: '#fecaca', fontSize: 14 },
-  resultBox: { backgroundColor: '#111827', borderRadius: 8, padding: 12, gap: 8 },
-  resultText: { color: '#e5e7eb', fontSize: 14 },
+  resultBox: { backgroundColor: '#111827', borderRadius: 8, padding: 16, gap: 12 },
+  resultTitle: { color: '#fff', fontSize: 18, fontWeight: '700', marginBottom: 4 },
+  advisoryText: { color: '#e5e7eb', fontSize: 14, lineHeight: 20 },
+  usageSection: { gap: 4 },
+  sectionLabel: { color: '#9ca3af', fontSize: 13, fontWeight: '600', marginBottom: 4 },
+  usageValue: { color: '#fbbf24', fontSize: 14, fontWeight: '600', marginLeft: 8 },
+  rangesSection: { gap: 4, marginTop: 8 },
+  rangeText: { color: '#06b6d4', fontSize: 13, marginLeft: 8 },
+  tankStatus: { borderRadius: 8, borderWidth: 1, padding: 12, marginTop: 8 },
+  tankLabel: { fontSize: 15, fontWeight: '700', marginBottom: 4 },
+  tankExplanation: { color: '#d4d4d8', fontSize: 13, lineHeight: 18 },
+  warningsSection: { backgroundColor: '#7f1d1d', borderRadius: 8, padding: 12, marginTop: 8 },
+  warningTitle: { color: '#fecaca', fontSize: 14, fontWeight: '700', marginBottom: 6 },
+  warningText: { color: '#fecaca', fontSize: 13, lineHeight: 18 },
+  assumptionsSection: { backgroundColor: '#18181b', borderRadius: 8, padding: 12, marginTop: 8, borderWidth: 1, borderColor: '#3f3f46' },
+  assumptionTitle: { color: '#a1a1aa', fontSize: 13, fontWeight: '600', marginBottom: 6 },
+  assumptionText: { color: '#a1a1aa', fontSize: 12, lineHeight: 18 },
+  aiIndicator: { color: '#818cf8', fontSize: 12, fontStyle: 'italic', marginTop: 4, textAlign: 'center' },
 });
