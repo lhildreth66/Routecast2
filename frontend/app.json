@@ -50,8 +50,7 @@
           "androidMode": "default",
           "androidCollapsedTitle": "Routecast Weather Alerts"
         }
-      ],
-      "expo-secure-store"
+      ]
     ],
     "experiments": {
       "typedRoutes": true
