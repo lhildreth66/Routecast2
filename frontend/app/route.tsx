@@ -809,7 +809,7 @@ export default function RouteScreen() {
 
       {/* Pro Features Row */}
       <View style={styles.proFeaturesRow}>
-        {/* Off-Grid */}
+        {/* Boondockers */}
         <TouchableOpacity 
           style={styles.proFeatureCard}
           onPress={() => router.push('/boondockers-pro')}
@@ -817,7 +817,7 @@ export default function RouteScreen() {
           <View style={[styles.proFeatureIcon, { backgroundColor: '#8b4513' }]}>
             <Ionicons name="bonfire" size={20} color="#fff" />
           </View>
-          <Text style={styles.proFeatureTitle}>Off-Grid</Text>
+          <Text style={styles.proFeatureTitle}>Boondockers</Text>
         </TouchableOpacity>
 
         {/* Tractor Trailer */}

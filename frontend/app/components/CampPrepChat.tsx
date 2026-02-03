@@ -55,7 +55,7 @@ export default function CampPrepChat({ onClose }: CampPrepChatProps) {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: 'assistant',
-      text: '🏕️ Welcome to Off-Grid!\n\nYour all-in-one campsite planning assistant. Type a command or ask questions about your camping setup, resource planning, and site conditions.',
+      text: '🏕️ Welcome to Boondockers!\n\nYour all-in-one campsite planning assistant. Type a command or ask questions about your camping setup, resource planning, and site conditions.',
     },
   ]);
   const [input, setInput] = useState('');
@@ -150,7 +150,7 @@ export default function CampPrepChat({ onClose }: CampPrepChatProps) {
       {/* Header */}
       <View style={styles.header}>
         <View>
-          <Text style={styles.headerTitle}>🏕️ Off-Grid</Text>
+          <Text style={styles.headerTitle}>🏕️ Boondockers</Text>
           <Text style={styles.headerSubtitle}>Premium campsite planning tools</Text>
         </View>
         <TouchableOpacity onPress={onClose} style={styles.closeButton}>
