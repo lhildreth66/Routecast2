@@ -39,7 +39,7 @@ jobs:
         working-directory: frontend
         run: npm ci
 
-      - name: Run EAS Build (Local)
+      - name: Build Android (local, free)
         working-directory: frontend
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
