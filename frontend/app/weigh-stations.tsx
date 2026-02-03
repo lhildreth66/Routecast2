@@ -180,14 +180,6 @@ export default function WeighStationsScreen() {
               )}
             </TouchableOpacity>
           </View>
-              value={longitude}
-              onChangeText={setLongitude}
-              keyboardType="numeric"
-              style={styles.input}
-              placeholder="e.g., -111.03"
-              placeholderTextColor="#9ca3af"
-            />
-          </View>
 
           <View style={styles.inputRow}>
             <Text style={styles.label}>Search Radius (miles)</Text>
