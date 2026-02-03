@@ -82,6 +82,8 @@ export default function WeighStationsScreen() {
         latitude: parseFloat(latitude),
         longitude: parseFloat(longitude),
         radius_miles: parseInt(searchRadius, 10),
+      }, {
+        timeout: 65000,
       });
       setStations(resp.data.stations || []);
       if (resp.data.stations && resp.data.stations.length === 0) {

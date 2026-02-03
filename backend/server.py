@@ -4894,7 +4894,7 @@ async def search_weigh_stations(request: WeighStationRequest):
         radius_meters = int(request.radius_miles * 1609.34)
         
         overpass_query = f"""
-        [out:json][timeout:25];
+        [out:json][timeout:40];
         (
           node["amenity"="weighbridge"](around:{radius_meters},{request.latitude},{request.longitude});
           node["amenity"="weigh_station"](around:{radius_meters},{request.latitude},{request.longitude});
@@ -4906,7 +4906,7 @@ async def search_weigh_stations(request: WeighStationRequest):
         out skel qt;
         """
         
-        async with httpx.AsyncClient(timeout=45.0) as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.post("https://overpass-api.de/api/interpreter", data=overpass_query)
             response.raise_for_status()
             data = response.json()
