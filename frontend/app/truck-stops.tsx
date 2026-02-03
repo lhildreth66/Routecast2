@@ -358,23 +358,20 @@ const styles = StyleSheet.create({
     margin: 16,
     borderRadius: 12,
   },
-  locationButton: {
-    backgroundColor: '#3b82f6',
+  locationRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 14,
-    borderRadius: 10,
-    marginBottom: 20,
+    alignItems: 'flex-end',
     gap: 8,
+    marginBottom: 16,
   },
-  locationButtonText: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '600',
+  refreshButton: {
+    padding: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   inputRow: {
-    marginBottom: 16,
+    flex: 1,
+    marginBottom: 0,
   },
   label: {
     color: '#d4d4d8',
