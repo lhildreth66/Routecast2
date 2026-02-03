@@ -19,7 +19,7 @@ import {
 import * as Calendar from 'expo-calendar';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
@@ -155,6 +155,13 @@ export default function HomeScreen() {
   useEffect(() => {
     setFavoriteAdded(false);
   }, [origin, destination, stops]);
+
+  // Reload favorites when screen comes back into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      fetchFavoriteRoutes();
+    }, [])
+  );
 
   const loadPushToken = async () => {
     try {
@@ -491,24 +498,30 @@ export default function HomeScreen() {
     try {
       // Try backend first
       const response = await axios.get(`${API_BASE}/api/routes/favorites`);
-      setFavoriteRoutes(response.data);
-      console.log('Loaded favorites from backend:', response.data.length);
+      if (response.data && response.data.length > 0) {
+        setFavoriteRoutes(response.data);
+        console.log('Loaded favorites from backend:', response.data.length);
+        return;
+      }
+      // Backend returned empty array, fall through to local storage
+      console.log('Backend returned empty favorites, checking local storage');
     } catch (err: any) {
-      console.log('Backend favorites not available, using local storage');
-      // Fall back to local storage
-      try {
-        const stored = await AsyncStorage.getItem('favoriteRoutes');
-        if (stored) {
-          const parsed = JSON.parse(stored);
-          setFavoriteRoutes(parsed);
-          console.log('Loaded favorites from local storage:', parsed.length);
-        } else {
-          setFavoriteRoutes([]);
-        }
-      } catch (localErr) {
-        console.log('Error loading local favorites:', localErr);
+      console.log('Backend favorites not available, using local storage:', err.message);
+    }
+    
+    // Fall back to local storage (either error or empty backend response)
+    try {
+      const stored = await AsyncStorage.getItem('favoriteRoutes');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        setFavoriteRoutes(parsed);
+        console.log('Loaded favorites from local storage:', parsed.length);
+      } else {
         setFavoriteRoutes([]);
       }
+    } catch (localErr) {
+      console.log('Error loading local favorites:', localErr);
+      setFavoriteRoutes([]);
     }
   };
 
