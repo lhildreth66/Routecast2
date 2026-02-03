@@ -32,21 +32,25 @@ interface AlertFeature {
 }
 
 export default function RadarMapScreen() {
+  console.log('[RadarMap] Component rendering');
   const [loading, setLoading] = useState(true);
   const [alerts, setAlerts] = useState<AlertFeature[]>([]);
   const [userLocation, setUserLocation] = useState<{ lat: number; lon: number } | null>(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
+    console.log('[RadarMap] useEffect running');
     loadData();
   }, []);
 
   const loadData = async () => {
+    console.log('[RadarMap] loadData started');
     setLoading(true);
     setError('');
 
     try {
       // Get user location
+      console.log('[RadarMap] Requesting location permission');
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status === 'granted') {
         const location = await Location.getCurrentPositionAsync({});
@@ -429,13 +433,39 @@ export default function RadarMapScreen() {
           mixedContentMode="always"
           onError={(syntheticEvent) => {
             const { nativeEvent } = syntheticEvent;
-            console.error('WebView error:', nativeEvent);
+            console.error('WebView error:', JSON.stringify(nativeEvent, null, 2));
+            setError(`WebView failed to load: ${nativeEvent.description || 'Unknown error'}`);
+            setLoading(false);
           }}
           onMessage={(event) => {
-            console.log('WebView message:', event.nativeEvent.data);
+            try {
+              const msg = JSON.parse(event.nativeEvent.data);
+              console.log(`[WebView ${msg.type}]`, msg.message);
+              if (msg.type === 'error') {
+                setError(`Map error: ${msg.message}`);
+              }
+            } catch {
+              console.log('WebView message:', event.nativeEvent.data);
+            }
+          }}
+          onLoadStart={() => {
+            console.log('WebView load started');
           }}
           onLoadEnd={() => {
             console.log('WebView loaded successfully');
+            setLoading(false);
+          }}
+          onHttpError={(syntheticEvent) => {
+            const { nativeEvent } = syntheticEvent;
+            console.error('WebView HTTP error:', nativeEvent);
+          }}
+          renderError={(errorName) => {
+            console.error('WebView render error:', errorName);
+            return (
+              <View style={styles.errorContainer}>
+                <Text style={styles.errorText}>Map failed to render: {errorName}</Text>
+              </View>
+            );
           }}
         />
       )}
