@@ -156,10 +156,11 @@ export default function HomeScreen() {
     setFavoriteAdded(false);
   }, [origin, destination, stops]);
 
-  // Reload favorites when screen comes back into focus
+  // Reload favorites and recents when screen comes back into focus
   useFocusEffect(
     React.useCallback(() => {
       fetchFavoriteRoutes();
+      fetchRecentRoutes();
     }, [])
   );
 
@@ -478,19 +479,30 @@ export default function HomeScreen() {
     try {
       // Try to fetch from backend first
       const response = await axios.get(`${API_BASE}/api/routes/history`);
-      setRecentRoutes(response.data.slice(0, 3));
+      if (response.data && response.data.length > 0) {
+        setRecentRoutes(response.data.slice(0, 3));
+        console.log('Loaded recent routes from backend:', response.data.length);
+        return;
+      }
+      // Backend returned empty array, fall through to local storage
+      console.log('Backend returned empty recents, checking local storage');
     } catch (err) {
       console.log('Error fetching from backend, using local storage:', err);
-      // Fallback to local storage
-      try {
-        const stored = await AsyncStorage.getItem('recentRoutes');
-        if (stored) {
-          const recents = JSON.parse(stored);
-          setRecentRoutes(recents.slice(0, 3));
-        }
-      } catch (localErr) {
-        console.log('Error loading local recent routes:', localErr);
+    }
+    
+    // Fallback to local storage (either error or empty backend response)
+    try {
+      const stored = await AsyncStorage.getItem('recentRoutes');
+      if (stored) {
+        const recents = JSON.parse(stored);
+        setRecentRoutes(recents.slice(0, 3));
+        console.log('Loaded recent routes from local storage:', recents.length);
+      } else {
+        setRecentRoutes([]);
       }
+    } catch (localErr) {
+      console.log('Error loading local recent routes:', localErr);
+      setRecentRoutes([]);
     }
   };
 
