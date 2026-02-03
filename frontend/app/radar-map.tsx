@@ -265,12 +265,14 @@ export default function RadarMapScreen() {
         try {
           const layer = L.geoJSON(alert.geometry, { style }).addTo(map);
           
-          const popupContent = '<div class="alert-popup">' +
-            '<h3>' + alert.event + '</h3>' +
-            '<p><strong>Severity:</strong> ' + alert.severity + '</p>' +
-            '<p><strong>Areas:</strong> ' + alert.areas.slice(0, 3).join(', ') + '</p>' +
-            '<p><strong>Expires:</strong> ' + (alert.expires ? new Date(alert.expires).toLocaleString() : 'Unknown') + '</p>' +
-            '</div>';
+          const popupContent = \`
+            <div class="alert-popup">
+              <h3>\${alert.event}</h3>
+              <p><strong>Severity:</strong> \${alert.severity}</p>
+              <p><strong>Areas:</strong> \${alert.areas.slice(0, 3).join(', ')}</p>
+              <p><strong>Expires:</strong> \${alert.expires ? new Date(alert.expires).toLocaleString() : 'Unknown'}</p>
+            </div>
+          \`;
           
           layer.bindPopup(popupContent);
         } catch (e) {
