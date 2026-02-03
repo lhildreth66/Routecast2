@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator, Platform, ScrollView, Alert } from 'react-native';
 import axios from 'axios';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -15,23 +15,51 @@ export default function SolarForecastScreen() {
   const [numPanels, setNumPanels] = useState('2');
 
   const [loading, setLoading] = useState(false);
+  const [locationLoading, setLocationLoading] = useState(true);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string>('');
 
-  const useCurrentLocation = async () => {
+  useEffect(() => {
+    getCurrentLocation();
+  }, []);
+
+  const getCurrentLocation = async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === 'granted') {
+        const location = await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        });
+        setLatitude(location.coords.latitude.toFixed(4));
+        setLongitude(location.coords.longitude.toFixed(4));
+      }
+    } catch (err) {
+      console.log('Could not get current location:', err);
+    } finally {
+      setLocationLoading(false);
+    }
+  };
+
+  const refreshLocation = async () => {
+    setLocationLoading(true);
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission Denied', 'Location permission is required to use current location.');
+        Alert.alert('Permission Denied', 'Location permission is required.');
+        setLocationLoading(false);
         return;
       }
 
-      const location = await Location.getCurrentPositionAsync({});
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+      });
       setLatitude(location.coords.latitude.toFixed(4));
       setLongitude(location.coords.longitude.toFixed(4));
-      Alert.alert('Location Updated', `Using current position: ${location.coords.latitude.toFixed(4)}, ${location.coords.longitude.toFixed(4)}`);
+      Alert.alert('Location Updated', `Refreshed to: ${location.coords.latitude.toFixed(4)}, ${location.coords.longitude.toFixed(4)}`);
     } catch (err) {
-      Alert.alert('Error', 'Failed to get current location');
+      Alert.alert('Error', 'Failed to refresh location');
+    } finally {
+      setLocationLoading(false);
     }
   };
 
@@ -85,12 +113,14 @@ export default function SolarForecastScreen() {
             <Text style={styles.locationText}>
               Analyzing: {latitude}, {longitude}
             </Text>
+            <TouchableOpacity onPress={refreshLocation} style={styles.refreshButton} disabled={locationLoading}>
+              {locationLoading ? (
+                <ActivityIndicator size="small" color="#eab308" />
+              ) : (
+                <Ionicons name="refresh" size={18} color="#eab308" />
+              )}
+            </TouchableOpacity>
           </View>
-
-          <TouchableOpacity onPress={useCurrentLocation} style={styles.locationButton}>
-            <Ionicons name="locate" size={18} color="#eab308" />
-            <Text style={styles.locationButtonText}>Use Current Location</Text>
-          </TouchableOpacity>
 
           <View style={styles.inputRow}>
             <Text style={styles.label}>Latitude</Text>
@@ -199,9 +229,8 @@ const styles = StyleSheet.create({
   title: { color: '#fff', fontSize: 20, fontWeight: '800' },
   subtitle: { color: '#d4d4d8', fontSize: 14 },
   locationInfo: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#111827', padding: 10, borderRadius: 8 },
-  locationText: { color: '#d4d4d8', fontSize: 12 },
-  locationButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#1f2937', paddingVertical: 10, borderRadius: 8, borderWidth: 1, borderColor: '#eab308' },
-  locationButtonText: { color: '#eab308', fontWeight: '600', fontSize: 14 },
+  locationText: { flex: 1, color: '#d4d4d8', fontSize: 12 },
+  refreshButton: { padding: 4 },
   inputRow: { gap: 6 },
   label: { color: '#e4e4e7', fontWeight: '600' },
   input: { backgroundColor: '#111827', color: '#fff', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10 },

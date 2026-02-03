@@ -62,7 +62,7 @@ export default function CampsiteIndexScreen() {
     })();
   }, []);
 
-  const useCurrentLocation = async () => {
+  const refreshLocation = async () => {
     setLocationLoading(true);
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
@@ -84,7 +84,7 @@ export default function CampsiteIndexScreen() {
       setLatitude(location.coords.latitude.toFixed(4));
       setLongitude(location.coords.longitude.toFixed(4));
       setLocationLoading(false);
-      Alert.alert('Location Updated', 'Your current location has been set.');
+      Alert.alert('Location Updated', `Refreshed to: ${location.coords.latitude.toFixed(4)}, ${location.coords.longitude.toFixed(4)}`);
     } catch (err: any) {
       setLocationLoading(false);
       Alert.alert(
@@ -201,20 +201,18 @@ export default function CampsiteIndexScreen() {
                   editable={!loading}
                 />
               </View>
+              <TouchableOpacity
+                style={styles.refreshLocationButton}
+                onPress={refreshLocation}
+                disabled={locationLoading || loading}
+              >
+                {locationLoading ? (
+                  <ActivityIndicator size="small" color="#eab308" />
+                ) : (
+                  <Ionicons name="refresh" size={20} color="#eab308" />
+                )}
+              </TouchableOpacity>
             </View>
-
-            <TouchableOpacity
-              style={styles.locationButton}
-              onPress={useCurrentLocation}
-              disabled={locationLoading || loading}
-            >
-              {locationLoading ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <Ionicons name="location" size={20} color="#fff" />
-              )}
-              <Text style={styles.locationButtonText}>Use Current Location</Text>
-            </TouchableOpacity>
           </>
         ) : (
           <>
@@ -465,19 +463,10 @@ const styles = StyleSheet.create({
   coordInput: {
     flex: 1,
   },
-  locationButton: {
-    backgroundColor: '#1E88E5',
-    flexDirection: 'row',
-    alignItems: 'center',
+  refreshLocationButton: {
+    padding: 8,
     justifyContent: 'center',
-    paddingVertical: 12,
-    borderRadius: 8,
-    gap: 8,
-  },
-  locationButtonText: {
-    color: '#FFF',
-    fontSize: 14,
-    fontWeight: '600',
+    alignItems: 'center',
   },
   buttonGroup: {
     flexDirection: 'row',
