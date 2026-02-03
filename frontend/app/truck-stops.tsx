@@ -88,7 +88,7 @@ export default function TruckStopsScreen() {
         longitude: parseFloat(longitude),
         radius_miles: parseInt(searchRadius, 10),
       }, {
-        timeout: 25000, // 25 second timeout
+        timeout: 65000, // 65 second timeout
       });
       setStops(resp.data.stops || []);
       if (resp.data.stops && resp.data.stops.length === 0) {

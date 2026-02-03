@@ -4540,82 +4540,103 @@ class TruckStopResponse(BaseModel):
 
 @api_router.post("/pro/truck-stops/search", response_model=TruckStopResponse)
 async def search_truck_stops(request: TruckStopRequest):
-    """Find truck stops with fuel and amenities using static database."""
+    """Find truck stops with fuel and amenities using OpenStreetMap."""
     # TESTING: Paywalls disabled - require_premium(request.subscription_id, TRUCK_STOPS)
     try:
-        # Load static truck stop database
-        import json
-        import os
+        radius_meters = int(request.radius_miles * 1609.34)
         
-        db_path = os.path.join(os.path.dirname(__file__), 'truck_stops_database.json')
-        with open(db_path, 'r') as f:
-            truck_stops_db = json.load(f)
+        # Query for truck stops, gas stations with HGV fuel, and service areas
+        overpass_query = f"""
+        [out:json][timeout:40];
+        (
+          node["amenity"="fuel"]["hgv"="yes"](around:{radius_meters},{request.latitude},{request.longitude});
+          node["amenity"="fuel"]["hgv:diesel"="yes"](around:{radius_meters},{request.latitude},{request.longitude});
+          node["highway"="services"]["fuel"="yes"](around:{radius_meters},{request.latitude},{request.longitude});
+          way["amenity"="fuel"]["hgv"="yes"](around:{radius_meters},{request.latitude},{request.longitude});
+          way["amenity"="fuel"]["hgv:diesel"="yes"](around:{radius_meters},{request.latitude},{request.longitude});
+          way["highway"="services"]["fuel"="yes"](around:{radius_meters},{request.latitude},{request.longitude});
+        );
+        out center;
+        """
         
-        logger.info(f"Loaded {len(truck_stops_db)} truck stops from static database")
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.post("https://overpass-api.de/api/interpreter", data=overpass_query)
+            response.raise_for_status()
+            data = response.json()
         
         stops = []
-        for stop_data in truck_stops_db:
-            lat = stop_data['lat']
-            lon = stop_data['lon']
+        for element in data.get('elements', []):
+            tags = element.get('tags', {})
             
-            # Calculate distance
-            distance = haversine_miles(request.latitude, request.longitude, lat, lon)
+            # Get coordinates
+            if element['type'] == 'way':
+                lat = element.get('center', {}).get('lat', 0)
+                lon = element.get('center', {}).get('lon', 0)
+            else:
+                lat = element.get('lat', 0)
+                lon = element.get('lon', 0)
             
-            # Filter by radius
-            if distance > request.radius_miles:
+            if not lat or not lon:
                 continue
             
-            # Map amenities from database to proper format
-            amenities_list = []
-            for amenity in stop_data.get('amenities', []):
-                if amenity == 'fuel':
-                    amenities_list.append('Diesel Fuel')
-                elif amenity == 'parking':
-                    amenities_list.append('Truck Parking')
-                elif amenity == 'restrooms':
-                    amenities_list.append('Restrooms')
-                elif amenity == 'food':
-                    amenities_list.append('Food')
-                elif amenity == 'showers':
-                    amenities_list.append('Showers')
-                elif amenity == 'truck_wash':
-                    amenities_list.append('Truck Wash')
-                elif amenity == 'repair':
-                    amenities_list.append('Repair Services')
+            distance = haversine_miles(request.latitude, request.longitude, lat, lon)
             
-            # All major truck stops have diesel and DEF
-            fuel_types = ['Diesel', 'DEF']
+            # Get name and brand
+            name = tags.get('name', tags.get('brand', 'Truck Stop'))
+            brand = tags.get('brand', tags.get('operator', 'Independent'))
             
-            # Common services
-            services = ['WiFi']
-            if 'truck_wash' in stop_data.get('amenities', []):
+            # Determine amenities
+            amenities = []
+            if tags.get('fuel:diesel') == 'yes' or tags.get('hgv:diesel') == 'yes' or tags.get('hgv') == 'yes':
+                amenities.append('Diesel Fuel')
+            if tags.get('fuel:HGV_diesel') == 'yes':
+                amenities.append('DEF')
+            if tags.get('truck_parking') == 'yes' or tags.get('hgv') == 'yes':
+                amenities.append('Truck Parking')
+            if tags.get('toilets') == 'yes':
+                amenities.append('Restrooms')
+            if tags.get('restaurant') == 'yes' or tags.get('food') == 'yes':
+                amenities.append('Food')
+            if tags.get('shower') == 'yes':
+                amenities.append('Showers')
+            
+            # Fuel types
+            fuel_types = ['Diesel']
+            if tags.get('fuel:HGV_diesel') == 'yes':
+                fuel_types.append('DEF')
+            
+            # Services
+            services = []
+            if tags.get('wifi') == 'yes':
+                services.append('WiFi')
+            if tags.get('car_wash') == 'yes':
                 services.append('Truck Wash')
-            if 'repair' in stop_data.get('amenities', []):
+            if tags.get('repair') == 'yes':
                 services.append('Repair')
             
+            # Hours
+            hours = tags.get('opening_hours', '24/7' if tags.get('24/7') == 'yes' else None)
+            
             stops.append(TruckStop(
-                name=stop_data['name'],
-                brand=stop_data['brand'],
+                name=name,
+                brand=brand,
                 distance_miles=round(distance, 1),
                 latitude=lat,
                 longitude=lon,
-                amenities=amenities_list,
+                amenities=amenities if amenities else ['Diesel Fuel'],
                 fuel_types=fuel_types,
-                services=services,
-                phone=None,  # Can add to database later
-                website=None,  # Can add to database later
-                hours='24/7',  # Most major truck stops are 24/7
+                services=services if services else ['WiFi'],
+                phone=tags.get('phone'),
+                website=tags.get('website'),
+                hours=hours,
             ))
         
         stops.sort(key=lambda x: x.distance_miles)
-        stops = stops[:20]
+        stops = stops[:30]
         
-        logger.info(f"✓ Found {len(stops)} truck stops within {request.radius_miles} miles (static database)")
+        logger.info(f"✓ Found {len(stops)} truck stops within {request.radius_miles} miles")
         return TruckStopResponse(stops=stops)
     
-    except FileNotFoundError:
-        logger.error("Truck stops database file not found")
-        raise HTTPException(status_code=500, detail="Truck stops database not available")
     except Exception as e:
         logger.error(f"Error searching truck stops: {e}")
         raise HTTPException(status_code=500, detail=f"Error searching truck stops: {str(e)}")
