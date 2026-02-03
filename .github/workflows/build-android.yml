@@ -1,0 +1,72 @@
+name: Build Android App
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/build-android.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Setup Java (required for Android builds)
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Expo and EAS
+        run: |
+          npm install -g eas-cli
+          npm install -g expo-cli
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Run EAS Build (Local)
+        working-directory: frontend
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          eas build --local --platform android --profile production --non-interactive
+
+      - name: Find generated AAB
+        id: find-aab
+        run: |
+          AAB_PATH=$(find . -name "*.aab" -type f | head -n 1)
+          echo "aab_path=$AAB_PATH" >> $GITHUB_OUTPUT
+          echo "Found AAB at: $AAB_PATH"
+
+      - name: Upload AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-release-${{ github.sha }}
+          path: ${{ steps.find-aab.aab_path }}
+          retention-days: 30
+
+      - name: Build summary
+        run: |
+          echo "## Build Complete ✅" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Platform:** Android" >> $GITHUB_STEP_SUMMARY
+          echo "**Profile:** Production" >> $GITHUB_STEP_SUMMARY
+          echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "**AAB:** ${{ steps.find-aab.outputs.aab_path }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Download the artifact from the Actions tab above." >> $GITHUB_STEP_SUMMARY
