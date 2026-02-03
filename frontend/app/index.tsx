@@ -489,12 +489,26 @@ export default function HomeScreen() {
 
   const fetchFavoriteRoutes = async () => {
     try {
+      // Try backend first
       const response = await axios.get(`${API_BASE}/api/routes/favorites`);
       setFavoriteRoutes(response.data);
-      console.log('Loaded favorites:', response.data.length);
+      console.log('Loaded favorites from backend:', response.data.length);
     } catch (err: any) {
-      console.log('Error fetching favorites:', err.response?.data || err.message);
-      setFavoriteRoutes([]); // Set empty array on error
+      console.log('Backend favorites not available, using local storage');
+      // Fall back to local storage
+      try {
+        const stored = await AsyncStorage.getItem('favoriteRoutes');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          setFavoriteRoutes(parsed);
+          console.log('Loaded favorites from local storage:', parsed.length);
+        } else {
+          setFavoriteRoutes([]);
+        }
+      } catch (localErr) {
+        console.log('Error loading local favorites:', localErr);
+        setFavoriteRoutes([]);
+      }
     }
   };
 
@@ -651,7 +665,17 @@ export default function HomeScreen() {
       return;
     }
 
+    const favorite: SavedRoute = {
+      id: Date.now().toString(),
+      origin: origin.trim(),
+      destination: destination.trim(),
+      stops: stops,
+      is_favorite: true,
+      created_at: new Date().toISOString(),
+    };
+
     try {
+      // Try backend first
       await axios.post(`${API_BASE}/api/routes/favorites`, {
         origin: origin.trim(),
         destination: destination.trim(),
@@ -661,17 +685,42 @@ export default function HomeScreen() {
       fetchFavoriteRoutes();
       Alert.alert('Saved!', 'Route added to favorites');
     } catch (err: any) {
-      console.error('Error saving favorite:', err);
-      Alert.alert('Error', err?.response?.data?.detail || 'Failed to save favorite. Please try again.');
+      console.log('Backend not available, saving locally');
+      // Fall back to local storage
+      try {
+        const stored = await AsyncStorage.getItem('favoriteRoutes');
+        const favorites = stored ? JSON.parse(stored) : [];
+        favorites.unshift(favorite);
+        await AsyncStorage.setItem('favoriteRoutes', JSON.stringify(favorites));
+        setFavoriteRoutes(favorites);
+        setFavoriteAdded(true);
+        Alert.alert('Saved!', 'Route added to favorites (locally)');
+      } catch (localErr) {
+        console.error('Error saving favorite locally:', localErr);
+        Alert.alert('Error', 'Failed to save favorite. Please try again.');
+      }
     }
   };
 
   const removeFavorite = async (id: string) => {
     try {
+      // Try backend first
       await axios.delete(`${API_BASE}/api/routes/favorites/${id}`);
       fetchFavoriteRoutes();
     } catch (err) {
-      console.error('Error removing favorite:', err);
+      console.log('Backend not available, removing from local storage');
+      // Fall back to local storage
+      try {
+        const stored = await AsyncStorage.getItem('favoriteRoutes');
+        if (stored) {
+          const favorites = JSON.parse(stored);
+          const updated = favorites.filter((r: SavedRoute) => r.id !== id);
+          await AsyncStorage.setItem('favoriteRoutes', JSON.stringify(updated));
+          setFavoriteRoutes(updated);
+        }
+      } catch (localErr) {
+        console.error('Error removing favorite locally:', localErr);
+      }
     }
   };
 
