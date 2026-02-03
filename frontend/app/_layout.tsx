@@ -5,33 +5,28 @@ import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
-// Temporarily disabled for Expo Go testing
-// import { EntitlementsProvider } from './billing/EntitlementsProvider';
-
-// Only configure notifications in standalone builds (not Expo Go)
-// Expo Go doesn't support push notifications since SDK 53
-const isExpoGo = Constants.appOwnership === 'expo';
-if (!isExpoGo) {
-  Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowAlert: true,
-      shouldPlaySound: true,
-      shouldSetBadge: false,
-      shouldShowBanner: true,
-      shouldShowList: true,
-    }),
-  });
-}
 
 export default function RootLayout() {
   useEffect(() => {
     // Request notification permissions and get token
     async function setupNotifications() {
       // Skip notifications in Expo Go - not supported since SDK 53
+      const isExpoGo = Constants.appOwnership === 'expo';
       if (isExpoGo) {
         console.log('Push notifications not available in Expo Go - use development build');
         return;
       }
+      
+      // Only configure notification handler in standalone builds
+      Notifications.setNotificationHandler({
+        handleNotification: async () => ({
+          shouldShowAlert: true,
+          shouldPlaySound: true,
+          shouldSetBadge: false,
+          shouldShowBanner: true,
+          shouldShowList: true,
+        }),
+      });
       
       if (Platform.OS !== 'web') {
         try {

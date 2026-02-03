@@ -1,13 +1,8 @@
 /**
  * Road Passability Assessment Component
  * 
- * Example premium feature component that shows:
- * - How to use useRoadPassability hook
- * - How to handle premium gating / paywall
- * - How to display assessment results with risk visualization
- * 
- * This is intended as a reference implementation for integrating
- * road passability assessment into the Routecast app.
+ * Shows road passability assessment based on weather conditions,
+ * terrain slope, and soil type.
  */
 
 import React, { useState } from 'react';
@@ -43,12 +38,6 @@ const RoadPassabilityScreen: React.FC = () => {
         min_temp_f: minTempF,
         soil_type: selectedSoilType,
       });
-
-      // Handle premium lock
-      if (response.is_premium_locked) {
-        setShowPaywall(true);
-        return;
-      }
 
       // Display results
       Alert.alert(
@@ -190,21 +179,11 @@ const RoadPassabilityScreen: React.FC = () => {
       {error && (
         <View style={styles.errorBox}>
           <Text style={styles.errorText}>⚠️ {error}</Text>
-          {error.includes('premium') && (
-            <TouchableOpacity
-              style={styles.upgradeButton}
-              onPress={() => setShowPaywall(true)}
-            >
-              <Text style={styles.upgradeButtonText}>
-                Upgrade to Pro
-              </Text>
-            </TouchableOpacity>
-          )}
         </View>
       )}
 
       {/* Results Section */}
-      {result && !result.is_premium_locked && (
+      {result && (
         <View style={styles.resultsSection}>
           <View
             style={[

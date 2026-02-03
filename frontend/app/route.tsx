@@ -54,6 +54,7 @@ interface WeatherData {
   conditions: string | null;
   wind_speed: string | null;
   humidity: number | null;
+  is_daytime?: boolean;
 }
 
 interface WeatherAlert {
@@ -112,6 +113,7 @@ interface RouteData {
   reroute_recommended: boolean;
   reroute_reason: string | null;
   trucker_warnings: string[];
+  bridge_warnings?: string[];
   ai_summary: string | null;
 }
 
@@ -1842,15 +1844,6 @@ const styles = StyleSheet.create({
     color: '#a1a1aa',
     fontSize: 11,
     marginTop: 4,
-  },
-  navBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#2563eb',
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 25,
-    gap: 8,
   },
   navText: {
     color: '#fff',

@@ -50,13 +50,17 @@
           "androidMode": "default",
           "androidCollapsedTitle": "Routecast Weather Alerts"
         }
-      ]
+      ],
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true
     },
     "ios": {
       "bundleIdentifier": "com.routecast.app"
+    },
+    "updates": {
+      "fallbackToCacheTimeout": 0
     },
     "extra": {
       "router": {},

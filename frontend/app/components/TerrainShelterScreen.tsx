@@ -3,7 +3,7 @@
  *
  * Complete UI for solar exposure and wind shelter planning with terrain consideration.
  * Integrates both terrain shade (solar path, tree canopy) and wind shelter (orientation)
- * features with results visualization and premium paywall.
+ * features with results visualization.
  *
  * Usage in navigation:
  * ```typescript
@@ -91,18 +91,13 @@ const TerrainShelterScreen: React.FC = () => {
       return;
     }
 
-    const response = await estimateShade({
+    await estimateShade({
       latitude: lat,
       longitude: lon,
       date,
       tree_canopy_pct: canopyPct,
       horizon_obstruction_deg: obstructionDeg,
     });
-
-    if (response?.is_premium_locked) {
-      setPaywallFeature('shade');
-      setShowPaywall(true);
-    }
   };
 
   // Handle wind shelter estimation
@@ -113,7 +108,7 @@ const TerrainShelterScreen: React.FC = () => {
       return;
     }
 
-    const response = await estimateWind({
+    await estimateWind({
       predominant_dir_deg: WIND_DIRECTIONS[windDirectionIdx].value,
       gust_mph: gustNum,
       local_ridges: ridges.map((r) => ({
@@ -122,11 +117,6 @@ const TerrainShelterScreen: React.FC = () => {
         name: r.name,
       })),
     });
-
-    if (response?.is_premium_locked) {
-      setPaywallFeature('wind');
-      setShowPaywall(true);
-    }
   };
 
   // Add new ridge
@@ -175,8 +165,8 @@ const TerrainShelterScreen: React.FC = () => {
   };
 
   const loading = shadeLoading || windLoading;
-  const shade = shadeResult && !shadeResult.is_premium_locked ? shadeResult : null;
-  const wind = windResult && !windResult.is_premium_locked ? windResult : null;
+  const shade = shadeResult;
+  const wind = windResult;
 
   return (
     <View style={styles.container}>

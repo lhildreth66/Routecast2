@@ -34,11 +34,9 @@ export interface UseSolarForecastReturn {
  * Hook for forecasting daily solar energy generation
  * 
  * Features:
- * - Premium-gated: requires active premium subscription
  * - Pure deterministic calculations
  * - Accounts for latitude, season, cloud cover, and shade
  * - Returns Wh/day estimates for multi-day forecasts
- * - Handles paywall gracefully
  * 
  * Usage:
  * ```

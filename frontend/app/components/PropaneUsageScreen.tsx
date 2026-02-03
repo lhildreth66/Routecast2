@@ -1,8 +1,7 @@
 /**
  * PropaneUsageScreen - React Native Component for Propane Consumption Estimation
  *
- * Complete UI for propane usage estimation with inputs, results visualization,
- * and premium paywall integration.
+ * Complete UI for propane usage estimation with inputs and results visualization.
  *
  * Usage in navigation:
  * ```typescript

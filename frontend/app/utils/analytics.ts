@@ -1,17 +1,15 @@
 /**
- * Analytics Event Tracking (Task F1)
+ * Analytics Event Tracking
  * 
- * Centralized event logging for conversion tracking and funnel analysis.
+ * Centralized event logging for user activity tracking.
  * 
  * Supported events:
- * - paywall_viewed: When paywall screen/modal is shown
- * - trial_started: When user successfully starts free trial
- * - purchase_success: After confirmed subscription purchase
- * - feature_intent_used: When user attempts to use premium feature
- * - feature_locked_shown: When premium gate blocks access
+ * - feature_used: When user uses any feature
+ * - route_created: When user creates a new route
+ * - route_saved: When user saves a route
  * 
  * Usage:
- *   trackEvent("paywall_viewed", { feature: "solar_forecast", source: "route_summary" });
+ *   trackEvent("feature_used", { feature: "solar_forecast", source: "route_summary" });
  */
 
 // Declare React Native __DEV__ global
@@ -21,28 +19,20 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // Event names (typed for safety)
 export type AnalyticsEvent =
-  | 'paywall_viewed'
-  | 'trial_started'
-  | 'purchase_success'
-  | 'feature_intent_used'
-  | 'feature_locked_shown';
+  | 'feature_used'
+  | 'route_created'
+  | 'route_saved';
 
 // Event parameters
 export interface AnalyticsParams {
-  // Paywall viewed
+  // Feature usage
   feature?: string;
   source?: string;
   screen?: string;
   
-  // Trial started / Purchase success
-  planType?: 'monthly' | 'yearly';
-  platform?: 'ios' | 'android';
-  productId?: string;
-  price?: string;
-  
-  // Feature intent/locked
-  isPremium?: boolean;
-  entryPoint?: string;
+  // Route events
+  origin?: string;
+  destination?: string;
   
   // Additional context
   [key: string]: any;
@@ -197,8 +187,8 @@ async function sendToBackend(event: EventRecord): Promise<void> {
  * @param params - Event parameters (no PII)
  * 
  * @example
- * trackEvent("paywall_viewed", { feature: "solar_forecast", source: "route_summary" });
- * trackEvent("purchase_success", { planType: "yearly", productId: "pro_yearly", price: "$99.99" });
+ * trackEvent("feature_used", { feature: "solar_forecast", source: "route_summary" });
+ * trackEvent("route_created", { origin: "Denver", destination: "Boulder" });
  */
 export async function trackEvent(
   name: AnalyticsEvent,

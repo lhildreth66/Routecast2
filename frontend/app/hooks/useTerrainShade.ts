@@ -60,7 +60,7 @@ export interface UseTerrainShadeReturn {
  * });
  *
  * if (result?.is_premium_locked) {
- *   // Show paywall modal
+ * // Handle premium response
  * } else if (result?.sun_path_slots) {
  *   // Display solar path and shade factor
  * }

@@ -58,7 +58,7 @@ export interface UseWaterBudgetReturn {
  * });
  *
  * if (result?.is_premium_locked) {
- *   // Show paywall modal
+ * // Handle premium response
  * } else if (result?.days_remaining !== undefined) {
  *   // Display results
  * }

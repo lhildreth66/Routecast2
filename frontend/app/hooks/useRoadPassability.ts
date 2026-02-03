@@ -40,11 +40,9 @@ export interface UseRoadPassabilityReturn {
  * Hook for assessing road passability conditions
  * 
  * Features:
- * - Premium-gated: requires active subscription
- * - Pure deterministic calculations
  * - Comprehensive risk assessment (mud, ice, clearance)
  * - Vehicle recommendations
- * - Handles paywall gracefully
+ * - Pure deterministic calculations
  * 
  * Usage:
  * ```

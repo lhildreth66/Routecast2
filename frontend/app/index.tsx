@@ -98,6 +98,7 @@ export default function HomeScreen() {
   
   const [isListening, setIsListening] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(false);
+  const [chatMessage, setChatMessage] = useState('');
   
   // Off-Grid Chat
   const [showCampPrep, setShowCampPrep] = useState(false);
@@ -1934,6 +1935,14 @@ const styles = StyleSheet.create({
     borderColor: '#52525b',
     overflow: 'hidden',
   },
+  suggestions: {
+    backgroundColor: '#3f3f46',
+    borderRadius: 10,
+    marginTop: 4,
+    borderWidth: 1,
+    borderColor: '#52525b',
+    overflow: 'hidden',
+  },
   suggestionItem: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1942,6 +1951,11 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#52525b',
     gap: 10,
+  },
+  suggestionText: {
+    color: '#ffffff',
+    fontSize: 14,
+    flex: 1,
   },
   suggestionTextContainer: {
     flex: 1,
@@ -2152,20 +2166,6 @@ const styles = StyleSheet.create({
   },
   webDatePicker: {
     paddingVertical: 16,
-  },
-  datePickerLabel: {
-    color: '#a1a1aa',
-    fontSize: 12,
-    fontWeight: '600',
-    marginBottom: 8,
-    textTransform: 'uppercase',
-  },
-  selectedDateTime: {
-    color: '#eab308',
-    fontSize: 16,
-    fontWeight: '700',
-    textAlign: 'center',
-    marginTop: 8,
   },
   // AI Chat styles
   chatFab: {

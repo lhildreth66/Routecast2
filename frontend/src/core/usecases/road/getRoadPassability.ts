@@ -1,7 +1,4 @@
-import type { Entitlements } from '../../billing/Entitlements';
-import { PremiumLockedError } from '../../billing/PremiumLockedError';
 import { score, type Passability, type SoilType } from '../../domain/road/RoadPassability';
-import { trackEvent } from '../../analytics/track';
 
 /**
  * Road Passability Input Parameters
@@ -23,36 +20,15 @@ export interface RoadPassabilityInput {
 /**
  * Get Road Passability Use Case
  *
- * Premium-gated wrapper around road passability domain logic.
- * Requires 'road_passability' entitlement.
+ * Assesses road passability based on weather and terrain conditions.
  *
- * Analytics events:
- * - Always logs 'feature_intent_used' when called
- * - Logs 'feature_locked_shown' if entitlement missing (before throwing)
- *
- * @param entitlements User's entitlements
  * @param input Road passability parameters
- * @param source Optional analytics source identifier
  * @returns Passability assessment with score and flags
- * @throws PremiumLockedError if user lacks road_passability entitlement
  */
 export function getRoadPassability(
-  entitlements: Entitlements,
-  input: RoadPassabilityInput,
-  source?: string
+  input: RoadPassabilityInput
 ): Passability {
-  const feature = 'road_passability';
-
-  // Always track intent
-  trackEvent('feature_intent_used', { feature, source });
-
-  // Check if locked and track before throwing
-  if (!entitlements.has(feature)) {
-    trackEvent('feature_locked_shown', { feature, source });
-    throw new PremiumLockedError(feature);
-  }
-
-  // Execute domain logic if entitled
+  // Execute domain logic
   return score(input.precip72hIn, input.slopePct, input.minTempF, input.soil);
 }
 

@@ -1,8 +1,7 @@
 /**
  * WaterBudgetScreen - React Native Component for Water Budget Estimation
  *
- * Complete UI for water tank duration estimation with inputs, results visualization,
- * and premium paywall integration.
+ * Complete UI for water tank duration estimation with inputs and results visualization.
  *
  * Water tanks track fresh/gray/black water capacity and estimates how many days
  * the trip can be sustained before the limiting tank runs out.
@@ -78,7 +77,7 @@ const WaterBudgetScreen: React.FC = () => {
 
   // Handle estimation
   const handleEstimate = async () => {
-    const response = await estimate({
+    await estimate({
       fresh_gal: freshGal,
       gray_gal: grayGal,
       black_gal: blackGal,
@@ -86,11 +85,6 @@ const WaterBudgetScreen: React.FC = () => {
       showers_per_week: showersPerWeek,
       hot_days: isHotDays,
     });
-
-    // Handle premium paywall
-    if (response?.is_premium_locked) {
-      setShowPaywall(true);
-    }
   };
 
   // Get color based on days remaining
@@ -304,7 +298,7 @@ const WaterBudgetScreen: React.FC = () => {
       </TouchableOpacity>
 
       {/* Results Section */}
-      {result && !result.is_premium_locked && (
+      {result && (
         <View style={styles.resultsSection}>
           <View style={styles.resultCard}>
             <Text

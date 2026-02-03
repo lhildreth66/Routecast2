@@ -59,7 +59,7 @@ export interface UseWindShelterReturn {
  * });
  *
  * if (result?.is_premium_locked) {
- *   // Show paywall modal
+ * // Handle premium response
  * } else if (result?.recommended_bearing_deg !== undefined) {
  *   // Display orientation recommendation
  * }

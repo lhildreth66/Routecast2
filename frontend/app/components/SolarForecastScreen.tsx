@@ -41,12 +41,6 @@ const SolarForecastScreen: React.FC = () => {
         cloud_cover: cloudCover,
       });
 
-      // Handle premium lock
-      if (response.is_premium_locked) {
-        setShowPaywall(true);
-        return;
-      }
-
       // Display results summary
       if (response.daily_wh && response.dates) {
         const totalWh = response.daily_wh.reduce((a, b) => a + b, 0);
@@ -170,7 +164,7 @@ const SolarForecastScreen: React.FC = () => {
         </View>
 
         {/* Results */}
-        {result && !result.is_premium_locked && (
+        {result && (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Forecast Results</Text>
             
@@ -218,7 +212,7 @@ const SolarForecastScreen: React.FC = () => {
           )}
         </TouchableOpacity>
 
-        {result && !result.is_premium_locked && (
+        {result && (
           <TouchableOpacity style={styles.clearButton} onPress={clearResult}>
             <Text style={styles.clearButtonText}>Clear Results</Text>
           </TouchableOpacity>
