@@ -86,20 +86,8 @@ export default function RadarMapScreen() {
 <html>
 <head>
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <script>
-    window.onerror = function(msg, url, line, col, error) {
-      window.ReactNativeWebView.postMessage(JSON.stringify({
-        type: 'error',
-        message: msg,
-        line: line,
-        col: col,
-        error: error ? error.stack : 'no stack'
-      }));
-      return false;
-    };
-  </script>
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><` + `/script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body { height: 100%; width: 100%; overflow: hidden; }
@@ -208,8 +196,10 @@ export default function RadarMapScreen() {
   
   <script>
     try {
+      // Send console messages to React Native
       const originalLog = console.log;
       const originalError = console.error;
+      const originalWarn = console.warn;
       
       console.log = function(...args) {
         window.ReactNativeWebView?.postMessage(JSON.stringify({ type: 'log', message: args.join(' ') }));
@@ -219,119 +209,144 @@ export default function RadarMapScreen() {
         window.ReactNativeWebView?.postMessage(JSON.stringify({ type: 'error', message: args.join(' ') }));
         originalError.apply(console, args);
       };
+      console.warn = function(...args) {
+        window.ReactNativeWebView?.postMessage(JSON.stringify({ type: 'warn', message: args.join(' ') }));
+        originalWarn.apply(console, args);
+      };
+      
+      console.log('WebView script started');
+      console.log('API_BASE:', '${API_BASE}');
       
       const alerts = ${alertsJSON};
       const userLocation = ${userLoc};
       
+      console.log('Alerts loaded:', alerts.length);
+      console.log('User location:', userLocation);
+      
+      // Initialize map
       const map = L.map('map', {
         zoomControl: true,
         attributionControl: true,
       }).setView(userLocation ? [userLocation.lat, userLocation.lon] : [39.8283, -98.5795], userLocation ? 8 : 4);
       
+      console.log('Map initialized');
+      
+      // Add dark base layer
       L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
         attribution: '&copy; OpenStreetMap, &copy; CARTO',
         subdomains: 'abcd',
         maxZoom: 20
       }).addTo(map);
+      
+      console.log('Base layer added');
     
-      if (userLocation) {
-        L.circleMarker([userLocation.lat, userLocation.lon], {
-          radius: 8,
-          color: '#eab308',
-          fillColor: '#eab308',
-          fillOpacity: 0.8,
-          weight: 2
-        }).addTo(map).bindPopup('<b style="color:#eab308">Your Location</b>');
-      }
-      
-      alerts.forEach(alert => {
-        if (alert.geometry && alert.geometry.coordinates) {
-          const style = {
-            color: alert.color,
-            weight: 2,
-            opacity: 0.8,
-            fillColor: alert.color,
-            fillOpacity: 0.3
-          };
-          
-          try {
-            const layer = L.geoJSON(alert.geometry, { style }).addTo(map);
-            
-            const popupContent = '<div class="alert-popup">' +
-              '<h3>' + alert.event + '</h3>' +
-              '<p><strong>Severity:</strong> ' + alert.severity + '</p>' +
-              '<p><strong>Areas:</strong> ' + alert.areas.slice(0, 3).join(', ') + '</p>' +
-              '<p><strong>Expires:</strong> ' + (alert.expires ? new Date(alert.expires).toLocaleString() : 'Unknown') + '</p>' +
-              '</div>';
-            
-            layer.bindPopup(popupContent);
-          } catch (e) {
-            console.error('Failed to add alert layer:', e);
-          }
-        }
-      });
-      
-      let radarLayer = null;
-      let radarVisible = false;
-      
-      async function toggleRadar() {
-        const btn = document.getElementById('radarBtn');
+    // Add user location marker
+    if (userLocation) {
+      L.circleMarker([userLocation.lat, userLocation.lon], {
+        radius: 8,
+        color: '#eab308',
+        fillColor: '#eab308',
+        fillOpacity: 0.8,
+        weight: 2
+      }).addTo(map).bindPopup('<b style="color:#eab308">Your Location</b>');
+    }
+    
+    // Add alert polygons
+    alerts.forEach(alert => {
+      if (alert.geometry && alert.geometry.coordinates) {
+        const style = {
+          color: alert.color,
+          weight: 2,
+          opacity: 0.8,
+          fillColor: alert.color,
+          fillOpacity: 0.3
+        };
         
-        if (radarVisible) {
-          if (radarLayer) {
-            map.removeLayer(radarLayer);
-            radarLayer = null;
-          }
-          radarVisible = false;
-          btn.classList.remove('active');
-          btn.textContent = '🌧️ Radar';
-        } else {
-          btn.textContent = 'Loading...';
-          try {
-            const apiBase = '${API_BASE}';
-            let tileUrl = null;
-            
-            if (apiBase) {
-              try {
-                const response = await fetch(apiBase + '/api/radar/tiles');
-                const data = await response.json();
-                tileUrl = data.tile_url;
-              } catch (backendErr) {
-                console.warn('Backend radar unavailable');
-              }
-            }
-            
-            if (!tileUrl) {
-              const rainResponse = await fetch('https://api.rainviewer.com/public/weather-maps.json');
-              const rainData = await rainResponse.json();
-              if (rainData.radar && rainData.radar.past && rainData.radar.past.length > 0) {
-                const latest = rainData.radar.past[rainData.radar.past.length - 1];
-                tileUrl = 'https://tilecache.rainviewer.com' + latest.path + '/512/{z}/{x}/{y}/2/1_1.png';
-              }
-            }
-            
-            if (tileUrl) {
-              radarLayer = L.tileLayer(tileUrl, {
-                opacity: 0.7,
-                attribution: 'RainViewer'
-              }).addTo(map);
-              radarVisible = true;
-              btn.classList.add('active');
-              btn.textContent = '🌧️ Radar ON';
-            } else {
-              btn.textContent = '🌧️ Radar (N/A)';
-            }
-          } catch (e) {
-            console.error('Failed to load radar:', e);
-            btn.textContent = '🌧️ Radar (Error)';
-          }
+        try {
+          const layer = L.geoJSON(alert.geometry, { style }).addTo(map);
+          
+          const popupContent = \`
+            <div class="alert-popup">
+              <h3>\${alert.event}</h3>
+              <p><strong>Severity:</strong> \${alert.severity}</p>
+              <p><strong>Areas:</strong> \${alert.areas.slice(0, 3).join(', ')}</p>
+              <p><strong>Expires:</strong> \${alert.expires ? new Date(alert.expires).toLocaleString() : 'Unknown'}</p>
+            </div>
+          \`;
+          
+          layer.bindPopup(popupContent);
+        } catch (e) {
+          console.error('Failed to add alert layer:', e);
         }
       }
+    });
+    
+    // Radar layer
+    let radarLayer = null;
+    let radarVisible = false;
+    
+    async function toggleRadar() {
+      const btn = document.getElementById('radarBtn');
+      
+      if (radarVisible) {
+        // Hide radar
+        if (radarLayer) {
+          map.removeLayer(radarLayer);
+          radarLayer = null;
+        }
+        radarVisible = false;
+        btn.classList.remove('active');
+        btn.textContent = '🌧️ Radar';
+      } else {
+        // Show radar
+        btn.textContent = 'Loading...';
+        try {
+          // Try backend first if available
+          const apiBase = '${API_BASE}';
+          let tileUrl = null;
+          
+          if (apiBase) {
+            try {
+              const response = await fetch(apiBase + '/api/radar/tiles');
+              const data = await response.json();
+              tileUrl = data.tile_url;
+            } catch (backendErr) {
+              console.warn('Backend radar unavailable, falling back to direct RainViewer');
+            }
+          }
+          
+          // Fallback to RainViewer directly if backend unavailable
+          if (!tileUrl) {
+            const rainResponse = await fetch('https://api.rainviewer.com/public/weather-maps.json');
+            const rainData = await rainResponse.json();
+            if (rainData.radar && rainData.radar.past && rainData.radar.past.length > 0) {
+              const latest = rainData.radar.past[rainData.radar.past.length - 1];
+              tileUrl = 'https://tilecache.rainviewer.com' + latest.path + '/512/{z}/{x}/{y}/2/1_1.png';
+            }
+          }
+          
+          if (tileUrl) {
+            radarLayer = L.tileLayer(tileUrl, {
+              opacity: 0.7,
+              attribution: 'RainViewer'
+            }).addTo(map);
+            radarVisible = true;
+            btn.classList.add('active');
+            btn.textContent = '🌧️ Radar ON';
+          } else {
+            btn.textContent = '🌧️ Radar (N/A)';
+          }
+        } catch (e) {
+          console.error('Failed to load radar:', e);
+          btn.textContent = '🌧️ Radar (Error)';
+        }
+      }
+    }
     } catch (err) {
       console.error('WebView script error:', err.message, err.stack);
       window.ReactNativeWebView?.postMessage(JSON.stringify({ type: 'error', message: 'Script error: ' + err.message }));
     }
-  <` + `/script>
+  </script>
 </body>
 </html>
     `;
