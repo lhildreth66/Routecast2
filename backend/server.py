@@ -4983,7 +4983,7 @@ async def search_truck_restrictions(request: TruckRestrictionRequest):
         
         # Query for various truck restrictions
         overpass_query = f"""
-        [out:json][timeout:15];
+        [out:json][timeout:20];
         (
           way["maxweight"](around:{radius_meters},{request.latitude},{request.longitude});
           way["maxheight"](around:{radius_meters},{request.latitude},{request.longitude});
@@ -4995,13 +4995,12 @@ async def search_truck_restrictions(request: TruckRestrictionRequest):
         out center;
         """
         
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=45.0) as client:
             response = await client.post("https://overpass-api.de/api/interpreter", data=overpass_query)
             response.raise_for_status()
             data = response.json()
         
         restrictions = []
-        processed_locations = {}  # Cache geocoding results
         
         for element in data.get('elements', []):
             if element['type'] != 'way':
@@ -5018,28 +5017,9 @@ async def search_truck_restrictions(request: TruckRestrictionRequest):
             distance = haversine_miles(request.latitude, request.longitude, lat, lon)
             name = tags.get('name', tags.get('ref', 'Unnamed Road'))
             
-            # Reverse geocode to get city/state (cached by rounded coords)
-            loc_key = f"{round(lat, 2)},{round(lon, 2)}"
-            if loc_key not in processed_locations:
-                try:
-                    async with httpx.AsyncClient(timeout=5.0) as geo_client:
-                        geo_resp = await geo_client.get(
-                            f"https://nominatim.openstreetmap.org/reverse",
-                            params={'lat': lat, 'lon': lon, 'format': 'json'},
-                            headers={'User-Agent': 'Routecast/1.0'}
-                        )
-                        if geo_resp.status_code == 200:
-                            geo_data = geo_resp.json()
-                            address = geo_data.get('address', {})
-                            city = address.get('city') or address.get('town') or address.get('village') or address.get('county')
-                            state = address.get('state')
-                            processed_locations[loc_key] = (city, state)
-                        else:
-                            processed_locations[loc_key] = (None, None)
-                except:
-                    processed_locations[loc_key] = (None, None)
-            
-            city, state = processed_locations[loc_key]
+            # Skip geocoding to avoid rate limit timeouts
+            city = None
+            state = None
             
             # Check for weight restrictions
             if 'maxweight' in tags:

@@ -84,7 +84,7 @@ export default function TruckRestrictionsScreen() {
         longitude: parseFloat(longitude),
         radius_miles: parseInt(searchRadius, 10),
       }, {
-        timeout: 25000,
+        timeout: 50000,
       });
       setRestrictions(resp.data.restrictions || []);
       if (resp.data.restrictions && resp.data.restrictions.length === 0) {
