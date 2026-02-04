@@ -5385,6 +5385,11 @@ app.include_router(geocode_router, prefix="/api/geocode")
 app.include_router(radar_router, prefix="/api")  # Radar router already has /radar prefix
 app.include_router(api_router)
 
+# Simple health endpoint for liveness checks (non-prefixed)
+@app.get("/health")
+async def root_health():
+    return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
+
 @app.on_event("startup")
 async def startup_db_client():
     await connect_to_mongo()
