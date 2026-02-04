@@ -44,35 +44,48 @@ export default function RadarMapScreen() {
   const loadData = async () => {
     setLoading(true);
     setError('');
+    console.log('[RadarMap] Loading data...');
+    console.log('[RadarMap] API_BASE:', API_BASE);
 
     try {
       // Get user location
+      console.log('[RadarMap] Requesting location permission...');
       const { status } = await Location.requestForegroundPermissionsAsync();
+      console.log('[RadarMap] Location permission status:', status);
+      
       if (status === 'granted') {
+        console.log('[RadarMap] Getting current position...');
         const location = await Location.getCurrentPositionAsync({});
         setUserLocation({
           lat: location.coords.latitude,
           lon: location.coords.longitude,
         });
+        console.log('[RadarMap] User location:', location.coords.latitude, location.coords.longitude);
+      } else {
+        console.warn('[RadarMap] Location permission denied');
       }
 
       // Fetch alerts from backend if available
       if (API_BASE) {
         try {
-          const response = await axios.get(`${API_BASE}/api/radar/alerts/map`);
+          console.log('[RadarMap] Fetching alerts from:', `${API_BASE}/api/radar/alerts/map`);
+          const response = await axios.get(`${API_BASE}/api/radar/alerts/map`, { timeout: 10000 });
+          console.log('[RadarMap] Alerts response:', response.status, response.data?.alerts?.length || 0, 'alerts');
           setAlerts(response.data.alerts || []);
         } catch (alertErr: any) {
-          console.warn('Failed to load weather alerts, continuing without alerts:', alertErr);
+          console.warn('[RadarMap] Failed to load weather alerts:', alertErr.message || alertErr);
+          console.warn('[RadarMap] Continuing without alerts - map will still work');
           // Continue without alerts - map will still work
         }
       } else {
-        console.warn('Backend URL not configured, radar map will work without weather alerts');
+        console.warn('[RadarMap] Backend URL not configured, radar map will work without weather alerts');
       }
     } catch (err: any) {
-      console.error('Error loading radar data:', err);
+      console.error('[RadarMap] Error loading radar data:', err.message || err);
       setError('Failed to load location data');
     } finally {
       setLoading(false);
+      console.log('[RadarMap] Data loading complete');
     }
   };
 
@@ -430,14 +443,43 @@ export default function RadarMapScreen() {
           mixedContentMode="always"
           onError={(syntheticEvent) => {
             const { nativeEvent } = syntheticEvent;
-            console.error('WebView error:', nativeEvent);
+            console.error('[RadarMap] WebView error:', JSON.stringify(nativeEvent, null, 2));
+            setError(`WebView error: ${nativeEvent.description || 'Unknown error'}`);
           }}
           onMessage={(event) => {
-            console.log('WebView message:', event.nativeEvent.data);
+            try {
+              const msg = JSON.parse(event.nativeEvent.data);
+              const prefix = `[WebView ${msg.type}]`;
+              if (msg.type === 'error') {
+                console.error(prefix, msg.message);
+              } else if (msg.type === 'warn') {
+                console.warn(prefix, msg.message);
+              } else {
+                console.log(prefix, msg.message);
+              }
+            } catch (e) {
+              console.log('[WebView]', event.nativeEvent.data);
+            }
           }}
           onLoadEnd={() => {
-            console.log('WebView loaded successfully');
+            console.log('[RadarMap] WebView loaded successfully');
           }}
+          onLoadStart={() => {
+            console.log('[RadarMap] WebView loading started...');
+          }}
+          onHttpError={(syntheticEvent) => {
+            const { nativeEvent } = syntheticEvent;
+            console.error('[RadarMap] HTTP error:', nativeEvent.statusCode, nativeEvent.url);
+          }}
+          renderError={(errorName) => (
+            <View style={styles.errorContainer}>
+              <Ionicons name="alert-circle" size={48} color="#ef4444" />
+              <Text style={styles.errorText}>Map Error: {errorName}</Text>
+              <TouchableOpacity onPress={loadData} style={styles.retryButton}>
+                <Text style={styles.retryButtonText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          )}
         />
       )}
 
