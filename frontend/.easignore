@@ -1,27 +1,52 @@
-# Exclude files from EAS Build upload
+# Node modules (EAS will reinstall)
 node_modules/
-.git/
-.gitignore
-.vscode/
-.idea/
-dist/
-build/
-.expo/
-web-build/
 
-# Ignore native folders since we're using Prebuild
-/android
-/ios
+# Caches
+.expo/
+.expo-shared/
+*.cache
+
+# Logs
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# OS files
 .DS_Store
-*.pem
-.env*.local
+Thumbs.db
+*~
+.*.swp
+
+# IDE
+.vscode/
+.idea/
+
+# Build artifacts
+android/app/build/
+android/.gradle/
+ios/build/
+
+# Git
+.git/
+.gitignore
+
+# Documentation
 README.md
 *.md
+
+# Tests
 tests/
 __tests__/
-.test.js
-.spec.js
+*.test.js
+*.spec.js
 coverage/
+
+# Environment
+.env*.local
+*.pem
+
+# Web
+web-build/
+dist/
+build/

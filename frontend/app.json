@@ -79,7 +79,8 @@
           "androidMode": "default",
           "androidCollapsedTitle": "Routecast Weather Alerts"
         }
-      ]
+      ],
+      "@react-native-community/datetimepicker"
     ],
     "experiments": {
       "typedRoutes": true
