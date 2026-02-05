@@ -924,6 +924,14 @@ export default function HomeScreen() {
                   </TouchableOpacity>
                 </View>
                 <TouchableOpacity 
+                  style={styles.radarHomeBtn}
+                  onPress={() => router.push('/radar-map')}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="radio-outline" size={18} color="#22c55e" />
+                  <Text style={styles.radarHomeBtnText}>Radar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity 
                   style={styles.favoriteButton}
                   onPress={addToFavorites}
                 >
@@ -1665,6 +1673,21 @@ const styles = StyleSheet.create({
   },
   favoriteButton: {
     padding: 8,
+  },
+  radarHomeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#22c55e15',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 12,
+    gap: 4,
+    marginRight: 8,
+  },
+  radarHomeBtnText: {
+    color: '#22c55e',
+    fontSize: 14,
+    fontWeight: '600',
   },
   descriptionBox: {
     backgroundColor: 'rgba(234, 179, 8, 0.1)',

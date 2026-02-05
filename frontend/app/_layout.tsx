@@ -54,9 +54,36 @@ export default function RootLayout() {
       >
         <Stack.Screen name="index" />
         <Stack.Screen name="route" />
-        <Stack.Screen name="road-passability" />
+        
+        {/* Hub Screens */}
+        <Stack.Screen name="boondockers" />
+        <Stack.Screen name="tractor-trailer" />
+        <Stack.Screen name="user-guide" />
+        <Stack.Screen name="radar-map" />
+        
+        {/* Boondockers Sub-Features */}
+        <Stack.Screen name="camp-prep-checklist" />
+        <Stack.Screen name="free-camping" />
+        <Stack.Screen name="dump-station" />
+        <Stack.Screen name="last-chance" />
+        <Stack.Screen name="rv-dealership" />
+        <Stack.Screen name="solar-forecast" />
+        <Stack.Screen name="propane-usage" />
+        <Stack.Screen name="water-budget" />
+        <Stack.Screen name="wind-shelter" />
         <Stack.Screen name="connectivity" />
         <Stack.Screen name="campsite-index" />
+        
+        {/* Tractor Trailer Sub-Features */}
+        <Stack.Screen name="truck-stops" />
+        <Stack.Screen name="weigh-stations" />
+        <Stack.Screen name="truck-parking" />
+        <Stack.Screen name="low-clearance" />
+        <Stack.Screen name="truck-services" />
+        <Stack.Screen name="truck-restrictions" />
+        
+        {/* Other Screens */}
+        <Stack.Screen name="road-passability" />
         <Stack.Screen name="claim-log" />
       </Stack>
     </>
