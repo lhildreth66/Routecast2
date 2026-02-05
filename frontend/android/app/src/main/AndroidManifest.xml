@@ -39,7 +39,7 @@
         <category android:name="android.intent.category.DEFAULT"/>
         <category android:name="android.intent.category.BROWSABLE"/>
         <data android:scheme="routecast2"/>
-        <data android:scheme="com.promedtrans01.routecast2"/>
+        <data android:scheme="com.routecast.app"/>
       </intent-filter>
     </activity>
   </application>

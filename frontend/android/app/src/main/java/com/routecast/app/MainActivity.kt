@@ -1,4 +1,4 @@
-package com.promedtrans01.routecast2
+package com.routecast.app
 import expo.modules.splashscreen.SplashScreenManager
 
 import android.os.Build

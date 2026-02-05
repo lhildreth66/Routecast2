@@ -1,4 +1,4 @@
-package com.promedtrans01.routecast2
+package com.routecast.app
 
 import android.app.Application
 import android.content.res.Configuration
