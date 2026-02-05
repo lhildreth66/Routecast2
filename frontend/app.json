@@ -1,11 +1,11 @@
 {
   "expo": {
     "name": "Routecast",
-    "slug": "routecast",
+    "slug": "routecast2",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "routecast",
+    "scheme": "routecast2",
     "userInterfaceStyle": "dark",
     "newArchEnabled": false,
     "description": "RouteCast: Weather-smart route planning for RVers, truckers, and travelers. Real-time forecasts, road conditions, and hazard alerts along your route.",
@@ -89,7 +89,7 @@
         "origin": false
       },
       "eas": {
-        "projectId": "c67f1743-e076-46fa-8363-440fb0b881d1"
+        "projectId": "7b6c21be-1c86-4aee-b78e-0be00853818f"
       }
     },
     "owner": "promedtrans01"
