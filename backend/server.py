@@ -4538,6 +4538,7 @@ class TruckStop(BaseModel):
 class TruckStopResponse(BaseModel):
     stops: List[TruckStop]
 
+@api_router.post("/truck-stops/search", response_model=TruckStopResponse)
 @api_router.post("/pro/truck-stops/search", response_model=TruckStopResponse)
 async def search_truck_stops(request: TruckStopRequest):
     """Find truck stops with fuel and amenities using OpenStreetMap."""
@@ -4664,6 +4665,7 @@ class ParkingSpot(BaseModel):
 class TruckParkingResponse(BaseModel):
     spots: List[ParkingSpot]
 
+@api_router.post("/truck-parking/search", response_model=TruckParkingResponse)
 @api_router.post("/pro/truck-parking/search", response_model=TruckParkingResponse)
 async def search_truck_parking(request: TruckParkingRequest):
     """Find truck parking including rest areas and safe parking zones."""
@@ -4797,6 +4799,7 @@ class TruckService(BaseModel):
 class TruckServiceResponse(BaseModel):
     services: List[TruckService]
 
+@api_router.post("/truck-services/search", response_model=TruckServiceResponse)
 @api_router.post("/pro/truck-services/search", response_model=TruckServiceResponse)
 async def search_truck_services(request: TruckServiceRequest):
     """Find truck repair shops, tire services, washes, and scales."""
