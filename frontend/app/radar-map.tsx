@@ -13,7 +13,7 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
 import * as Location from 'expo-location';
-import { API_BASE } from './apiConfig';
+import { API_BASE } from '../lib/apiConfig';
 
 interface AlertFeature {
   id: string;

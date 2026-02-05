@@ -1,6 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -16,10 +15,19 @@ export default function BoondockersScreen() {
     { id: 'power', icon: 'flash', title: 'Solar Forecast', route: '/solar-forecast' },
     { id: 'propane', icon: 'flame', title: 'Propane Usage', route: '/propane-usage' },
     { id: 'water', icon: 'water', title: 'Water Planning', route: '/water-budget' },
-    { id: 'wind', icon: 'cloudy', title: 'Wind Shelter', route: '/wind-shelter' },
+    { id: 'wind', icon: 'leaf', title: 'Wind Shelter', route: '/wind-shelter' },
     { id: 'connectivity', icon: 'wifi', title: 'Connectivity', route: '/connectivity' },
-    { id: 'campsite', icon: 'star', title: 'Campsite Index', route: '/campsite-index' },
+    { id: 'index', icon: 'analytics', title: 'Campsite Index', route: '/campsite-index' },
   ];
+
+  const handleFeatureTap = (feature: typeof features[0]) => {
+    if (feature.route) {
+      router.push(feature.route);
+    } else {
+      // For features without dedicated screens, you could show a modal or toast
+      console.log(`Feature ${feature.title} not yet implemented`);
+    }
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -46,14 +54,14 @@ export default function BoondockersScreen() {
             <TouchableOpacity
               key={feature.id}
               style={styles.featureCard}
-              onPress={() => router.push(feature.route as any)}
+              onPress={() => handleFeatureTap(feature)}
               activeOpacity={0.7}
             >
               <View style={styles.featureIconContainer}>
                 <Ionicons name={feature.icon as any} size={28} color="#8b4513" />
               </View>
               <Text style={styles.featureTitle}>{feature.title}</Text>
-              <Ionicons name="chevron-forward" size={20} color="#71717a" />
+              <Ionicons name="chevron-forward" size={20} color="#a1a1aa" />
             </TouchableOpacity>
           ))}
         </View>
@@ -111,6 +119,12 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginTop: 16,
     marginBottom: 8,
+  },
+  introDesc: {
+    color: '#a1a1aa',
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
   },
   introText: {
     color: '#a1a1aa',

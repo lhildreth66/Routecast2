@@ -1,21 +1,53 @@
 {
   "expo": {
-    "name": "Routecast",
-    "slug": "routecast2",
-    "version": "1.0.109",
-    "description": "Plan your road trip with real-time weather forecasts along your route. Get alerts for bad weather and AI-powered driving recommendations.",
+    "name": "RouteCast",
+    "slug": "weather-redo",
+    "version": "1.0.0",
+    "orientation": "portrait",
     "icon": "./assets/images/icon.png",
+    "scheme": "weather-redo",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": false,
+    "description": "RouteCast: Weather-smart route planning for RVers, truckers, and travelers. Real-time forecasts, road conditions, and hazard alerts along your route.",
+    "splash": {
+      "image": "./assets/images/splash-image.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0a0a0a"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.promedtrans01.weatherredo",
+      "buildNumber": "1",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Routecast needs your location to show weather along your route.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Routecast needs your location to provide weather updates during your trip.",
+        "UIBackgroundModes": ["location", "fetch", "remote-notification"]
+      }
+    },
     "android": {
-      "package": "com.routecast.app",
+      "package": "com.promedtrans01.weatherredo",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
-        "backgroundColor": "#0B1020"
+        "backgroundColor": "#0a0a0a"
       },
+      "splash": {
+        "image": "./assets/images/splash-image.png",
+        "resizeMode": "contain",
+        "backgroundColor": "#0a0a0a"
+      },
+      "edgeToEdgeEnabled": true,
       "permissions": [
-        "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION"
-      ],
-      "versionCode": 113
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "RECEIVE_BOOT_COMPLETED",
+        "VIBRATE",
+        "WAKE_LOCK",
+        "SCHEDULE_EXACT_ALARM",
+        "POST_NOTIFICATIONS",
+        "INTERNET",
+        "ACCESS_NETWORK_STATE"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -24,15 +56,6 @@
     },
     "plugins": [
       "expo-router",
-      [
-        "expo-splash-screen",
-        {
-          "image": "./assets/images/splash-image.png",
-          "imageWidth": 200,
-          "resizeMode": "contain",
-          "backgroundColor": "#0a0a0a"
-        }
-      ],
       [
         "expo-location",
         {
@@ -55,15 +78,12 @@
     "experiments": {
       "typedRoutes": true
     },
-    "ios": {
-      "bundleIdentifier": "com.routecast.app"
-    },
     "extra": {
-      "API_BASE": "https://routecast-backend.onrender.com",
       "router": {},
       "eas": {
-        "projectId": "7b6c21be-1c86-4aee-b78e-0be00853818f"
+        "projectId": "0bd77d06-d5af-40da-83f9-19f7aa1599a6"
       }
-    }
+    },
+    "owner": "promedtrans01"
   }
 }

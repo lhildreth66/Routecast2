@@ -13,7 +13,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
 import * as Location from 'expo-location';
-import { API_BASE } from './apiConfig';
+import { API_BASE } from '../lib/apiConfig';
 
 interface CampsiteIndexResult {
   score: number;
@@ -107,13 +107,13 @@ export default function CampsiteIndexScreen() {
       let response;
       if (useAutoMode) {
         // Auto mode: fetch real data from backend
-        response = await axios.post(`${API_BASE}/api/pro/campsite-index/auto`, {
+        response = await axios.post(`${API_BASE}/api/campsite-index/auto`, {
           latitude: parseFloat(latitude),
           longitude: parseFloat(longitude),
         });
       } else {
         // Manual mode: use user inputs
-        response = await axios.post(`${API_BASE}/api/pro/campsite-index`, {
+        response = await axios.post(`${API_BASE}/api/campsite-index`, {
           wind_gust_mph: parseFloat(windGustMph),
           shade_score: parseFloat(shadeScore),
           slope_pct: parseFloat(slopePct),
@@ -176,42 +176,26 @@ export default function CampsiteIndexScreen() {
               Automatic mode fetches real-time data: current wind, terrain slope, tree shade, road access, cell signal, and passability conditions.
             </Text>
             
-            <View style={styles.locationRow}>
-              <View style={styles.coordInput}>
-                <Text style={styles.label}>Latitude</Text>
-                <TextInput
-                  style={styles.input}
-                  keyboardType="numeric"
-                  value={latitude}
-                  onChangeText={setLatitude}
-                  placeholder="40.7128"
-                  placeholderTextColor="#999"
-                  editable={!loading}
-                />
+            {/* Location Display with Auto-detect */}
+            <View style={styles.locationBox}>
+              <View style={styles.locationBoxHeader}>
+                <Ionicons name="location" size={18} color="#eab308" />
+                <Text style={styles.locationBoxLabel}>Your Location</Text>
+                <TouchableOpacity
+                  style={styles.refreshLocationBtn}
+                  onPress={refreshLocation}
+                  disabled={locationLoading || loading}
+                >
+                  {locationLoading ? (
+                    <ActivityIndicator size="small" color="#eab308" />
+                  ) : (
+                    <Ionicons name="refresh" size={18} color="#eab308" />
+                  )}
+                </TouchableOpacity>
               </View>
-              <View style={styles.coordInput}>
-                <Text style={styles.label}>Longitude</Text>
-                <TextInput
-                  style={styles.input}
-                  keyboardType="numeric"
-                  value={longitude}
-                  onChangeText={setLongitude}
-                  placeholder="-74.0060"
-                  placeholderTextColor="#999"
-                  editable={!loading}
-                />
-              </View>
-              <TouchableOpacity
-                style={styles.refreshLocationButton}
-                onPress={refreshLocation}
-                disabled={locationLoading || loading}
-              >
-                {locationLoading ? (
-                  <ActivityIndicator size="small" color="#eab308" />
-                ) : (
-                  <Ionicons name="refresh" size={20} color="#eab308" />
-                )}
-              </TouchableOpacity>
+              <Text style={styles.locationBoxCoords}>
+                {locationLoading ? 'Detecting...' : `${latitude}, ${longitude}`}
+              </Text>
             </View>
           </>
         ) : (
@@ -394,6 +378,40 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 2,
+  },
+  locationBox: {
+    backgroundColor: '#1f1f23',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#eab30820',
+  },
+  locationBoxHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    gap: 8,
+  },
+  locationBoxLabel: {
+    color: '#9ca3af',
+    fontSize: 13,
+    fontWeight: '500',
+    flex: 1,
+  },
+  refreshLocationBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#eab30815',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  locationBoxCoords: {
+    color: '#eab308',
+    fontSize: 15,
+    fontWeight: '600',
+    fontFamily: 'monospace',
   },
   sectionTitle: {
     fontSize: 16,

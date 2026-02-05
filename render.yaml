@@ -1,0 +1,42 @@
+# Render Blueprint - Deploy both services with one click
+# Usage: Connect this repo to Render and it will auto-detect this file
+
+services:
+  # Backend API Service
+  - type: web
+    name: routecast-backend
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: MONGO_URL
+        sync: false  # Set manually in Render dashboard
+      - key: DB_NAME
+        value: routecast_db
+      - key: MAPBOX_ACCESS_TOKEN
+        sync: false  # Set manually in Render dashboard
+      - key: GOOGLE_API_KEY
+        sync: false  # Set manually in Render dashboard
+      - key: PYTHON_VERSION
+        value: 3.11.0
+    healthCheckPath: /api/health
+    autoDeploy: true
+
+  # Frontend Static Site (Web export)
+  # Note: For mobile app, use EAS Build instead
+  - type: web
+    name: routecast-frontend
+    runtime: node
+    rootDir: frontend
+    buildCommand: yarn install && npx expo export --platform web
+    startCommand: npx serve dist -s -l $PORT
+    envVars:
+      - key: EXPO_PUBLIC_BACKEND_URL
+        fromService:
+          type: web
+          name: routecast-backend
+          property: host
+      - key: NODE_VERSION
+        value: 18.19.0
+    autoDeploy: true

@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import { API_BASE } from './apiConfig';
+import { API_BASE } from '../lib/apiConfig';
 
 interface TruckRestriction {
   name: string;
@@ -79,7 +79,7 @@ export default function TruckRestrictionsScreen() {
     setRestrictions([]);
     setError('');
     try {
-      const resp = await axios.post(`${API_BASE}/api/pro/truck-restrictions/search`, {
+      const resp = await axios.post(`${API_BASE}/api/truck-restrictions/search`, {
         latitude: parseFloat(latitude),
         longitude: parseFloat(longitude),
         radius_miles: parseInt(searchRadius, 10),
@@ -172,41 +172,27 @@ export default function TruckRestrictionsScreen() {
           <View style={styles.searchCard}>
             <Text style={styles.searchTitle}>Search Location</Text>
             
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Latitude</Text>
-              <TextInput
-                style={styles.input}
-                value={latitude}
-                onChangeText={setLatitude}
-                placeholder="39.7392"
-                placeholderTextColor="#6b7280"
-                keyboardType="decimal-pad"
-              />
+            {/* Location Display with Auto-detect */}
+            <View style={styles.locationBox}>
+              <View style={styles.locationBoxHeader}>
+                <Ionicons name="location" size={18} color="#ec4899" />
+                <Text style={styles.locationBoxLabel}>Your Location</Text>
+                <TouchableOpacity
+                  style={styles.refreshLocationBtn}
+                  onPress={refreshLocation}
+                  disabled={locationLoading}
+                >
+                  {locationLoading ? (
+                    <ActivityIndicator size="small" color="#ec4899" />
+                  ) : (
+                    <Ionicons name="refresh" size={18} color="#ec4899" />
+                  )}
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.locationBoxCoords}>
+                {locationLoading ? 'Detecting...' : `${latitude}, ${longitude}`}
+              </Text>
             </View>
-
-            <View style={styles.inputGroup}>
-              <Text style={styles.label}>Longitude</Text>
-              <TextInput
-                style={styles.input}
-                value={longitude}
-                onChangeText={setLongitude}
-                placeholder="-104.9903"
-                placeholderTextColor="#6b7280"
-                keyboardType="decimal-pad"
-              />
-            </View>
-
-            <TouchableOpacity
-              style={styles.refreshButton}
-              onPress={refreshLocation}
-              disabled={locationLoading}
-            >
-              {locationLoading ? (
-                <ActivityIndicator size="small" color="#eab308" />
-              ) : (
-                <Ionicons name="refresh" size={20} color="#eab308" />
-              )}
-            </TouchableOpacity>
           </View>
 
           <View style={styles.inputWrapper}>
@@ -368,6 +354,40 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#fff',
     marginBottom: 16,
+  },
+  locationBox: {
+    backgroundColor: '#1f1f23',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#ec489920',
+  },
+  locationBoxHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    gap: 8,
+  },
+  locationBoxLabel: {
+    color: '#9ca3af',
+    fontSize: 13,
+    fontWeight: '500',
+    flex: 1,
+  },
+  refreshLocationBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#ec489915',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  locationBoxCoords: {
+    color: '#ec4899',
+    fontSize: 15,
+    fontWeight: '600',
+    fontFamily: 'monospace',
   },
   inputGroup: {
     marginBottom: 16,

@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import { API_BASE } from './apiConfig';
+import { API_BASE } from '../lib/apiConfig';
 
 type ConnectivityTab = 'cell' | 'starlink';
 
@@ -90,7 +90,7 @@ export default function ConnectivityScreen() {
       };
 
       try {
-        const resp = await axios.post(`${API_BASE}/api/pro/connectivity/cell-probability`, payload);
+        const resp = await axios.post(`${API_BASE}/api/connectivity/cell-probability`, payload);
         const d = resp.data;
         setCellResultData(d);
         setCellResult(`${d.bar_estimate} probability: ${(d.probability * 100).toFixed(0)}%. ${d.explanation}`);
@@ -116,7 +116,7 @@ export default function ConnectivityScreen() {
       };
 
       try {
-        const resp = await axios.post(`${API_BASE}/api/pro/connectivity/starlink-risk`, payload);
+        const resp = await axios.post(`${API_BASE}/api/connectivity/starlink-risk`, payload);
         const d = resp.data;
         setStarlinkResultData(d);
         const reasons = Array.isArray(d.reasons) ? d.reasons.join('; ') : '';
@@ -155,16 +155,26 @@ export default function ConnectivityScreen() {
             <Text style={styles.title}>Connectivity</Text>
             <Text style={styles.subtitle}>Predict cellular and Starlink signal quality</Text>
 
-            <View style={styles.locationInfo}>
-              <Ionicons name="location" size={16} color="#06b6d4" />
-              <Text style={styles.locationText}>
-                {locationLoading ? 'Getting location...' : `Location: ${latitude}, ${longitude}`}
-              </Text>
-              {!locationLoading && (
-                <TouchableOpacity onPress={refreshLocation} style={styles.refreshBtn}>
-                  <Ionicons name="refresh" size={18} color="#06b6d4" />
+            {/* Location Display with Auto-detect */}
+            <View style={styles.locationBox}>
+              <View style={styles.locationBoxHeader}>
+                <Ionicons name="location" size={18} color="#06b6d4" />
+                <Text style={styles.locationBoxLabel}>Your Location</Text>
+                <TouchableOpacity 
+                  onPress={refreshLocation} 
+                  style={styles.refreshLocationBtn}
+                  disabled={locationLoading}
+                >
+                  {locationLoading ? (
+                    <ActivityIndicator size="small" color="#06b6d4" />
+                  ) : (
+                    <Ionicons name="refresh" size={18} color="#06b6d4" />
+                  )}
                 </TouchableOpacity>
-              )}
+              </View>
+              <Text style={styles.locationBoxCoords}>
+                {locationLoading ? 'Detecting...' : `${latitude}, ${longitude}`}
+              </Text>
             </View>
 
             {/* Tab buttons */}
@@ -345,4 +355,39 @@ const styles = StyleSheet.create({
   reasonsBox: { backgroundColor: '#1f2937', borderRadius: 8, padding: 12 },
   reasonsTitle: { color: '#fbbf24', fontSize: 13, fontWeight: '700', marginBottom: 6 },
   reasonText: { color: '#d4d4d8', fontSize: 12, marginBottom: 2 },
+  // Location box styles
+  locationBox: {
+    backgroundColor: '#1f1f23',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#06b6d420',
+  },
+  locationBoxHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    gap: 8,
+  },
+  locationBoxLabel: {
+    color: '#9ca3af',
+    fontSize: 13,
+    fontWeight: '500',
+    flex: 1,
+  },
+  refreshLocationBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#06b6d415',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  locationBoxCoords: {
+    color: '#06b6d4',
+    fontSize: 15,
+    fontWeight: '600',
+    fontFamily: 'monospace',
+  },
 });

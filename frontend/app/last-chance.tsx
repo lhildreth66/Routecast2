@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import { API_BASE } from './apiConfig';
+import { API_BASE } from '../lib/apiConfig';
 
 interface SupplyPoint {
   name: string;
@@ -75,7 +75,7 @@ export default function LastChanceScreen() {
     setSupplies([]);
     setError('');
     try {
-      const resp = await axios.post(`${API_BASE}/api/pro/last-chance/search`, {
+      const resp = await axios.post(`${API_BASE}/api/last-chance/search`, {
         latitude: parseFloat(latitude),
         longitude: parseFloat(longitude),
         radius_miles: parseInt(searchRadius, 10),
@@ -143,37 +143,27 @@ export default function LastChanceScreen() {
         <View style={styles.card}>
           <Text style={styles.title}>🏪 Last Chance Supplies</Text>
           <Text style={styles.subtitle}>Find grocery, propane, and hardware stores before going remote</Text>
-          <Text style={styles.infoNote}>💡 TIP: If a result shows "Name" or is missing a title, don't worry—tap Navigate and Google Maps will display the business name in directions. We use free map data to keep costs (and pricing) low.</Text>
 
-          {locationLoading && (
-            <View style={styles.loadingLocationBox}>
-              <ActivityIndicator size="small" color="#f59e0b" />
-              <Text style={styles.loadingLocationText}>Determining your current location...</Text>
+          {/* Location Display with Auto-detect */}
+          <View style={styles.locationBox}>
+            <View style={styles.locationHeader}>
+              <Ionicons name="location" size={18} color="#f59e0b" />
+              <Text style={styles.locationLabel}>Your Location</Text>
+              <TouchableOpacity 
+                onPress={useCurrentLocation} 
+                style={styles.refreshLocationBtn}
+                disabled={locationLoading}
+              >
+                {locationLoading ? (
+                  <ActivityIndicator size="small" color="#f59e0b" />
+                ) : (
+                  <Ionicons name="refresh" size={18} color="#f59e0b" />
+                )}
+              </TouchableOpacity>
             </View>
-          )}
-
-          <View style={styles.inputRow}>
-            <Text style={styles.label}>Latitude</Text>
-            <TextInput
-              value={latitude}
-              onChangeText={setLatitude}
-              keyboardType="numeric"
-              style={styles.input}
-              placeholder="e.g., 34.05"
-              placeholderTextColor="#9ca3af"
-            />
-          </View>
-
-          <View style={styles.inputRow}>
-            <Text style={styles.label}>Longitude</Text>
-            <TextInput
-              value={longitude}
-              onChangeText={setLongitude}
-              keyboardType="numeric"
-              style={styles.input}
-              placeholder="e.g., -111.03"
-              placeholderTextColor="#9ca3af"
-            />
+            <Text style={styles.locationCoords}>
+              {locationLoading ? 'Detecting...' : `${latitude}, ${longitude}`}
+            </Text>
           </View>
 
           <View style={styles.inputRow}>
@@ -364,7 +354,7 @@ export default function LastChanceScreen() {
                         </View>
                       )}
 
-                      <View style={styles.infoNote}>
+                      <View style={styles.infoNoteContainer}>
                         <Ionicons name="information-circle-outline" size={14} color="#9ca3af" />
                         <Text style={styles.infoNoteText}>The business name and details will be shown in Google Maps when you navigate to this location.</Text>
                       </View>
@@ -434,6 +424,40 @@ const styles = StyleSheet.create({
     color: '#9ca3af',
     marginBottom: 16,
   },
+  locationBox: {
+    backgroundColor: '#1f1f23',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#f59e0b20',
+  },
+  locationHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    gap: 8,
+  },
+  locationLabel: {
+    color: '#9ca3af',
+    fontSize: 13,
+    fontWeight: '500',
+    flex: 1,
+  },
+  refreshLocationBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#f59e0b15',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  locationCoords: {
+    color: '#f59e0b',
+    fontSize: 15,
+    fontWeight: '600',
+    fontFamily: 'monospace',
+  },
   infoNote: {
     fontSize: 12,
     color: '#fbbf24',
@@ -484,6 +508,32 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#9ca3af',
     fontStyle: 'italic',
+  },
+  locationBox: {
+    backgroundColor: '#3f3f46',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+  },
+  locationHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    gap: 8,
+  },
+  locationLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#e5e7eb',
+    flex: 1,
+  },
+  refreshLocationBtn: {
+    padding: 4,
+  },
+  locationCoords: {
+    fontSize: 14,
+    color: '#9ca3af',
+    fontFamily: 'monospace',
   },
   inputRow: {
     marginBottom: 16,
@@ -670,7 +720,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#e5e7eb',
   },
-  infoNote: {
+  infoNoteContainer: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     backgroundColor: '#3f3f46',

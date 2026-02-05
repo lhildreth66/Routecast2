@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import { API_BASE } from './apiConfig';
+import { API_BASE } from '../lib/apiConfig';
 
 interface DumpStation {
   name: string;
@@ -94,7 +94,7 @@ export default function DumpStationScreen() {
     setStations([]);
     setError('');
     try {
-      const resp = await axios.post(`${API_BASE}/api/pro/dump-stations/search`, {
+      const resp = await axios.post(`${API_BASE}/api/dump-stations/search`, {
         latitude: parseFloat(latitude),
         longitude: parseFloat(longitude),
         radius_miles: parseInt(searchRadius, 10),
@@ -143,37 +143,27 @@ export default function DumpStationScreen() {
         <View style={styles.card}>
           <Text style={styles.title}>🚿 Dump Station Finder</Text>
           <Text style={styles.subtitle}>Locate RV dump stations and fresh water fill points</Text>
-          <Text style={styles.infoNote}>💡 TIP: If a result shows "Name" or is missing a title, don't worry—tap Navigate and Google Maps will display the business name in directions. We use free map data to keep costs (and pricing) low.</Text>
 
-          {locationLoading && (
-            <View style={styles.loadingLocationBox}>
-              <ActivityIndicator size="small" color="#8b5cf6" />
-              <Text style={styles.loadingLocationText}>Determining your current location...</Text>
+          {/* Location Display with Auto-detect */}
+          <View style={styles.locationBox}>
+            <View style={styles.locationHeader}>
+              <Ionicons name="location" size={18} color="#8b5cf6" />
+              <Text style={styles.locationLabel}>Your Location</Text>
+              <TouchableOpacity 
+                onPress={useCurrentLocation} 
+                style={styles.refreshLocationBtn}
+                disabled={locationLoading}
+              >
+                {locationLoading ? (
+                  <ActivityIndicator size="small" color="#8b5cf6" />
+                ) : (
+                  <Ionicons name="refresh" size={18} color="#8b5cf6" />
+                )}
+              </TouchableOpacity>
             </View>
-          )}
-
-          <View style={styles.inputRow}>
-            <Text style={styles.label}>Latitude</Text>
-            <TextInput
-              value={latitude}
-              onChangeText={setLatitude}
-              keyboardType="numeric"
-              style={styles.input}
-              placeholder="e.g., 34.05"
-              placeholderTextColor="#9ca3af"
-            />
-          </View>
-
-          <View style={styles.inputRow}>
-            <Text style={styles.label}>Longitude</Text>
-            <TextInput
-              value={longitude}
-              onChangeText={setLongitude}
-              keyboardType="numeric"
-              style={styles.input}
-              placeholder="e.g., -111.03"
-              placeholderTextColor="#9ca3af"
-            />
+            <Text style={styles.locationCoords}>
+              {locationLoading ? 'Detecting...' : `${latitude}, ${longitude}`}
+            </Text>
           </View>
 
           <View style={styles.inputRow}>
@@ -396,6 +386,40 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#9ca3af',
     marginBottom: 16,
+  },
+  locationBox: {
+    backgroundColor: '#1f1f23',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#8b5cf620',
+  },
+  locationHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    gap: 8,
+  },
+  locationLabel: {
+    color: '#9ca3af',
+    fontSize: 13,
+    fontWeight: '500',
+    flex: 1,
+  },
+  refreshLocationBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#8b5cf615',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  locationCoords: {
+    color: '#8b5cf6',
+    fontSize: 15,
+    fontWeight: '600',
+    fontFamily: 'monospace',
   },
   infoNote: {
     fontSize: 12,

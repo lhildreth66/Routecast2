@@ -15,7 +15,7 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
-import { useRoadPassability } from '../hooks/useRoadPassability';
+import { useRoadPassability } from '../../lib/hooks/useRoadPassability';
 
 const RoadPassabilityScreen: React.FC = () => {
   const { assess, loading, error, result, clearResult } =

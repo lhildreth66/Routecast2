@@ -6,7 +6,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { API_BASE } from './apiConfig';
+import { API_BASE } from '../lib/apiConfig';
 
 interface ParkingSpot {
   name: string;
@@ -81,7 +81,7 @@ export default function TruckParkingScreen() {
     setSpots([]);
     setError('');
     try {
-      const resp = await axios.post(`${API_BASE}/api/pro/truck-parking/search`, {
+      const resp = await axios.post(`${API_BASE}/api/truck-parking/search`, {
         latitude: parseFloat(latitude),
         longitude: parseFloat(longitude),
         radius_miles: parseInt(searchRadius, 10),
@@ -152,42 +152,26 @@ export default function TruckParkingScreen() {
         </View>
 
         <View style={styles.formContainer}>
-          <View style={styles.locationRow}>
-            <View style={styles.inputRow}>
-              <Text style={styles.label}>Latitude</Text>
-              <TextInput
-                value={latitude}
-                onChangeText={setLatitude}
-                keyboardType="numeric"
-                style={styles.input}
-                placeholder="e.g., 34.05"
-                placeholderTextColor="#9ca3af"
-              />
+          {/* Location Display with Auto-detect */}
+          <View style={styles.locationBox}>
+            <View style={styles.locationBoxHeader}>
+              <Ionicons name="location" size={18} color="#22c55e" />
+              <Text style={styles.locationBoxLabel}>Your Location</Text>
+              <TouchableOpacity
+                style={styles.refreshLocationBtn}
+                onPress={refreshLocation}
+                disabled={locationLoading}
+              >
+                {locationLoading ? (
+                  <ActivityIndicator size="small" color="#22c55e" />
+                ) : (
+                  <Ionicons name="refresh" size={18} color="#22c55e" />
+                )}
+              </TouchableOpacity>
             </View>
-
-            <View style={styles.inputRow}>
-              <Text style={styles.label}>Longitude</Text>
-              <TextInput
-                value={longitude}
-                onChangeText={setLongitude}
-                keyboardType="numeric"
-                style={styles.input}
-                placeholder="e.g., -111.03"
-                placeholderTextColor="#9ca3af"
-              />
-            </View>
-
-            <TouchableOpacity
-              style={styles.refreshButton}
-              onPress={refreshLocation}
-              disabled={locationLoading}
-            >
-              {locationLoading ? (
-                <ActivityIndicator size="small" color="#eab308" />
-              ) : (
-                <Ionicons name="refresh" size={20} color="#eab308" />
-              )}
-            </TouchableOpacity>
+            <Text style={styles.locationBoxCoords}>
+              {locationLoading ? 'Detecting...' : `${latitude}, ${longitude}`}
+            </Text>
           </View>
 
           <View style={styles.inputRow}>
@@ -359,6 +343,40 @@ const styles = StyleSheet.create({
     backgroundColor: '#1a1a1a',
     margin: 16,
     borderRadius: 12,
+  },
+  locationBox: {
+    backgroundColor: '#1f1f23',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#22c55e20',
+  },
+  locationBoxHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    gap: 8,
+  },
+  locationBoxLabel: {
+    color: '#9ca3af',
+    fontSize: 13,
+    fontWeight: '500',
+    flex: 1,
+  },
+  refreshLocationBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#22c55e15',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  locationBoxCoords: {
+    color: '#22c55e',
+    fontSize: 15,
+    fontWeight: '600',
+    fontFamily: 'monospace',
   },
   locationButton: {
     backgroundColor: '#22c55e',

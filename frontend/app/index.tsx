@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, forwardRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TextInput,
+  TextInputProps,
   TouchableOpacity,
   ScrollView,
   ActivityIndicator,
@@ -12,27 +13,52 @@ import {
   Keyboard,
   Switch,
   Modal,
-  Alert,
-  Linking,
-  Animated,
+  Dimensions,
 } from 'react-native';
-import Constants from 'expo-constants';
-import * as Calendar from 'expo-calendar';
+
+// Custom TextInput that disables browser autofill on web
+const NoAutofillInput = forwardRef<any, TextInputProps>((props, ref) => {
+  if (Platform.OS === 'web') {
+    return (
+      <TextInput
+        {...props}
+        ref={ref}
+        // @ts-ignore - web-specific attributes
+        autoComplete="off"
+        autoCorrect={false}
+        autoCapitalize="none"
+        data-form-type="other"
+        data-lpignore="true"
+        data-1p-ignore="true"
+        aria-autocomplete="none"
+        spellCheck={false}
+      />
+    );
+  }
+  return <TextInput {...props} ref={ref} />;
+});
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { router, useFocusEffect } from 'expo-router';
+import { router } from 'expo-router';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Notifications from 'expo-notifications';
+import DateTimePicker from '@react-native-community/datetimepicker';
 import { format } from 'date-fns';
-import { API_BASE } from './apiConfig';
-import CampPrepChat from './components/CampPrepChat';
+import { WebView } from 'react-native-webview';
+
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 // Vehicle types for safety scoring
 const VEHICLE_TYPES = [
   { id: 'car', label: 'Car/Sedan', icon: 'car-sport-outline' },
+  { id: 'suv', label: 'SUV', icon: 'car-outline' },
+  { id: 'truck', label: 'Pickup Truck', icon: 'car-outline' },
   { id: 'semi', label: 'Semi Truck', icon: 'bus-outline' },
   { id: 'rv', label: 'RV/Motorhome', icon: 'home-outline' },
+  { id: 'motorcycle', label: 'Motorcycle', icon: 'bicycle-outline' },
+  { id: 'trailer', label: 'Vehicle + Trailer', icon: 'train-outline' },
 ];
 
 interface StopPoint {
@@ -55,28 +81,15 @@ interface AutocompleteSuggestion {
   coordinates: number[];
 }
 
-interface CalendarTrip {
-  id: string;
-  title: string;
-  startDate: Date;
-  endDate: Date;
-  location?: string;
-  parsedDestination?: string;
-}
-
 export default function HomeScreen() {
   const [origin, setOrigin] = useState('');
   const [destination, setDestination] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [alertsEnabled, setAlertsEnabled] = useState(false);
-  const [pushToken, setPushToken] = useState<string | null>(null);
-  const [testNotificationLoading, setTestNotificationLoading] = useState(false);
-  const [testNotificationMessage, setTestNotificationMessage] = useState('');
   const [recentRoutes, setRecentRoutes] = useState<SavedRoute[]>([]);
   const [favoriteRoutes, setFavoriteRoutes] = useState<SavedRoute[]>([]);
   const [showFavorites, setShowFavorites] = useState(false);
-  const [favoriteAdded, setFavoriteAdded] = useState(false);
   const [saveMessage, setSaveMessage] = useState('');
   
   // Autocomplete state
@@ -90,48 +103,29 @@ export default function HomeScreen() {
   const [vehicleType, setVehicleType] = useState('car');
   const [truckerMode, setTruckerMode] = useState(false);
   const [showVehicleSelector, setShowVehicleSelector] = useState(false);
-  const [vehicleHeight, setVehicleHeight] = useState('13.5'); // Default semi truck height in feet
   
   // Departure time
   const [departureTime, setDepartureTime] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [useCustomTime, setUseCustomTime] = useState(false);
   
+  // AI Chat
+  const [showChat, setShowChat] = useState(false);
+  const [chatMessage, setChatMessage] = useState('');
+  const [chatHistory, setChatHistory] = useState<{role: 'user' | 'ai', text: string}[]>([]);
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatSuggestions, setChatSuggestions] = useState<string[]>(['How to drive in snow?', 'Is fog dangerous?', 'Rest stop tips']);
   const [isListening, setIsListening] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(false);
-  const [chatMessage, setChatMessage] = useState('');
-  
-  // Off-Grid Chat
-  const [showCampPrep, setShowCampPrep] = useState(false);
-  
-  // Calendar integration
-  const [calendarTrips, setCalendarTrips] = useState<CalendarTrip[]>([]);
-  const [calendarPermission, setCalendarPermission] = useState(false);
-  
-  // Animations
-  const fadeAnim = React.useRef(new Animated.Value(0)).current;
-  const scaleAnim = React.useRef(new Animated.Value(1)).current;
-  
-  // Input focus states
-  const [originFocused, setOriginFocused] = useState(false);
-  const [destFocused, setDestFocused] = useState(false);
-
-  // Navigation to dedicated Road Passability screen (Pro)
   
   // Multi-stop
   const [stops, setStops] = useState<StopPoint[]>([]);
   const [showAddStop, setShowAddStop] = useState(false);
   const [newStopLocation, setNewStopLocation] = useState('');
   const [newStopType, setNewStopType] = useState('stop');
-  const [stopSuggestions, setStopSuggestions] = useState<AutocompleteSuggestion[]>([]);
-  const [showStopSuggestions, setShowStopSuggestions] = useState(false);
-
-  // Dev-only: long-press gesture counter for Pro entitlement toggle (5 taps)
-  const [devTapCount, setDevTapCount] = useState(0);
   
-  // Debug panel
-  const [showDebugPanel, setShowDebugPanel] = useState(false);
-  const [debugInfo, setDebugInfo] = useState('');
+  // Radar map state
+  const [showRadarMap, setShowRadarMap] = useState(false);
 
   // Check for speech recognition support on web
   useEffect(() => {
@@ -145,45 +139,7 @@ export default function HomeScreen() {
     fetchRecentRoutes();
     fetchFavoriteRoutes();
     loadCachedRoute();
-    loadPushToken();
-    requestCalendarPermission();
-    
-    // Fade in animation on mount
-    Animated.timing(fadeAnim, {
-      toValue: 1,
-      duration: 500,
-      useNativeDriver: true,
-    }).start();
   }, []);
-
-  // Reset favorite indicator when route changes
-  useEffect(() => {
-    setFavoriteAdded(false);
-  }, [origin, destination, stops]);
-
-  // Reload favorites and recents when screen comes back into focus
-  useFocusEffect(
-    React.useCallback(() => {
-      fetchFavoriteRoutes();
-      fetchRecentRoutes();
-    }, [])
-  );
-
-  const loadPushToken = async () => {
-    try {
-      const token = await AsyncStorage.getItem('expoPushToken');
-      if (token) {
-        setPushToken(token);
-        console.log('Push token loaded successfully');
-      } else {
-        // Token not available yet, retry after a delay
-        console.log('Push token not yet available, will retry...');
-        setTimeout(loadPushToken, 1000);
-      }
-    } catch (err) {
-      console.log('Error loading push token:', err);
-    }
-  };
 
   const loadCachedRoute = async () => {
     try {
@@ -195,107 +151,6 @@ export default function HomeScreen() {
     } catch (e) {
       console.log('No cached route');
     }
-  };
-
-  // Debug function to test backend connectivity
-  const testBackendConnection = async () => {
-    setDebugInfo('Testing backend connection...');
-    try {
-      const startTime = Date.now();
-      console.log('[DEBUG] Testing connection to:', API_BASE);
-      
-      const response = await axios.get(`${API_BASE}/api/health`, {
-        timeout: 10000,
-      });
-      
-      const duration = Date.now() - startTime;
-      const info = `✅ Backend Connected!\n\nAPI_BASE: ${API_BASE}\nStatus: ${response.status}\nResponse Time: ${duration}ms\nBackend: ${JSON.stringify(response.data, null, 2)}`;
-      
-      console.log('[DEBUG] Success:', info);
-      setDebugInfo(info);
-      Alert.alert('Backend Test Success', info);
-    } catch (err: any) {
-      const errorInfo = `❌ Backend Connection Failed!\n\nAPI_BASE: ${API_BASE}\nError: ${err.message}\nCode: ${err.code || 'N/A'}\nURL: ${err.config?.url || 'N/A'}`;
-      
-      console.error('[DEBUG] Failed:', errorInfo);
-      setDebugInfo(errorInfo);
-      Alert.alert('Backend Test Failed', errorInfo);
-    }
-  };
-
-  // Calendar integration functions
-  const requestCalendarPermission = async () => {
-    try {
-      const { status } = await Calendar.requestCalendarPermissionsAsync();
-      if (status === 'granted') {
-        setCalendarPermission(true);
-        fetchUpcomingTrips();
-      }
-    } catch (error) {
-      console.log('Calendar permission error:', error);
-    }
-  };
-
-  const fetchUpcomingTrips = async () => {
-    try {
-      const calendars = await Calendar.getCalendarsAsync(Calendar.EntityTypes.EVENT);
-      if (calendars.length === 0) return;
-
-      const now = new Date();
-      const futureDate = new Date();
-      futureDate.setDate(futureDate.getDate() + 30); // Next 30 days
-
-      const events = await Calendar.getEventsAsync(
-        calendars.map(c => c.id),
-        now,
-        futureDate
-      );
-
-      // Parse events for travel-related keywords
-      const tripKeywords = ['trip', 'travel', 'vacation', 'visit', 'camping', 'rv', 'road trip', 'drive to', 'flying to'];
-      const trips: CalendarTrip[] = events
-        .filter(event => {
-          const titleLower = event.title.toLowerCase();
-          return tripKeywords.some(keyword => titleLower.includes(keyword));
-        })
-        .map(event => {
-          // Try to extract destination from title
-          const destination = parseDestinationFromTitle(event.title);
-          return {
-            id: event.id,
-            title: event.title,
-            startDate: new Date(event.startDate),
-            endDate: new Date(event.endDate),
-            location: event.location,
-            parsedDestination: destination,
-          };
-        })
-        .slice(0, 3); // Show only first 3
-
-      setCalendarTrips(trips);
-    } catch (error) {
-      console.log('Error fetching calendar events:', error);
-    }
-  };
-
-  const parseDestinationFromTitle = (title: string): string | undefined => {
-    // Simple parsing: look for "to [Place]" or "[Place] Trip"
-    const toMatch = title.match(/to\s+([A-Z][a-zA-Z\s,]+)/);
-    if (toMatch) return toMatch[1].trim();
-    
-    const inMatch = title.match(/in\s+([A-Z][a-zA-Z\s,]+)/);
-    if (inMatch) return inMatch[1].trim();
-    
-    return undefined;
-  };
-
-  const useCalendarTrip = (trip: CalendarTrip) => {
-    if (trip.parsedDestination) {
-      setDestination(trip.parsedDestination);
-    } else if (trip.location) {
-      setDestination(trip.location);
-    }
-    // Destination is set, user can fill origin manually
   };
 
   // Debounced autocomplete function
@@ -314,29 +169,18 @@ export default function HomeScreen() {
     setAutocompleteLoading(true);
     try {
       const response = await axios.get(`${API_BASE}/api/geocode/autocomplete`, {
-        params: { query, limit: 5 },
-        timeout: 10000,
+        params: { query, limit: 5 }
       });
       
-      const suggestions = Array.isArray(response.data) ? response.data : [];
-      
       if (type === 'origin') {
-        setOriginSuggestions(suggestions);
-        setShowOriginSuggestions(suggestions.length > 0);
+        setOriginSuggestions(response.data);
+        setShowOriginSuggestions(response.data.length > 0);
       } else {
-        setDestSuggestions(suggestions);
-        setShowDestSuggestions(suggestions.length > 0);
+        setDestSuggestions(response.data);
+        setShowDestSuggestions(response.data.length > 0);
       }
-    } catch (err: any) {
-      console.log('Autocomplete error:', err.message || err);
-      // Clear suggestions on error
-      if (type === 'origin') {
-        setOriginSuggestions([]);
-        setShowOriginSuggestions(false);
-      } else {
-        setDestSuggestions([]);
-        setShowDestSuggestions(false);
-      }
+    } catch (err) {
+      console.log('Autocomplete error:', err);
     } finally {
       setAutocompleteLoading(false);
     }
@@ -382,20 +226,31 @@ export default function HomeScreen() {
     setDestSuggestions([]);
   };
 
-  const goToRoadPassability = () => router.push('/road-passability');
-  const goToConnectivity = () => router.push('/connectivity');
-
-  // Cleanup debounce timers on unmount
-  useEffect(() => {
-    return () => {
-      if (originDebounceRef.current) {
-        clearTimeout(originDebounceRef.current);
+  // AI Chat functions
+  const sendChatMessage = async (message?: string) => {
+    const msgToSend = message || chatMessage;
+    if (!msgToSend.trim()) return;
+    
+    setChatLoading(true);
+    setChatHistory(prev => [...prev, { role: 'user', text: msgToSend }]);
+    setChatMessage('');
+    
+    try {
+      const response = await axios.post(`${API_BASE}/api/chat`, {
+        message: msgToSend,
+        route_context: origin && destination ? `${origin} to ${destination}` : null
+      });
+      
+      setChatHistory(prev => [...prev, { role: 'ai', text: response.data.response }]);
+      if (response.data.suggestions) {
+        setChatSuggestions(response.data.suggestions);
       }
-      if (destDebounceRef.current) {
-        clearTimeout(destDebounceRef.current);
-      }
-    };
-  }, []);
+    } catch (err) {
+      setChatHistory(prev => [...prev, { role: 'ai', text: "Sorry, I couldn't process that. Please try again." }]);
+    } finally {
+      setChatLoading(false);
+    }
+  };
 
   // Voice-to-text function
   const startVoiceRecognition = () => {
@@ -469,181 +324,21 @@ export default function HomeScreen() {
     }
   };
 
-  const saveToRecentRoutes = async (origin: string, destination: string, stops: StopPoint[]) => {
-    try {
-      // Load existing recent routes from local storage
-      const stored = await AsyncStorage.getItem('recentRoutes');
-      let recents: SavedRoute[] = stored ? JSON.parse(stored) : [];
-      
-      // Create new route entry
-      const newRoute: SavedRoute = {
-        id: Date.now().toString(),
-        origin: origin,
-        destination: destination,
-        stops: stops,
-        is_favorite: false,
-        created_at: new Date().toISOString()
-      };
-      
-      // Remove duplicate if it exists (same origin and destination)
-      recents = recents.filter(r => 
-        !(r.origin === origin && r.destination === destination)
-      );
-      
-      // Add to front of list
-      recents.unshift(newRoute);
-      
-      // Keep only last 10
-      recents = recents.slice(0, 10);
-      
-      // Save back to storage
-      await AsyncStorage.setItem('recentRoutes', JSON.stringify(recents));
-      
-      // Update state
-      setRecentRoutes(recents.slice(0, 3));
-    } catch (err) {
-      console.log('Error saving to recent routes:', err);
-    }
-  };
-
   const fetchRecentRoutes = async () => {
     try {
-      // Try to fetch from backend first
       const response = await axios.get(`${API_BASE}/api/routes/history`);
-      if (response.data && response.data.length > 0) {
-        setRecentRoutes(response.data.slice(0, 3));
-        console.log('Loaded recent routes from backend:', response.data.length);
-        return;
-      }
-      // Backend returned empty array, fall through to local storage
-      console.log('Backend returned empty recents, checking local storage');
+      setRecentRoutes(response.data.slice(0, 5));
     } catch (err) {
-      console.log('Error fetching from backend, using local storage:', err);
-    }
-    
-    // Fallback to local storage (either error or empty backend response)
-    try {
-      const stored = await AsyncStorage.getItem('recentRoutes');
-      if (stored) {
-        const recents = JSON.parse(stored);
-        setRecentRoutes(recents.slice(0, 3));
-        console.log('Loaded recent routes from local storage:', recents.length);
-      } else {
-        setRecentRoutes([]);
-      }
-    } catch (localErr) {
-      console.log('Error loading local recent routes:', localErr);
-      setRecentRoutes([]);
+      console.log('Error fetching history:', err);
     }
   };
 
   const fetchFavoriteRoutes = async () => {
     try {
-      // Try backend first
       const response = await axios.get(`${API_BASE}/api/routes/favorites`);
-      if (response.data && response.data.length > 0) {
-        setFavoriteRoutes(response.data);
-        console.log('Loaded favorites from backend:', response.data.length);
-        return;
-      }
-      // Backend returned empty array, fall through to local storage
-      console.log('Backend returned empty favorites, checking local storage');
-    } catch (err: any) {
-      console.log('Backend favorites not available, using local storage:', err.message);
-    }
-    
-    // Fall back to local storage (either error or empty backend response)
-    try {
-      const stored = await AsyncStorage.getItem('favoriteRoutes');
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        setFavoriteRoutes(parsed);
-        console.log('Loaded favorites from local storage:', parsed.length);
-      } else {
-        setFavoriteRoutes([]);
-      }
-    } catch (localErr) {
-      console.log('Error loading local favorites:', localErr);
-      setFavoriteRoutes([]);
-    }
-  };
-
-  const handleAlertsToggle = async (enabled: boolean) => {
-    if (enabled) {
-      // Request permissions first
-      const { status: existingStatus } = await Notifications.getPermissionsAsync();
-      let finalStatus = existingStatus;
-      
-      if (existingStatus !== 'granted') {
-        const { status } = await Notifications.requestPermissionsAsync();
-        finalStatus = status;
-      }
-      
-      if (finalStatus !== 'granted') {
-        Alert.alert(
-          'Permission Required',
-          'Please enable notifications in your device settings to receive weather alerts.',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            { text: 'Open Settings', onPress: () => Linking.openSettings() }
-          ]
-        );
-        return;
-      }
-      
-      // Get push token
-      try {
-        const token = (await Notifications.getExpoPushTokenAsync({
-          projectId: '7eddbe0f-7b2-4ae3-b25c-cf1c1e67f0e7'
-        })).data;
-        
-        await AsyncStorage.setItem('expoPushToken', token);
-        setPushToken(token);
-        
-        // Register with backend
-        await axios.post(`${API_BASE}/api/notifications/register`, {
-          push_token: token,
-          enabled: true,
-        });
-        
-        setAlertsEnabled(true);
-        setTestNotificationMessage('✅ Push alerts enabled!');
-        setTimeout(() => setTestNotificationMessage(''), 3000);
-      } catch (err) {
-        console.error('Error setting up notifications:', err);
-        setTestNotificationMessage('❌ Error enabling alerts');
-        setTimeout(() => setTestNotificationMessage(''), 3000);
-      }
-    } else {
-      setAlertsEnabled(false);
-      setTestNotificationMessage('Push alerts disabled');
-      setTimeout(() => setTestNotificationMessage(''), 2000);
-    }
-  };
-
-  const handleTestNotification = async () => {
-    if (!pushToken) {
-      setTestNotificationMessage('⚠️ No push token available');
-      setTimeout(() => setTestNotificationMessage(''), 3000);
-      return;
-    }
-
-    try {
-      setTestNotificationLoading(true);
-      setTestNotificationMessage('Sending test notification...');
-      
-      const response = await axios.post(`${API_BASE}/api/notifications/test`, {
-        push_token: pushToken,
-      });
-      
-      setTestNotificationMessage('✅ Test notification sent!');
-      setTimeout(() => setTestNotificationMessage(''), 3000);
+      setFavoriteRoutes(response.data);
     } catch (err) {
-      console.log('Error sending test notification:', err);
-      setTestNotificationMessage('❌ Failed to send test notification');
-      setTimeout(() => setTestNotificationMessage(''), 3000);
-    } finally {
-      setTestNotificationLoading(false);
+      console.log('Error fetching favorites:', err);
     }
   };
 
@@ -665,32 +360,19 @@ export default function HomeScreen() {
         vehicle_type: vehicleType,
         trucker_mode: truckerMode,
       };
-      // Include vehicle height if in trucker mode
-      if (truckerMode && vehicleHeight) {
-        requestData.vehicle_height_ft = parseFloat(vehicleHeight);
-      }
+      
       if (useCustomTime) {
         requestData.departure_time = departureTime.toISOString();
       }
 
       const response = await axios.post(`${API_BASE}/api/route/weather`, requestData);
-      const data = response.data;
-
-      // Defensive: Ensure required fields exist
-      if (!data || !data.origin || !data.destination || !data.waypoints || !Array.isArray(data.waypoints)) {
-        setError('Weather route data is incomplete. Please try again.');
-        return;
-      }
-
-      // Cache the route for offline
-      await AsyncStorage.setItem('lastRoute', JSON.stringify(data));
       
-      // Save to recent routes
-      await saveToRecentRoutes(origin.trim(), destination.trim(), stops);
+      // Cache the route for offline
+      await AsyncStorage.setItem('lastRoute', JSON.stringify(response.data));
 
       router.push({
         pathname: '/route',
-        params: { routeData: JSON.stringify(data) },
+        params: { routeData: JSON.stringify(response.data) },
       });
     } catch (err: any) {
       console.error('Error:', err);
@@ -704,147 +386,50 @@ export default function HomeScreen() {
   };
 
   const handleRecentRoute = (route: SavedRoute) => {
-    // Fill in the route details only - user must press Check Route Weather to load
     setOrigin(route.origin);
     setDestination(route.destination);
     if (route.stops) {
       setStops(route.stops);
     }
-    
-    // Clear any previous errors
-    setError('');
   };
 
   const addToFavorites = async () => {
     if (!origin.trim() || !destination.trim()) {
-      Alert.alert('Missing Information', 'Enter origin and destination first to save as favorite');
+      setError('Enter a route first to save as favorite');
       return;
     }
 
-    const favorite: SavedRoute = {
-      id: Date.now().toString(),
-      origin: origin.trim(),
-      destination: destination.trim(),
-      stops: stops,
-      is_favorite: true,
-      created_at: new Date().toISOString(),
-    };
-
     try {
-      // Try backend first
       await axios.post(`${API_BASE}/api/routes/favorites`, {
         origin: origin.trim(),
         destination: destination.trim(),
         stops: stops,
       });
-      setFavoriteAdded(true);
       fetchFavoriteRoutes();
-      Alert.alert('Saved!', 'Route added to favorites');
-    } catch (err: any) {
-      console.log('Backend not available, saving locally');
-      // Fall back to local storage
-      try {
-        const stored = await AsyncStorage.getItem('favoriteRoutes');
-        const favorites = stored ? JSON.parse(stored) : [];
-        favorites.unshift(favorite);
-        await AsyncStorage.setItem('favoriteRoutes', JSON.stringify(favorites));
-        setFavoriteRoutes(favorites);
-        setFavoriteAdded(true);
-        Alert.alert('Saved!', 'Route added to favorites (locally)');
-      } catch (localErr) {
-        console.error('Error saving favorite locally:', localErr);
-        Alert.alert('Error', 'Failed to save favorite. Please try again.');
-      }
+    } catch (err) {
+      console.error('Error saving favorite:', err);
     }
   };
 
   const removeFavorite = async (id: string) => {
     try {
-      // Try backend first
       await axios.delete(`${API_BASE}/api/routes/favorites/${id}`);
       fetchFavoriteRoutes();
     } catch (err) {
-      console.log('Backend not available, removing from local storage');
-      // Fall back to local storage
-      try {
-        const stored = await AsyncStorage.getItem('favoriteRoutes');
-        if (stored) {
-          const favorites = JSON.parse(stored);
-          const updated = favorites.filter((r: SavedRoute) => r.id !== id);
-          await AsyncStorage.setItem('favoriteRoutes', JSON.stringify(updated));
-          setFavoriteRoutes(updated);
-        }
-      } catch (localErr) {
-        console.error('Error removing favorite locally:', localErr);
-      }
+      console.error('Error removing favorite:', err);
     }
-  };
-
-  const stopDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const handleStopLocationChange = (text: string) => {
-    setNewStopLocation(text);
-    
-    // Debounce autocomplete
-    if (stopDebounceRef.current) {
-      clearTimeout(stopDebounceRef.current);
-    }
-    stopDebounceRef.current = setTimeout(() => {
-      fetchStopAutocomplete(text);
-    }, 300);
-  };
-
-  const fetchStopAutocomplete = async (query: string) => {
-    if (query.length < 2) {
-      setStopSuggestions([]);
-      setShowStopSuggestions(false);
-      return;
-    }
-
-    try {
-      const response = await axios.get(`${API_BASE}/api/geocode/autocomplete`, {
-        params: { query, limit: 5 }
-      });
-      setStopSuggestions(response.data);
-      setShowStopSuggestions(response.data.length > 0);
-    } catch (err) {
-      console.log('Stop autocomplete error:', err);
-    }
-  };
-
-  const selectStopSuggestion = (suggestion: AutocompleteSuggestion) => {
-    setNewStopLocation(suggestion.place_name);
-    setShowStopSuggestions(false);
-    setStopSuggestions([]);
   };
 
   const addStop = () => {
     if (newStopLocation.trim()) {
       setStops([...stops, { location: newStopLocation.trim(), type: newStopType }]);
       setNewStopLocation('');
-      setStopSuggestions([]);
-      setShowStopSuggestions(false);
       setShowAddStop(false);
     }
   };
 
   const removeStop = (index: number) => {
     setStops(stops.filter((_, i) => i !== index));
-  };
-
-  // Dev-only: handle 5 rapid taps on subtitle to toggle Pro entitlement
-  const handleDevTap = () => {
-    if (!__DEV__) return;
-    const newCount = devTapCount + 1;
-    setDevTapCount(newCount);
-    if (newCount >= 5) {
-      setDevTapCount(0);
-      // Dev entitlement toggle removed - all features now free
-    }
-    // Reset counter after 2 seconds of inactivity
-    setTimeout(() => {
-      setDevTapCount(0);
-    }, 2000);
   };
 
   const swapLocations = () => {
@@ -860,13 +445,215 @@ export default function HomeScreen() {
     rest: 'bed',
   };
 
+  // Generate radar map HTML using IEM WMS layer for NWS Watch/Warning/Advisory colored zones
+  const generateRadarMapHtml = (): string => {
+    // Default to center of US
+    const usLat = 39.8283;
+    const usLon = -98.5795;
+    
+    return `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+        <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+        <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+        <style>
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          html, body { width: 100%; height: 100%; background: #f0f0f0; }
+          #map { width: 100%; height: calc(100% - 120px); }
+          .legend-box {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: #003366;
+            padding: 8px 12px;
+            z-index: 1000;
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+          }
+          .legend-title {
+            color: #fff;
+            font-size: 13px;
+            font-weight: 700;
+            margin-bottom: 6px;
+            text-align: center;
+          }
+          .legend-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 4px;
+          }
+          .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+          }
+          .legend-color {
+            width: 18px;
+            height: 12px;
+            border-radius: 2px;
+            border: 1px solid rgba(255,255,255,0.3);
+          }
+          .legend-text {
+            color: #fff;
+            font-size: 10px;
+            font-weight: 500;
+          }
+          .controls-row {
+            position: absolute;
+            bottom: 125px;
+            left: 10px;
+            z-index: 1000;
+          }
+          .toggle-btn {
+            background: rgba(0,51,102,0.9);
+            border: 1px solid #4fc3f7;
+            color: #4fc3f7;
+            padding: 2px 6px;
+            border-radius: 8px;
+            font-size: 8px;
+            font-weight: 600;
+            cursor: pointer;
+          }
+          .toggle-btn.active { background: #4fc3f7; color: #003366; }
+          .time-display {
+            color: #fff;
+            font-size: 11px;
+            font-weight: 500;
+          }
+          .zoom-controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+            z-index: 1000;
+            overflow: hidden;
+          }
+          .zoom-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 44px;
+            height: 44px;
+            background: #fff;
+            border: none;
+            font-size: 24px;
+            font-weight: bold;
+            cursor: pointer;
+            color: #003366;
+          }
+          .zoom-btn:first-child { border-bottom: 1px solid #ddd; }
+          .zoom-btn:active { background: #e0e0e0; }
+          .leaflet-control-zoom { display: none !important; }
+        </style>
+      </head>
+      <body>
+        <div id="map"></div>
+        <div class="zoom-controls">
+          <button class="zoom-btn" id="zoomInBtn">+</button>
+          <button class="zoom-btn" id="zoomOutBtn">−</button>
+        </div>
+        <div class="controls-row">
+          <button class="toggle-btn active" id="radarBtn">☁️ Radar</button>
+        </div>
+        <div class="legend-box">
+          <div class="legend-title">⚠️ NWS WATCH / WARNING / ADVISORY</div>
+          <div class="legend-grid">
+            <div class="legend-item">
+              <div class="legend-color" style="background: #ff69b4;"></div>
+              <span class="legend-text">Winter Storm</span>
+            </div>
+            <div class="legend-item">
+              <div class="legend-color" style="background: #9400d3;"></div>
+              <span class="legend-text">Special Statement</span>
+            </div>
+            <div class="legend-item">
+              <div class="legend-color" style="background: #00ffff;"></div>
+              <span class="legend-text">Extreme Cold</span>
+            </div>
+            <div class="legend-item">
+              <div class="legend-color" style="background: #00ff00;"></div>
+              <span class="legend-text">Flood</span>
+            </div>
+            <div class="legend-item">
+              <div class="legend-color" style="background: #ff0000;"></div>
+              <span class="legend-text">Tornado</span>
+            </div>
+            <div class="legend-item">
+              <div class="legend-color" style="background: #ffa500;"></div>
+              <span class="legend-text">Severe T-Storm</span>
+            </div>
+          </div>
+        </div>
+        <script>
+          var map = L.map('map', { 
+            zoomControl: false,
+            attributionControl: false,
+            minZoom: 3,
+            maxZoom: 10
+          }).setView([${usLat}, ${usLon}], 4);
+          
+          // Light base map
+          L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
+            maxZoom: 19
+          }).addTo(map);
+          
+          // IEM WMS Layer - using correct layer names and version
+          var alertsLayer = L.tileLayer.wms('https://mesonet.agron.iastate.edu/cgi-bin/wms/us/wwa.cgi', {
+            layers: 'warnings_c',
+            format: 'image/png',
+            transparent: true,
+            version: '1.3.0',
+            opacity: 0.8
+          }).addTo(map);
+          
+          var radarLayer = null;
+          var showRadar = true;
+          
+          // Load radar overlay
+          fetch('https://api.rainviewer.com/public/weather-maps.json')
+            .then(r => r.json())
+            .then(data => {
+              var frames = data.radar.past;
+              if (frames.length > 0) {
+                var latest = frames[frames.length - 1];
+                radarLayer = L.tileLayer(
+                  'https://tilecache.rainviewer.com' + latest.path + '/512/{z}/{x}/{y}/2/1_1.png',
+                  { opacity: 0.5, zIndex: 50, tileSize: 512, zoomOffset: -1 }
+                );
+                if (showRadar) radarLayer.addTo(map);
+              }
+            });
+          
+          // Toggle radar layer
+          document.getElementById('radarBtn').onclick = function() {
+            showRadar = !showRadar;
+            this.classList.toggle('active', showRadar);
+            if (showRadar && radarLayer) {
+              radarLayer.addTo(map);
+            } else if (radarLayer) {
+              map.removeLayer(radarLayer);
+            }
+          };
+          
+          document.getElementById('zoomInBtn').onclick = function() { map.zoomIn(); };
+          document.getElementById('zoomOutBtn').onclick = function() { map.zoomOut(); };
+        </script>
+      </body>
+      </html>
+    `;
+  };
+
   return (
     <View style={styles.container}>
       <View style={styles.mapBackground}>
         <View style={styles.mapOverlay} />
       </View>
 
-      <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right']}>
+      <SafeAreaView style={styles.safeArea}>
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.keyboardView}
@@ -876,57 +663,20 @@ export default function HomeScreen() {
             keyboardShouldPersistTaps="handled"
             showsVerticalScrollIndicator={false}
           >
-            {/* Upcoming Trips from Calendar */}
-            {calendarTrips.length > 0 && (
-              <Animated.View style={[styles.calendarSection, { opacity: fadeAnim }]}>
-                <View style={styles.calendarHeader}>
-                  <Ionicons name="calendar" size={20} color="#3b82f6" />
-                  <Text style={styles.calendarTitle}>Upcoming Trips</Text>
-                </View>
-                {calendarTrips.map((trip) => (
-                  <TouchableOpacity
-                    key={trip.id}
-                    style={styles.calendarCard}
-                    onPress={() => useCalendarTrip(trip)}
-                    activeOpacity={0.7}
-                  >
-                    <View style={styles.calendarCardLeft}>
-                      <Text style={styles.calendarCardTitle}>{trip.title}</Text>
-                      <Text style={styles.calendarCardDate}>
-                        {format(trip.startDate, 'MMM d, yyyy')}
-                      </Text>
-                      {trip.parsedDestination && (
-                        <Text style={styles.calendarCardLocation}>
-                          📍 {trip.parsedDestination}
-                        </Text>
-                      )}
-                    </View>
-                    <View style={styles.calendarCardRight}>
-                      <Ionicons name="arrow-forward-circle" size={28} color="#3b82f6" />
-                      <Text style={styles.calendarCardAction}>Check Weather</Text>
-                    </View>
-                  </TouchableOpacity>
-                ))}
-              </Animated.View>
-            )}
-
             {/* Main Card */}
-            <Animated.View style={[styles.mainCard, { opacity: fadeAnim }]}>
+            <View style={styles.mainCard}>
               {/* Header */}
               <View style={styles.header}>
                 <View style={styles.iconContainer}>
-                  <MaterialCommunityIcons name="routes" size={22} color="#1a1a1a" />
+                  <MaterialCommunityIcons name="routes" size={28} color="#1a1a1a" />
                 </View>
                 <View style={styles.headerText}>
                   <Text style={styles.title}>Routecast</Text>
-                  <TouchableOpacity onPress={handleDevTap} delayPressIn={0}>
-                    <Text style={styles.subtitle}>Weather forecasts for your journey</Text>
-                  </TouchableOpacity>
+                  <Text style={styles.subtitle}>Weather forecasts for your journey</Text>
                 </View>
                 <TouchableOpacity 
                   style={styles.radarHomeBtn}
-                  onPress={() => router.push('/radar-map')}
-                  activeOpacity={0.7}
+                  onPress={() => setShowRadarMap(true)}
                 >
                   <Ionicons name="radio-outline" size={18} color="#22c55e" />
                   <Text style={styles.radarHomeBtnText}>Radar</Text>
@@ -935,63 +685,9 @@ export default function HomeScreen() {
                   style={styles.favoriteButton}
                   onPress={addToFavorites}
                 >
-                  <Ionicons 
-                    name={favoriteAdded ? "heart" : "heart-outline"} 
-                    size={24} 
-                    color={favoriteAdded ? "#ef4444" : "#eab308"} 
-                  />
+                  <Ionicons name="heart-outline" size={24} color="#eab308" />
                 </TouchableOpacity>
               </View>
-
-              {/* Debug Panel - Shows API connection status */}
-              <TouchableOpacity 
-                style={styles.debugToggle}
-                onPress={() => setShowDebugPanel(!showDebugPanel)}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="bug" size={16} color="#9ca3af" />
-                <Text style={styles.debugToggleText}>
-                  {showDebugPanel ? 'Hide Debug Info' : 'Show Debug Info'}
-                </Text>
-              </TouchableOpacity>
-
-              {showDebugPanel && (
-                <View style={styles.debugPanel}>
-                  <Text style={styles.debugTitle}>🔍 Debug Information</Text>
-                  
-                  <View style={styles.debugRow}>
-                    <Text style={styles.debugLabel}>API Base URL:</Text>
-                    <Text style={styles.debugValue}>{API_BASE || '(not set)'}</Text>
-                  </View>
-                  
-                  <View style={styles.debugRow}>
-                    <Text style={styles.debugLabel}>App Version:</Text>
-                    <Text style={styles.debugValue}>
-                      {require('expo-constants').default.expoConfig?.version || 'unknown'}
-                    </Text>
-                  </View>
-                  
-                  <View style={styles.debugRow}>
-                    <Text style={styles.debugLabel}>Platform:</Text>
-                    <Text style={styles.debugValue}>{Platform.OS}</Text>
-                  </View>
-
-                  <TouchableOpacity 
-                    style={styles.testButton}
-                    onPress={testBackendConnection}
-                    activeOpacity={0.7}
-                  >
-                    <Ionicons name="flash" size={18} color="#1a1a1a" />
-                    <Text style={styles.testButtonText}>Test Backend Connection</Text>
-                  </TouchableOpacity>
-
-                  {debugInfo ? (
-                    <View style={styles.debugResult}>
-                      <Text style={styles.debugResultText}>{debugInfo}</Text>
-                    </View>
-                  ) : null}
-                </View>
-              )}
 
               {/* App Description */}
               <View style={styles.descriptionBox}>
@@ -1003,40 +699,22 @@ export default function HomeScreen() {
               {/* Origin Input */}
               <View style={styles.inputSection}>
                 <Text style={styles.inputLabel}>ORIGIN</Text>
-                <View style={[styles.inputWrapper, originFocused && styles.inputWrapperFocused]}>
+                <View style={styles.inputWrapper}>
                   <View style={styles.originIcon}>
                     <Ionicons name="location" size={20} color="#22c55e" />
                   </View>
-                  <TextInput
+                  <NoAutofillInput
                     style={styles.input}
                     placeholder="Enter starting location"
                     placeholderTextColor="#6b7280"
                     value={origin}
                     onChangeText={handleOriginChange}
-                    onFocus={() => {
-                      setOriginFocused(true);
-                      origin.length >= 2 && setShowOriginSuggestions(originSuggestions.length > 0);
-                    }}
-                    onBlur={() => {
-                      setOriginFocused(false);
-                      setTimeout(() => setShowOriginSuggestions(false), 200);
-                    }}
+                    onFocus={() => origin.length >= 2 && setShowOriginSuggestions(originSuggestions.length > 0)}
+                    onBlur={() => setTimeout(() => setShowOriginSuggestions(false), 200)}
                     returnKeyType="next"
                   />
                   {autocompleteLoading && origin.length >= 2 && (
                     <ActivityIndicator size="small" color="#eab308" style={{ marginRight: 8 }} />
-                  )}
-                  {origin.length > 0 && !autocompleteLoading && (
-                    <TouchableOpacity 
-                      onPress={() => {
-                        setOrigin('');
-                        setOriginSuggestions([]);
-                        setShowOriginSuggestions(false);
-                      }}
-                      style={styles.clearButton}
-                    >
-                      <Ionicons name="close-circle" size={20} color="#6b7280" />
-                    </TouchableOpacity>
                   )}
                 </View>
                 {/* Origin Suggestions Dropdown */}
@@ -1090,41 +768,23 @@ export default function HomeScreen() {
               {/* Destination Input */}
               <View style={styles.inputSection}>
                 <Text style={styles.inputLabel}>DESTINATION</Text>
-                <View style={[styles.inputWrapper, destFocused && styles.inputWrapperFocused]}>
+                <View style={styles.inputWrapper}>
                   <View style={styles.destinationIcon}>
                     <Ionicons name="navigate" size={20} color="#ef4444" />
                   </View>
-                  <TextInput
+                  <NoAutofillInput
                     style={styles.input}
                     placeholder="Enter destination"
                     placeholderTextColor="#6b7280"
                     value={destination}
                     onChangeText={handleDestinationChange}
-                    onFocus={() => {
-                      setDestFocused(true);
-                      destination.length >= 2 && setShowDestSuggestions(destSuggestions.length > 0);
-                    }}
-                    onBlur={() => {
-                      setDestFocused(false);
-                      setTimeout(() => setShowDestSuggestions(false), 200);
-                    }}
+                    onFocus={() => destination.length >= 2 && setShowDestSuggestions(destSuggestions.length > 0)}
+                    onBlur={() => setTimeout(() => setShowDestSuggestions(false), 200)}
                     returnKeyType="done"
                     onSubmitEditing={handleGetWeather}
                   />
                   {autocompleteLoading && destination.length >= 2 && (
                     <ActivityIndicator size="small" color="#eab308" style={{ marginRight: 8 }} />
-                  )}
-                  {destination.length > 0 && !autocompleteLoading && (
-                    <TouchableOpacity 
-                      onPress={() => {
-                        setDestination('');
-                        setDestSuggestions([]);
-                        setShowDestSuggestions(false);
-                      }}
-                      style={styles.clearButton}
-                    >
-                      <Ionicons name="close-circle" size={20} color="#6b7280" />
-                    </TouchableOpacity>
                   )}
                   <TouchableOpacity onPress={swapLocations} style={styles.swapButton}>
                     <Ionicons name="swap-vertical" size={20} color="#60a5fa" />
@@ -1190,12 +850,12 @@ export default function HomeScreen() {
                 <Ionicons name="chevron-forward" size={18} color="#6b7280" />
               </TouchableOpacity>
 
-              {/* Trucker/RV Mode Toggle */}
+              {/* Trucker Mode Toggle */}
               <View style={styles.truckerToggle}>
                 <View style={styles.alertsLeft}>
                   <Ionicons name="bus-outline" size={22} color="#f59e0b" />
                   <View>
-                    <Text style={styles.alertsText}>Trucker/RV Mode</Text>
+                    <Text style={styles.alertsText}>Trucker Mode</Text>
                     <Text style={styles.truckerSubtext}>Wind & height warnings</Text>
                   </View>
                 </View>
@@ -1207,43 +867,19 @@ export default function HomeScreen() {
                 />
               </View>
 
-              {/* Vehicle Height Section (shown when trucker mode enabled) */}
-              {truckerMode && (
-                <View style={styles.heightSection}>
-                  <Text style={styles.heightSectionTitle}>⚠️ Bridge Clearance Alert</Text>
-                  <Text style={styles.heightSectionSubtitle}>Set your vehicle height to get alerts for bridges you can't drive under</Text>
-                  
-                  {/* Height Input */}
-                  <View style={styles.heightInputContainer}>
-                    <TextInput
-                      style={styles.heightInputField}
-                      placeholder="13.5"
-                      placeholderTextColor="#9ca3af"
-                      value={vehicleHeight}
-                      onChangeText={setVehicleHeight}
-                      keyboardType="decimal-pad"
-                      editable={truckerMode}
-                    />
-                    <Text style={styles.heightUnit}>ft</Text>
-                  </View>
-                  
-                  {/* Height Status */}
-                  <View style={styles.heightStatus}>
-                    <Ionicons name="information-circle" size={18} color="#eab308" />
-                    <Text style={styles.heightStatusText}>
-                      Current: {vehicleHeight} ft • You'll get alerts for bridges shorter than this
-                    </Text>
-                  </View>
-                  
-                  {/* Done Button - Just dismisses keyboard, keeps mode active */}
-                  <TouchableOpacity 
-                    style={styles.heightDoneButton}
-                    onPress={() => Keyboard.dismiss()}
-                  >
-                    <Text style={styles.heightDoneButtonText}>Done</Text>
-                  </TouchableOpacity>
+              {/* Weather Alerts Toggle */}
+              <View style={styles.alertsToggle}>
+                <View style={styles.alertsLeft}>
+                  <Ionicons name="notifications-outline" size={22} color="#eab308" />
+                  <Text style={styles.alertsText}>Push Weather Alerts</Text>
                 </View>
-              )}
+                <Switch
+                  value={alertsEnabled}
+                  onValueChange={setAlertsEnabled}
+                  trackColor={{ false: '#3f3f46', true: '#eab30880' }}
+                  thumbColor={alertsEnabled ? '#eab308' : '#71717a'}
+                />
+              </View>
 
               {/* Error Message */}
               {error ? (
@@ -1269,7 +905,7 @@ export default function HomeScreen() {
                   </>
                 )}
               </TouchableOpacity>
-            </Animated.View>
+            </View>
 
             {/* Tabs for Recent/Favorites */}
             <View style={styles.tabsContainer}>
@@ -1345,15 +981,13 @@ export default function HomeScreen() {
               )}
             </View>
           </ScrollView>
-
-          {/* Premium modal handled in RoadPassability screen */}
         </KeyboardAvoidingView>
       </SafeAreaView>
 
       {/* Date Time Picker Modal */}
       {showDatePicker && (
         <Modal transparent animationType="slide">
-          <SafeAreaView style={styles.modalOverlay}>
+          <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Select Departure Time</Text>
@@ -1362,113 +996,121 @@ export default function HomeScreen() {
                 </TouchableOpacity>
               </View>
               
-              <ScrollView contentContainerStyle={{ gap: 20, paddingVertical: 16 }}>
-                {/* Date Section */}
-                <View>
+              {Platform.OS === 'web' ? (
+                // Web-compatible date/time input
+                <View style={styles.webDatePicker}>
                   <Text style={styles.datePickerLabel}>Date</Text>
-                  <View style={styles.pickerRow}>
-                    <TouchableOpacity 
-                      style={styles.pickerButton}
-                      onPress={() => {
-                        const newDate = new Date(departureTime);
-                        newDate.setDate(newDate.getDate() - 1);
-                        setDepartureTime(newDate);
-                      }}
-                    >
-                      <Text style={styles.pickerButtonText}>−</Text>
-                    </TouchableOpacity>
-                    <Text style={styles.pickerValue}>{format(departureTime, 'MMM d, yyyy')}</Text>
-                    <TouchableOpacity 
-                      style={styles.pickerButton}
-                      onPress={() => {
-                        const newDate = new Date(departureTime);
-                        newDate.setDate(newDate.getDate() + 1);
-                        setDepartureTime(newDate);
-                      }}
-                    >
-                      <Text style={styles.pickerButtonText}>+</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-
-                {/* Hour Section */}
-                <View>
-                  <Text style={styles.datePickerLabel}>Hour</Text>
-                  <View style={styles.pickerRow}>
-                    <TouchableOpacity 
-                      style={styles.pickerButton}
-                      onPress={() => {
-                        const newDate = new Date(departureTime);
-                        newDate.setHours(newDate.getHours() - 1);
-                        setDepartureTime(newDate);
-                      }}
-                    >
-                      <Text style={styles.pickerButtonText}>−</Text>
-                    </TouchableOpacity>
-                    <Text style={styles.pickerValue}>{String(departureTime.getHours()).padStart(2, '0')}</Text>
-                    <TouchableOpacity 
-                      style={styles.pickerButton}
-                      onPress={() => {
-                        const newDate = new Date(departureTime);
-                        newDate.setHours(newDate.getHours() + 1);
-                        setDepartureTime(newDate);
-                      }}
-                    >
-                      <Text style={styles.pickerButtonText}>+</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-
-                {/* Minutes Section */}
-                <View>
-                  <Text style={styles.datePickerLabel}>Minutes</Text>
-                  <View style={styles.pickerRow}>
-                    <TouchableOpacity 
-                      style={styles.pickerButton}
-                      onPress={() => {
-                        const newDate = new Date(departureTime);
-                        newDate.setMinutes(newDate.getMinutes() - 15);
-                        setDepartureTime(newDate);
-                      }}
-                    >
-                      <Text style={styles.pickerButtonText}>−15</Text>
-                    </TouchableOpacity>
-                    <Text style={styles.pickerValue}>{String(departureTime.getMinutes()).padStart(2, '0')}</Text>
-                    <TouchableOpacity 
-                      style={styles.pickerButton}
-                      onPress={() => {
-                        const newDate = new Date(departureTime);
-                        newDate.setMinutes(newDate.getMinutes() + 15);
-                        setDepartureTime(newDate);
-                      }}
-                    >
-                      <Text style={styles.pickerButtonText}>+15</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-                
-                {/* Preview */}
-                <View style={{ padding: 12, backgroundColor: '#3f3f46', borderRadius: 8 }}>
+                  <input
+                    type="date"
+                    value={departureTime.toISOString().split('T')[0]}
+                    min={new Date().toISOString().split('T')[0]}
+                    onChange={(e) => {
+                      const newDate = new Date(departureTime);
+                      const [year, month, day] = e.target.value.split('-');
+                      newDate.setFullYear(parseInt(year), parseInt(month) - 1, parseInt(day));
+                      setDepartureTime(newDate);
+                    }}
+                    style={{
+                      width: '100%',
+                      padding: 12,
+                      fontSize: 16,
+                      backgroundColor: '#3f3f46',
+                      border: '1px solid #52525b',
+                      borderRadius: 8,
+                      color: '#fff',
+                      marginBottom: 16,
+                    }}
+                  />
+                  
+                  <Text style={styles.datePickerLabel}>Time</Text>
+                  <input
+                    type="time"
+                    value={`${String(departureTime.getHours()).padStart(2, '0')}:${String(departureTime.getMinutes()).padStart(2, '0')}`}
+                    onChange={(e) => {
+                      const newDate = new Date(departureTime);
+                      const [hours, minutes] = e.target.value.split(':');
+                      newDate.setHours(parseInt(hours), parseInt(minutes));
+                      setDepartureTime(newDate);
+                    }}
+                    style={{
+                      width: '100%',
+                      padding: 12,
+                      fontSize: 16,
+                      backgroundColor: '#3f3f46',
+                      border: '1px solid #52525b',
+                      borderRadius: 8,
+                      color: '#fff',
+                      marginBottom: 16,
+                    }}
+                  />
+                  
                   <Text style={styles.selectedDateTime}>
                     Selected: {format(departureTime, 'MMM d, yyyy h:mm a')}
                   </Text>
                 </View>
-              </ScrollView>
+              ) : (
+                // Native DateTimePicker for iOS/Android
+                <DateTimePicker
+                  value={departureTime}
+                  mode="datetime"
+                  display="spinner"
+                  onChange={(event, date) => {
+                    if (date) setDepartureTime(date);
+                  }}
+                  textColor="#fff"
+                  minimumDate={new Date()}
+                />
+              )}
               
               <TouchableOpacity 
                 style={styles.modalButton}
-                onPress={() => {
-                  try {
-                    setShowDatePicker(false);
-                  } catch (e) {
-                    console.error('Error closing date picker:', e);
-                  }
-                }}
+                onPress={() => setShowDatePicker(false)}
               >
                 <Text style={styles.modalButtonText}>Confirm</Text>
               </TouchableOpacity>
             </View>
-          </SafeAreaView>
+          </View>
+        </Modal>
+      )}
+
+      {/* Radar Map Modal */}
+      {showRadarMap && (
+        <Modal transparent animationType="slide">
+          <View style={styles.radarModalOverlay}>
+            <View style={styles.radarModalContent}>
+              <View style={styles.radarHeader}>
+                <View style={styles.radarHeaderLeft}>
+                  <Ionicons name="radio-outline" size={24} color="#22c55e" />
+                  <Text style={styles.radarTitle}>Live Weather Radar</Text>
+                </View>
+                <TouchableOpacity onPress={() => setShowRadarMap(false)}>
+                  <Ionicons name="close" size={28} color="#fff" />
+                </TouchableOpacity>
+              </View>
+              
+              {Platform.OS === 'web' ? (
+                <iframe
+                  srcDoc={generateRadarMapHtml()}
+                  style={{ flex: 1, border: 'none', width: '100%', height: '100%', touchAction: 'none' }}
+                  allowFullScreen
+                />
+              ) : (
+                <WebView
+                  source={{ html: generateRadarMapHtml() }}
+                  style={styles.radarWebView}
+                  javaScriptEnabled={true}
+                  domStorageEnabled={true}
+                  scalesPageToFit={true}
+                  scrollEnabled={false}
+                  bounces={false}
+                  overScrollMode="never"
+                  nestedScrollEnabled={false}
+                  setBuiltInZoomControls={false}
+                  setDisplayZoomControls={false}
+                />
+              )}
+            </View>
+          </View>
         </Modal>
       )}
 
@@ -1484,29 +1126,13 @@ export default function HomeScreen() {
                 </TouchableOpacity>
               </View>
               
-              <TextInput
+              <NoAutofillInput
                 style={styles.modalInput}
-                placeholder="City, address, or landmark"
+                placeholder="Enter stop location"
                 placeholderTextColor="#6b7280"
                 value={newStopLocation}
-                onChangeText={handleStopLocationChange}
+                onChangeText={setNewStopLocation}
               />
-              
-              {/* Stop Autocomplete Suggestions */}
-              {showStopSuggestions && stopSuggestions.length > 0 && (
-                <View style={styles.suggestions}>
-                  {stopSuggestions.map((suggestion, idx) => (
-                    <TouchableOpacity
-                      key={idx}
-                      style={styles.suggestionItem}
-                      onPress={() => selectStopSuggestion(suggestion)}
-                    >
-                      <Ionicons name="location-outline" size={18} color="#6b7280" />
-                      <Text style={styles.suggestionText}>{suggestion.place_name}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              )}
               
               <Text style={styles.stopTypeLabel}>Stop Type</Text>
               <View style={styles.stopTypes}>
@@ -1594,16 +1220,84 @@ export default function HomeScreen() {
         </Modal>
       )}
 
-      {/* Off-Grid Modal */}
-      {showCampPrep && (
-        <Modal
-          visible={showCampPrep}
-          animationType="slide"
-          onRequestClose={() => setShowCampPrep(false)}
-        >
-          <CampPrepChat onClose={() => setShowCampPrep(false)} />
+      {/* AI Chat Modal */}
+      {showChat && (
+        <Modal transparent animationType="slide">
+          <View style={styles.chatModalOverlay}>
+            <View style={styles.chatModalContent}>
+              <View style={styles.chatHeader}>
+                <View style={styles.chatHeaderLeft}>
+                  <Ionicons name="chatbubbles" size={24} color="#eab308" />
+                  <Text style={styles.chatTitle}>Ask Routecast AI</Text>
+                </View>
+                <TouchableOpacity onPress={() => setShowChat(false)}>
+                  <Ionicons name="close" size={24} color="#fff" />
+                </TouchableOpacity>
+              </View>
+              
+              <ScrollView style={styles.chatMessages} showsVerticalScrollIndicator={false}>
+                {chatHistory.length === 0 && (
+                  <View style={styles.chatWelcome}>
+                    <Text style={styles.chatWelcomeText}>👋 Hi! I'm your driving assistant.</Text>
+                    <Text style={styles.chatWelcomeSubtext}>Ask me about weather, road conditions, or safe driving tips!</Text>
+                  </View>
+                )}
+                
+                {chatHistory.map((msg, idx) => (
+                  <View key={idx} style={[styles.chatBubble, msg.role === 'user' ? styles.userBubble : styles.aiBubble]}>
+                    <Text style={styles.chatBubbleText}>{msg.text}</Text>
+                  </View>
+                ))}
+                
+                {chatLoading && (
+                  <View style={styles.chatTyping}>
+                    <ActivityIndicator size="small" color="#eab308" />
+                    <Text style={styles.chatTypingText}>Thinking...</Text>
+                  </View>
+                )}
+              </ScrollView>
+              
+              {/* Quick suggestions */}
+              <View style={styles.chatSuggestions}>
+                {chatSuggestions.map((suggestion, idx) => (
+                  <TouchableOpacity 
+                    key={idx} 
+                    style={styles.chatSuggestionBtn}
+                    onPress={() => sendChatMessage(suggestion)}
+                  >
+                    <Text style={styles.chatSuggestionText}>{suggestion}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              
+              {/* Input */}
+              <View style={styles.chatInputRow}>
+                <NoAutofillInput
+                  style={styles.chatInputFull}
+                  placeholder="Type your question here..."
+                  placeholderTextColor="#6b7280"
+                  value={chatMessage}
+                  onChangeText={setChatMessage}
+                  onSubmitEditing={() => sendChatMessage()}
+                  returnKeyType="send"
+                />
+                <TouchableOpacity 
+                  style={[styles.chatSendBtn, !chatMessage.trim() && styles.chatSendBtnDisabled]}
+                  onPress={() => sendChatMessage()}
+                  disabled={!chatMessage.trim() || chatLoading}
+                >
+                  <Ionicons name="send" size={20} color="#fff" />
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
         </Modal>
       )}
+
+      {/* Floating Chat Button */}
+      <TouchableOpacity style={styles.chatFab} onPress={() => setShowChat(true)}>
+        <Ionicons name="chatbubble-ellipses" size={24} color="#fff" />
+      </TouchableOpacity>
     </View>
   );
 }
@@ -1629,19 +1323,14 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 16,
-    paddingTop: Platform.OS === 'android' ? 48 : 12,
+    paddingTop: 12,
     paddingBottom: 40,
   },
   mainCard: {
     backgroundColor: '#27272a',
-    borderRadius: 20,
-    padding: 20,
+    borderRadius: 16,
+    padding: 18,
     marginBottom: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
-    elevation: 8,
   },
   header: {
     flexDirection: 'row',
@@ -1649,23 +1338,22 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   iconContainer: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
+    width: 44,
+    height: 44,
+    borderRadius: 12,
     backgroundColor: '#eab308',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 10,
+    marginRight: 12,
   },
   headerText: {
     flex: 1,
   },
   title: {
-    fontSize: 24,
-    fontWeight: '800',
+    fontSize: 22,
+    fontWeight: '700',
     color: '#ffffff',
     marginBottom: 2,
-    letterSpacing: 0.5,
   },
   subtitle: {
     fontSize: 13,
@@ -1673,21 +1361,6 @@ const styles = StyleSheet.create({
   },
   favoriteButton: {
     padding: 8,
-  },
-  radarHomeBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#22c55e15',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 12,
-    gap: 4,
-    marginRight: 8,
-  },
-  radarHomeBtnText: {
-    color: '#22c55e',
-    fontSize: 14,
-    fontWeight: '600',
   },
   descriptionBox: {
     backgroundColor: 'rgba(234, 179, 8, 0.1)',
@@ -1716,20 +1389,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#3f3f46',
-    borderRadius: 12,
-    borderWidth: 2,
+    borderRadius: 10,
+    borderWidth: 1,
     borderColor: '#52525b',
-    paddingHorizontal: 14,
-    shadowColor: '#3b82f6',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0,
-    shadowRadius: 8,
-    elevation: 0,
-  },
-  inputWrapperFocused: {
-    borderColor: '#3b82f6',
-    shadowOpacity: 0.3,
-    elevation: 4,
+    paddingHorizontal: 12,
   },
   originIcon: {
     marginRight: 10,
@@ -1743,10 +1406,6 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     paddingVertical: 12,
     fontWeight: '500',
-  },
-  clearButton: {
-    padding: 4,
-    marginRight: 4,
   },
   swapButton: {
     padding: 8,
@@ -1826,38 +1485,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#ffffff',
   },
-  testButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#eab30820',
-    borderRadius: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    marginBottom: 12,
-    gap: 8,
-    borderWidth: 1,
-    borderColor: '#eab308',
-  },
-  testButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#eab308',
-  },
-  notificationStatusContainer: {
-    backgroundColor: '#27272a',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginBottom: 12,
-    borderLeftWidth: 3,
-    borderLeftColor: '#eab308',
-  },
-  notificationStatusText: {
-    color: '#e4e4e7',
-    fontSize: 13,
-    fontWeight: '500',
-  },
   errorContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1874,18 +1501,12 @@ const styles = StyleSheet.create({
   },
   button: {
     backgroundColor: '#eab308',
-    borderRadius: 14,
-    paddingVertical: 16,
+    borderRadius: 10,
+    paddingVertical: 14,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
-    shadowColor: '#eab308',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    elevation: 6,
-    minHeight: 52,
   },
   buttonDisabled: {
     opacity: 0.7,
@@ -1988,8 +1609,6 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 20,
     padding: 20,
     paddingBottom: Platform.OS === 'ios' ? 40 : 20,
-    flex: 1,
-    maxHeight: '90%',
   },
   modalHeader: {
     flexDirection: 'row',
@@ -2054,68 +1673,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
   },
-  customDatePicker: {
-    marginVertical: 16,
-    gap: 12,
-  },
-  datePickerLabel: {
-    color: '#a1a1aa',
-    fontSize: 12,
-    fontWeight: '600',
-    letterSpacing: 0.5,
-  },
-  pickerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-    marginTop: 8,
-  },
-  pickerButton: {
-    backgroundColor: '#3f3f46',
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    minWidth: 50,
-    alignItems: 'center',
-  },
-  pickerButtonText: {
-    color: '#eab308',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  pickerValue: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-    minWidth: 100,
-    textAlign: 'center',
-  },
-  dateInput: {
-    backgroundColor: '#3f3f46',
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontSize: 15,
-    color: '#fff',
-    borderWidth: 1,
-    borderColor: '#52525b',
-  },
-  selectedDateTime: {
-    color: '#eab308',
-    fontSize: 14,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
   suggestionsDropdown: {
-    backgroundColor: '#3f3f46',
-    borderRadius: 10,
-    marginTop: 4,
-    borderWidth: 1,
-    borderColor: '#52525b',
-    overflow: 'hidden',
-  },
-  suggestions: {
     backgroundColor: '#3f3f46',
     borderRadius: 10,
     marginTop: 4,
@@ -2131,11 +1689,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#52525b',
     gap: 10,
-  },
-  suggestionText: {
-    color: '#ffffff',
-    fontSize: 14,
-    flex: 1,
   },
   suggestionTextContainer: {
     flex: 1,
@@ -2186,133 +1739,6 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     fontSize: 11,
   },
-  heightInput: {
-    backgroundColor: '#3f3f46',
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    marginBottom: 12,
-    borderLeftWidth: 3,
-    borderLeftColor: '#f59e0b',
-  },
-  heightSection: {
-    backgroundColor: '#422006',
-    borderRadius: 12,
-    padding: 12,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#f59e0b',
-  },
-  heightSectionTitle: {
-    color: '#fbbf24',
-    fontSize: 14,
-    fontWeight: '700',
-    marginBottom: 3,
-  },
-  heightSectionSubtitle: {
-    color: '#fde68a',
-    fontSize: 11,
-    marginBottom: 10,
-    lineHeight: 16,
-  },
-  heightLabel: {
-    color: '#e4e4e7',
-    fontSize: 13,
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  heightInputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 10,
-  },
-  heightInputField: {
-    flex: 1,
-    backgroundColor: '#27272a',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    color: '#ffffff',
-    fontSize: 16,
-    borderWidth: 1,
-    borderColor: '#f59e0b',
-  },
-  heightUnit: {
-    color: '#fbbf24',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  presetsContainer: {
-    marginBottom: 10,
-  },
-  presetsLabel: {
-    color: '#fde68a',
-    fontSize: 11,
-    fontWeight: '600',
-    marginBottom: 6,
-  },
-  presetsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  presetBtn: {
-    flex: 1,
-    minWidth: '48%',
-    backgroundColor: '#1f2937',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#f59e0b',
-    paddingHorizontal: 8,
-    paddingVertical: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  presetBtnText: {
-    color: '#fde68a',
-    fontSize: 11,
-    fontWeight: '600',
-  },
-  presetBtnHeight: {
-    color: '#fbbf24',
-    fontSize: 13,
-    fontWeight: '700',
-    marginTop: 2,
-  },
-  heightStatus: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#1f2937',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    gap: 8,
-    marginTop: 4,
-  },
-  heightStatusText: {
-    color: '#fde68a',
-    fontSize: 12,
-    flex: 1,
-  },
-  heightDoneButton: {
-    backgroundColor: '#f59e0b',
-    borderRadius: 8,
-    paddingVertical: 10,
-    alignItems: 'center',
-    marginTop: 12,
-  },
-  heightDoneButtonText: {
-    color: '#1a1a1a',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  heightHint: {
-    color: '#71717a',
-    fontSize: 11,
-    marginTop: 6,
-    fontStyle: 'italic',
-  },
   vehicleModalSubtext: {
     color: '#a1a1aa',
     fontSize: 13,
@@ -2346,6 +1772,20 @@ const styles = StyleSheet.create({
   },
   webDatePicker: {
     paddingVertical: 16,
+  },
+  datePickerLabel: {
+    color: '#a1a1aa',
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 8,
+    textTransform: 'uppercase',
+  },
+  selectedDateTime: {
+    color: '#eab308',
+    fontSize: 16,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginTop: 8,
   },
   // AI Chat styles
   chatFab: {
@@ -2504,134 +1944,50 @@ const styles = StyleSheet.create({
   chatSendBtnDisabled: {
     backgroundColor: '#3f3f46',
   },
-  calendarSection: {
-    marginBottom: 16,
-  },
-  calendarHeader: {
+  // Radar button and modal styles
+  radarHomeBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginBottom: 12,
-  },
-  calendarTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#e5e7eb',
-  },
-  calendarCard: {
-    backgroundColor: '#1e293b',
+    backgroundColor: '#14532d',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
     borderRadius: 16,
-    padding: 16,
-    marginBottom: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderLeftWidth: 4,
-    borderLeftColor: '#3b82f6',
-    shadowColor: '#3b82f6',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 4,
-  },
-  calendarCardLeft: {
-    flex: 1,
-  },
-  calendarCardTitle: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#e5e7eb',
-    marginBottom: 4,
-  },
-  calendarCardDate: {
-    fontSize: 12,
-    color: '#94a3b8',
-    marginBottom: 4,
-  },
-  calendarCardLocation: {
-    fontSize: 12,
-    color: '#60a5fa',
-  },
-  calendarCardRight: {
-    alignItems: 'center',
+    marginRight: 8,
     gap: 4,
   },
-  calendarCardAction: {
-    fontSize: 10,
-    color: '#60a5fa',
-    fontWeight: '600',
-  },
-  debugToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    backgroundColor: '#3f3f46',
-    borderRadius: 8,
-    marginBottom: 12,
-  },
-  debugToggleText: {
+  radarHomeBtnText: {
+    color: '#22c55e',
     fontSize: 12,
-    color: '#9ca3af',
     fontWeight: '600',
   },
-  debugPanel: {
-    backgroundColor: '#1e1e1e',
-    borderRadius: 12,
+  radarModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.9)',
+  },
+  radarModalContent: {
+    flex: 1,
+    backgroundColor: '#18181b',
+  },
+  radarHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
     padding: 16,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#3f3f46',
+    backgroundColor: '#27272a',
+    borderBottomWidth: 1,
+    borderBottomColor: '#3f3f46',
   },
-  debugTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#eab308',
-    marginBottom: 12,
-  },
-  debugRow: {
-    marginBottom: 8,
-  },
-  debugLabel: {
-    fontSize: 11,
-    color: '#9ca3af',
-    fontWeight: '600',
-    marginBottom: 2,
-  },
-  debugValue: {
-    fontSize: 12,
-    color: '#d4d4d8',
-    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
-  },
-  testButton: {
+  radarHeaderLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: '#eab308',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 10,
-    marginTop: 12,
+    gap: 10,
   },
-  testButtonText: {
-    fontSize: 14,
+  radarTitle: {
+    color: '#fff',
+    fontSize: 18,
     fontWeight: '700',
-    color: '#1a1a1a',
   },
-  debugResult: {
-    marginTop: 12,
-    padding: 12,
-    backgroundColor: '#27272a',
-    borderRadius: 8,
-    borderLeftWidth: 3,
-    borderLeftColor: '#eab308',
+  radarWebView: {
+    flex: 1,
   },
-  debugResultText: {
-    fontSize: 11,
-    color: '#d4d4d8',
-    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
-    lineHeight: 16,
-  },});
+});

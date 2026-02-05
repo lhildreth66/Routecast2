@@ -24,7 +24,7 @@ import {
   TouchableOpacity,
   Dimensions,
 } from 'react-native';
-import { usePropaneUsage } from '../hooks/usePropaneUsage';
+import { usePropaneUsage } from '../../lib/hooks/usePropaneUsage';
 
 const COLORS = {
   primary: '#22c55e',      // Green

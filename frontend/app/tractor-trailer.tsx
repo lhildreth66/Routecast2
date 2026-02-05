@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -55,10 +55,10 @@ export default function TractorTrailerScreen() {
       route: '/truck-services',
     },
     {
-      id: 'truck-restrictions',
-      title: 'Truck Restrictions',
+      id: 'truck-routes',
+      title: 'Truck-Restricted Routes',
       icon: 'close-circle' as const,
-      description: 'Weight limits, height restrictions, hazmat routes, and detours',
+      description: 'Roads with truck restrictions, hazmat routes, and detours',
       color: '#ec4899',
       route: '/truck-restrictions',
     },
@@ -131,18 +131,24 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   subtitle: {
-    fontSize: 16,
-    color: '#9ca3af',
+    fontSize: 15,
+    color: '#a1a1aa',
+    lineHeight: 22,
   },
   categoriesContainer: {
     padding: 16,
-    gap: 12,
   },
   categoryCard: {
     backgroundColor: '#1a1a1a',
-    borderRadius: 12,
+    borderRadius: 16,
     padding: 16,
+    marginBottom: 12,
     borderLeftWidth: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+    elevation: 5,
   },
   categoryHeader: {
     flexDirection: 'row',
@@ -153,7 +159,7 @@ const styles = StyleSheet.create({
   iconContainer: {
     width: 56,
     height: 56,
-    borderRadius: 12,
+    borderRadius: 28,
     justifyContent: 'center',
     alignItems: 'center',
   },

@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import { API_BASE } from './apiConfig';
+import { API_BASE } from '../lib/apiConfig';
 
 export default function SolarForecastScreen() {
   const router = useRouter();
@@ -78,7 +78,7 @@ export default function SolarForecastScreen() {
 
       const totalWatts = parseInt(panelWatts, 10) * parseInt(numPanels, 10);
 
-      const resp = await axios.post(`${API_BASE}/api/pro/solar-forecast`, {
+      const resp = await axios.post(`${API_BASE}/api/solar-forecast`, {
         lat: parseFloat(latitude),
         lon: parseFloat(longitude),
         date_range: dates,

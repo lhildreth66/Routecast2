@@ -1,31 +1,12 @@
 {
   "cli": {
-    "version": ">= 5.0.0",
-    "appVersionSource": "local"
+    "version": ">= 16.0.0",
+    "appVersionSource": "remote"
   },
   "build": {
-    "development": {
-      "developmentClient": true,
-      "distribution": "internal"
-    },
-    "preview": {
-      "distribution": "internal",
-      "android": {
-        "buildType": "apk",
-        "autoIncrement": true
-      },
-      "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://routecast-backend.onrender.com"
-      }
-    },
     "production": {
-      "android": {
-        "buildType": "app-bundle",
-        "autoIncrement": true
-      },
-      "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://routecast-backend.onrender.com"
-      }
+      "autoIncrement": true,
+      "node": "20.11.1"
     }
   }
 }

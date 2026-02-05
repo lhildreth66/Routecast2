@@ -44,19 +44,72 @@ const guideSections: GuideSection[] = [
       {
         name: 'Select Vehicle Type',
         icon: 'car',
-        description: 'Choose Car, Semi Truck, RV, Motorcycle, or Vehicle with Trailer to get customized safety scores and route recommendations.',
-        tips: ['Different vehicles get different hazard scores', 'Change vehicle type anytime']
+        description: 'Choose your vehicle: Sedan, Pickup Truck, RV, or Tractor Trailer. This affects hazard warnings and route recommendations.',
+        tips: ['RV mode shows low clearance warnings', 'Tractor Trailer mode includes weigh station info']
       },
       {
-        name: 'Add Stops',
-        icon: 'location',
-        description: 'Add waypoints by tapping "Add Stop" on the home screen. Perfect for multi-leg road trips.',
-        tips: ['Unlimited stops supported', 'Drag to reorder stops', 'Weather calculated for each segment']
+        name: 'Get Route Forecast',
+        icon: 'cloud',
+        description: 'Tap "Get Route Forecast" to see weather conditions along your entire route with hourly breakdowns.',
+      }
+    ]
+  },
+  {
+    id: 'weather-features',
+    title: 'Weather Along Route',
+    icon: 'thunderstorm',
+    color: '#eab308',
+    description: 'Real-time weather data for every point on your journey.',
+    features: [
+      {
+        name: 'Hourly Forecasts',
+        icon: 'time',
+        description: 'View hour-by-hour weather for each waypoint. See temperature, precipitation chance, wind speed, and conditions.',
+        tips: ['Swipe horizontally to see more hours', 'Tap a waypoint for detailed forecast']
+      },
+      {
+        name: 'Weather Alerts',
+        icon: 'warning',
+        description: 'Active NWS alerts along your route. Shows up to 10 alerts from the last 2 hours on your current route path.',
+        tips: ['Red alerts = severe weather, consider delaying', 'Yellow alerts = caution, monitor conditions', 'Alerts auto-refresh every 15 minutes']
+      },
+      {
+        name: 'Road Conditions',
+        icon: 'car-sport',
+        description: 'See road surface conditions based on precipitation, temperature, and recent weather. Includes ice risk, wet roads, and visibility warnings.',
+        tips: ['Check "Hazards" tab for road condition summary', 'Temperature below 32°F triggers ice warnings']
+      },
+      {
+        name: 'Weather Radar Map',
+        icon: 'map',
+        description: 'Live precipitation radar overlay on your route map. See rain, snow, and storm cells in real-time.',
+        tips: ['Pinch to zoom for detail', 'Radar updates every 5 minutes', 'Use timeline slider to see forecast movement']
+      }
+    ]
+  },
+  {
+    id: 'smart-features',
+    title: 'Smart Travel Features',
+    icon: 'bulb',
+    color: '#06b6d4',
+    description: 'Intelligent features to optimize your travel.',
+    features: [
+      {
+        name: 'Leave Later / Smart Delay',
+        icon: 'time',
+        description: 'Get recommendations on the best departure time based on weather conditions. Avoid storms by delaying your trip when conditions will improve.',
+        tips: ['Shows optimal departure windows', 'Compares current vs delayed weather', 'Considers your full route, not just origin']
+      },
+      {
+        name: 'Route to Speech',
+        icon: 'volume-high',
+        description: 'Listen to your route weather summary hands-free. Perfect for when you\'re packing up or doing pre-trip checks.',
+        tips: ['Tap the speaker icon on route screen', 'Includes hazard warnings in audio', 'Works with Bluetooth audio']
       },
       {
         name: 'Push Notifications',
         icon: 'notifications',
-        description: 'Get real-time weather alerts for severe conditions along your route. Never miss tornado, flash flood, or blizzard warnings.',
+        description: 'Receive alerts when weather conditions change significantly along your saved routes. Get warned about severe weather before you hit it.',
         tips: ['Enable notifications when prompted', 'Critical alerts for tornado/flash flood', 'Customize in device settings']
       },
       {
@@ -78,37 +131,29 @@ const guideSections: GuideSection[] = [
         name: 'Bridge Height Alerts',
         icon: 'git-commit',
         description: 'Warnings for low clearance bridges on your route. Essential for RVs and commercial trucks. Shows exact height in feet and inches.',
-        tips: ['Critical for RVs and semi trucks', 'Shows exact clearance height', 'Plan alternate routes in advance']
+        tips: ['Set your vehicle height in settings', 'Alerts show distance to bridge', 'Includes alternate route suggestions']
       },
       {
-        name: 'Tornado Warnings',
-        icon: 'warning',
-        description: 'Real-time tornado warnings from NWS with exact location and expiration time. Immediate push notifications.',
-        tips: ['Take shelter immediately', 'Check weather alerts tab', 'Monitor until warning expires']
+        name: 'Wind Warnings',
+        icon: 'speedometer',
+        description: 'High wind alerts for high-profile vehicles. Triggered when sustained winds exceed 25mph or gusts exceed 40mph.',
+        tips: ['Critical for RVs and tractor trailers', 'Shows wind direction relative to route', 'Includes specific danger zones']
       },
       {
-        name: 'Flash Flood Warnings',
-        icon: 'water',
-        description: 'Critical flood alerts along your route. Never drive through standing water—turn around, don\'t drown.',
-        tips: ['Avoid low-lying areas', 'Never drive through water', 'Seek higher ground']
+        name: 'Visibility Warnings',
+        icon: 'eye-off',
+        description: 'Alerts for fog, heavy rain, snow, or dust that reduces visibility below safe driving levels.',
       },
       {
-        name: 'Winter Storm Warnings',
+        name: 'Ice & Snow Alerts',
         icon: 'snow',
-        description: 'Blizzard, ice storm, and winter weather alerts with snowfall predictions and ice accumulation.',
-        tips: ['Carry emergency supplies', 'Reduce speed in snow/ice', 'Consider delaying travel']
-      },
-      {
-        name: 'Severe Thunderstorms',
-        icon: 'thunderstorm',
-        description: 'High wind, hail, and lightning warnings. Includes predicted hail size and wind speeds.',
-        tips: ['Pull over for large hail', 'Wait out severe storms', 'Avoid open areas in lightning']
+        description: 'Warnings when road temperatures are near or below freezing with precipitation. Includes black ice risk assessment.',
       }
     ]
   },
   {
     id: 'boondockers',
-    title: 'Boondockers Tools',
+    title: 'Boondockers Features',
     icon: 'bonfire',
     color: '#8b4513',
     description: 'Complete toolkit for off-grid camping and RV living.',
@@ -153,30 +198,30 @@ const guideSections: GuideSection[] = [
         name: 'Water Budget Planner',
         icon: 'water',
         description: 'Calculate how many days your fresh, gray, and black tanks will last based on usage patterns.',
-        tips: ['Enter tank capacities in gallons', 'Adjust for people count', 'Shows daily usage rates']
+        tips: ['Enter tank capacities', 'Adjust for number of people', 'Shows limiting factor']
       },
       {
-        name: 'Wind & Shelter Analysis',
-        icon: 'cloudy',
-        description: 'Plan campsite orientation based on forecasted wind direction. Minimize wind exposure for comfort.',
-        tips: ['Points RV in optimal direction', 'Accounts for terrain', 'Reduces propane usage']
+        name: 'Wind Shelter Advisor',
+        icon: 'compass',
+        description: 'Get recommendations on how to orient your RV for best wind protection based on local terrain and weather.',
+        tips: ['Enter predominant wind direction', 'Shows recommended parking bearing', 'Estimates wind reduction %']
       },
       {
-        name: 'Connectivity Prediction',
-        icon: 'wifi',
-        description: 'Predict cell signal strength at your destination using crowd-sourced data and tower locations.',
-        tips: ['Shows carrier coverage', 'Useful for remote work', 'Plan communication needs']
+        name: 'Connectivity Checker',
+        icon: 'cellular',
+        description: 'Predict cell signal strength (AT&T, Verizon, T-Mobile) and Starlink viability at your campsite location.',
+        tips: ['Select your carrier', 'Shows signal bar estimate', 'Starlink checks horizon obstructions']
       },
       {
-        name: 'Campsite Suitability Index',
-        icon: 'star',
-        description: 'Score potential campsites based on shade, wind, terrain, and accessibility. Find the perfect spot.',
-        tips: ['Combines multiple factors', 'Weather-based scoring', 'Updated with conditions']
+        name: 'Campsite Index',
+        icon: 'analytics',
+        description: 'Get an overall quality score (0-100) for any GPS location based on wind, shade, road access, cell signal, and more.',
+        tips: ['Auto mode fetches real data', 'Manual mode for planning', 'Higher score = better campsite']
       },
       {
         name: 'Camp Prep Checklist',
         icon: 'checkbox',
-        description: 'Interactive checklist for setting up camp. Never forget to check wheels, level, or connect utilities.',
+        description: 'Interactive checklist for setting up camp. Never forget to chock wheels, level, or connect utilities.',
       }
     ]
   },
@@ -303,10 +348,6 @@ export default function UserGuideScreen() {
         <View style={styles.statsRow}>
           <View style={styles.statCard}>
             <Text style={styles.statNumber}>10+</Text>
-            <Text style={styles.statLabel}>Features</Text>
-          </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statNumber}>5</Text>
             <Text style={styles.statLabel}>Boondocker Tools</Text>
           </View>
           <View style={styles.statCard}>
@@ -402,7 +443,7 @@ export default function UserGuideScreen() {
             <Text style={styles.pricingTitle}>Subscription Plans</Text>
           </View>
           <Text style={styles.pricingSubtitle}>Start with a FREE 1-week trial</Text>
-
+          
           <View style={styles.pricingOptions}>
             <View style={styles.pricingOption}>
               <Text style={styles.pricingAmount}>$9.99</Text>

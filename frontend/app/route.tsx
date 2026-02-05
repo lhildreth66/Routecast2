@@ -13,8 +13,6 @@ import {
   Modal,
   TextInput,
   Dimensions,
-  Alert,
-  RefreshControl,
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -22,8 +20,8 @@ import * as Speech from 'expo-speech';
 import { format, parseISO } from 'date-fns';
 import axios from 'axios';
 import { WebView } from 'react-native-webview';
-import { API_BASE } from './apiConfig';
 
+const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 // Types
@@ -54,7 +52,6 @@ interface WeatherData {
   conditions: string | null;
   wind_speed: string | null;
   humidity: number | null;
-  is_daytime?: boolean;
 }
 
 interface WeatherAlert {
@@ -92,10 +89,6 @@ interface HazardAlert {
   message: string;
   recommendation: string;
   countdown_text: string;
-  full_description?: string;
-  description?: string;
-  instruction?: string;
-  location_name?: string;
 }
 
 interface RouteData {
@@ -113,7 +106,6 @@ interface RouteData {
   reroute_recommended: boolean;
   reroute_reason: string | null;
   trucker_warnings: string[];
-  bridge_warnings?: string[];
   ai_summary: string | null;
 }
 
@@ -139,9 +131,8 @@ const getManeuverIcon = (maneuver: string): string => {
   return icons[maneuver] || 'arrow-forward';
 };
 
-// Generate radar map HTML using RainViewer API (free weather radar)
+// Generate radar map HTML using IEM WMS layer for NWS Watch/Warning/Advisory colored zones
 const generateRadarMapHtml = (centerLat: number, centerLon: number): string => {
-  // Constrain to continental US bounds only
   const usLat = Math.max(25, Math.min(48, centerLat));
   const usLon = Math.max(-124, Math.min(-68, centerLon));
   
@@ -154,319 +145,204 @@ const generateRadarMapHtml = (centerLat: number, centerLon: number): string => {
       <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
       <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        html, body { 
-          width: 100%; 
-          height: 100%; 
-          background: #1a1a1a;
-          touch-action: none;
-          -webkit-user-select: none;
-          user-select: none;
-        }
-        #map { 
-          width: 100%; 
-          height: calc(100% - 120px);
-          touch-action: none;
-        }
-        .leaflet-container {
-          touch-action: none !important;
-        }
-        .legend-bar {
+        html, body { width: 100%; height: 100%; background: #f0f0f0; }
+        #map { width: 100%; height: calc(100% - 120px); }
+        .legend-box {
           position: fixed;
-          bottom: 60px;
+          bottom: 0;
           left: 0;
           right: 0;
-          height: 50px;
-          background: rgba(30,30,30,0.95);
+          background: #003366;
+          padding: 8px 12px;
           z-index: 1000;
           font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-          display: flex;
-          flex-direction: column;
-          justify-content: center;
-          padding: 8px 16px;
-          border-radius: 8px 8px 0 0;
-          border-top: 1px solid #555;
-          box-shadow: 0 -2px 8px rgba(0,0,0,0.4);
         }
-        .gradient-legend {
-          display: flex;
-          flex-direction: column;
+        .legend-title {
+          color: #fff;
+          font-size: 13px;
+          font-weight: 700;
+          margin-bottom: 6px;
+          text-align: center;
+        }
+        .legend-grid {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
           gap: 4px;
         }
-        .gradient-bar {
-          height: 10px;
-          border-radius: 5px;
-          background: linear-gradient(to right, 
-            #00ff00 0%, 
-            #ffff00 20%, 
-            #ff8800 35%, 
-            #ff0000 45%, 
-            #ff00ff 55%, 
-            #cc66ff 65%,
-            #91d3ff 80%, 
-            #ffffff 100%
-          );
-          border: 1px solid #444;
-        }
-        .gradient-labels {
-          display: flex;
-          justify-content: space-between;
-          padding: 0 4px;
-        }
-        .gradient-label {
-          color: #fff;
-          font-size: 14px;
-          font-weight: 600;
-        }
-        .controls-row {
-          position: fixed;
-          bottom: 8px;
-          left: 50%;
-          transform: translateX(-50%);
+        .legend-item {
           display: flex;
           align-items: center;
-          gap: 12px;
-          background: rgba(24,24,27,0.95);
-          padding: 8px 16px;
-          border-radius: 20px;
-          z-index: 999;
-          max-width: 90%;
-          box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-          transition: opacity 0.3s ease, transform 0.3s ease;
-          opacity: 1;
+          gap: 6px;
         }
-        .controls-row.collapsed {
-          padding: 8px;
-          gap: 0;
+        .legend-color {
+          width: 18px;
+          height: 12px;
+          border-radius: 2px;
+          border: 1px solid rgba(255,255,255,0.3);
         }
-        .controls-row.hidden {
-          opacity: 0;
-          pointer-events: none;
-          transform: translateX(-50%) translateY(20px);
-        }
-        .time-display {
-          color: #eab308;
-          font-size: 12px;
-          font-weight: 600;
-          transition: max-width 0.3s ease, opacity 0.3s ease;
-          max-width: 200px;
-          overflow: hidden;
-          white-space: nowrap;
-        }
-        .controls-row.collapsed .time-display {
-          max-width: 0;
-          opacity: 0;
-        }
-        .control-btn {
-          background: #3f3f46;
-          border: none;
+        .legend-text {
           color: #fff;
-          width: 28px;
-          height: 28px;
-          border-radius: 14px;
-          font-size: 12px;
+          font-size: 10px;
+          font-weight: 500;
+        }
+        .controls-row {
+          position: absolute;
+          bottom: 125px;
+          left: 10px;
+          z-index: 1000;
+        }
+        .toggle-btn {
+          background: rgba(0,51,102,0.9);
+          border: 1px solid #4fc3f7;
+          color: #4fc3f7;
+          padding: 2px 6px;
+          border-radius: 8px;
+          font-size: 8px;
+          font-weight: 600;
           cursor: pointer;
         }
-        .control-btn:active { background: #52525b; }
+        .toggle-btn.active { background: #4fc3f7; color: #003366; }
+        .time-display {
+          color: #fff;
+          font-size: 11px;
+          font-weight: 500;
+        }
         .zoom-controls {
           position: absolute;
           top: 10px;
           right: 10px;
-          display: flex;
-          flex-direction: column;
-          gap: 4px;
+          background: #fff;
+          border-radius: 8px;
+          box-shadow: 0 2px 8px rgba(0,0,0,0.25);
           z-index: 1000;
+          overflow: hidden;
         }
         .zoom-btn {
-          background: rgba(24,24,27,0.95);
-          border: none;
-          color: #fff;
-          width: 36px;
-          height: 36px;
-          border-radius: 8px;
-          font-size: 20px;
-          font-weight: bold;
-          cursor: pointer;
           display: flex;
           align-items: center;
           justify-content: center;
+          width: 44px;
+          height: 44px;
+          background: #fff;
+          border: none;
+          font-size: 24px;
+          font-weight: bold;
+          cursor: pointer;
+          color: #003366;
         }
-        .zoom-btn:active { background: #3f3f46; }
+        .zoom-btn:first-child { border-bottom: 1px solid #ddd; }
+        .zoom-btn:active { background: #e0e0e0; }
         .leaflet-control-zoom { display: none !important; }
+        #alertOverlay {
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+          bottom: 120px;
+          pointer-events: none;
+          z-index: 500;
+        }
       </style>
     </head>
     <body>
       <div id="map"></div>
+      <img id="alertOverlay" src="" style="display:none;" />
       <div class="zoom-controls">
         <button class="zoom-btn" id="zoomInBtn">+</button>
         <button class="zoom-btn" id="zoomOutBtn">−</button>
       </div>
       <div class="controls-row">
-        <button class="control-btn" id="playBtn">▶</button>
-        <span class="time-display" id="timeDisplay">Loading...</span>
+        <button class="toggle-btn active" id="radarBtn">☁️ Radar</button>
       </div>
-      <div class="legend-bar">
-        <div class="gradient-legend">
-          <div class="gradient-labels">
-            <span class="gradient-label">Rain</span>
-            <span class="gradient-label">Mixed</span>
-            <span class="gradient-label">Snow</span>
+      <div class="legend-box">
+        <div class="legend-title">⚠️ NWS WATCH / WARNING / ADVISORY</div>
+        <div class="legend-grid">
+          <div class="legend-item">
+            <div class="legend-color" style="background: #ff69b4;"></div>
+            <span class="legend-text">Winter Storm</span>
           </div>
-          <div class="gradient-bar"></div>
+          <div class="legend-item">
+            <div class="legend-color" style="background: #9400d3;"></div>
+            <span class="legend-text">Special Statement</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color" style="background: #00ffff;"></div>
+            <span class="legend-text">Extreme Cold</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color" style="background: #00ff00;"></div>
+            <span class="legend-text">Flood</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color" style="background: #ff0000;"></div>
+            <span class="legend-text">Tornado</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-color" style="background: #ffa500;"></div>
+            <span class="legend-text">Severe T-Storm</span>
+          </div>
         </div>
       </div>
       <script>
-        // Initialize map with explicit touch zoom settings
         var map = L.map('map', { 
           zoomControl: false,
           attributionControl: false,
-          minZoom: 4,
-          maxZoom: 12,
-          // Enable all zoom methods
-          touchZoom: 'center',
-          scrollWheelZoom: true,
-          doubleClickZoom: true,
-          boxZoom: false,
-          // Smooth zooming
-          zoomSnap: 0.1,
-          zoomDelta: 0.5,
-          wheelPxPerZoomLevel: 60,
-          // No restrictions
-          bounceAtZoomLimits: false,
-          worldCopyJump: false,
-          inertia: true,
-          inertiaDeceleration: 3000
-        });
+          minZoom: 3,
+          maxZoom: 10
+        }).setView([${usLat}, ${usLon}], 5);
         
-        // Center on US
-        map.setView([39, -96], 5);
-        
-        // Light base map (Positron - white/light green)
+        // Light base map
         L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-          maxZoom: 19,
-          attribution: ''
+          maxZoom: 19
         }).addTo(map);
         
-        // Force enable touch handlers
-        if (map.touchZoom) {
-          map.touchZoom.enable();
-        }
-        if (map.dragging) {
-          map.dragging.enable();
-        }
+        // IEM WMS Layer - using correct layer names and version
+        var alertsLayer = L.tileLayer.wms('https://mesonet.agron.iastate.edu/cgi-bin/wms/us/wwa.cgi', {
+          layers: 'warnings_c',
+          format: 'image/png',
+          transparent: true,
+          version: '1.3.0',
+          opacity: 0.8
+        }).addTo(map);
         
-        // RainViewer radar with smooth tiles and snow coverage
         var radarLayer = null;
-        var radarFrames = [];
-        var currentFrame = 0;
-        var isPlaying = false;
-        var playInterval = null;
+        var showRadar = true;
         
-        // Fetch radar data from RainViewer
+        // Load radar overlay
         fetch('https://api.rainviewer.com/public/weather-maps.json')
-          .then(response => response.json())
+          .then(r => r.json())
           .then(data => {
-            radarFrames = data.radar.past.concat(data.radar.nowcast || []);
-            if (radarFrames.length > 0) {
-              currentFrame = radarFrames.length - 1;
-              showRadarFrame(currentFrame);
+            var frames = data.radar.past;
+            if (frames.length > 0) {
+              var latest = frames[frames.length - 1];
+              radarLayer = L.tileLayer(
+                'https://tilecache.rainviewer.com' + latest.path + '/512/{z}/{x}/{y}/2/1_1.png',
+                { opacity: 0.5, zIndex: 50, tileSize: 512, zoomOffset: -1 }
+              );
+              if (showRadar) radarLayer.addTo(map);
             }
-          })
-          .catch(err => {
-            document.getElementById('timeDisplay').textContent = 'Radar unavailable';
           });
-        
-        function showRadarFrame(index) {
-          if (index < 0 || index >= radarFrames.length) return;
-          
-          var frame = radarFrames[index];
-          var timestamp = new Date(frame.time * 1000);
-          var timeStr = timestamp.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
-          
-          document.getElementById('timeDisplay').textContent = 'Radar: ' + timeStr;
-          
-          if (radarLayer) {
+        // Toggle radar layer
+        document.getElementById('radarBtn').onclick = function() {
+          showRadar = !showRadar;
+          this.classList.toggle('active', showRadar);
+          if (showRadar && radarLayer) {
+            radarLayer.addTo(map);
+          } else if (radarLayer) {
             map.removeLayer(radarLayer);
           }
-          
-          // Smooth tiles with snow: /256/{z}/{x}/{y}/{colorScheme}/{smooth}_{snow}.png
-          // colorScheme 2 = Universal Blue (clean look)
-          // smooth 1 = smooth rendering
-          // snow 1 = show snow coverage
-          radarLayer = L.tileLayer(
-            'https://tilecache.rainviewer.com' + frame.path + '/512/{z}/{x}/{y}/2/1_1.png',
-            {
-              opacity: 0.6,
-              zIndex: 100,
-              tileSize: 512,
-              zoomOffset: -1
-            }
-          ).addTo(map);
-        }
+        };
         
-        // Play/pause animation
-        var controlsRow = document.querySelector('.controls-row');
-        var hideTimeout;
+        document.getElementById('zoomInBtn').onclick = function() { map.zoomIn(); };
+        document.getElementById('zoomOutBtn').onclick = function() { map.zoomOut(); };
         
-        // Auto-hide controls after inactivity
-        function resetHideTimer() {
-          clearTimeout(hideTimeout);
-          controlsRow.classList.remove('hidden');
-          
-          // If not playing, collapse and hide after 3 seconds
-          if (!isPlaying) {
-            hideTimeout = setTimeout(function() {
-              controlsRow.classList.add('collapsed');
-              setTimeout(function() {
-                if (!isPlaying) {
-                  controlsRow.classList.add('hidden');
-                }
-              }, 2000);
-            }, 3000);
-          }
-        }
-        
-        // Show controls on any map interaction
-        map.on('click drag zoom', resetHideTimer);
-        
-        // Show controls when hovering/touching control area
-        controlsRow.addEventListener('mouseenter', function() {
-          clearTimeout(hideTimeout);
-          controlsRow.classList.remove('hidden', 'collapsed');
+        // Debug: Log when tiles load
+        alertsLayer.on('tileload', function(e) {
+          console.log('Alert tile loaded:', e.url);
         });
-        
-        controlsRow.addEventListener('touchstart', function() {
-          clearTimeout(hideTimeout);
-          controlsRow.classList.remove('hidden', 'collapsed');
+        alertsLayer.on('tileerror', function(e) {
+          console.log('Alert tile error:', e.error);
         });
-        
-        document.getElementById('playBtn').onclick = function() {
-          controlsRow.classList.remove('hidden', 'collapsed');
-          clearTimeout(hideTimeout);
-          
-          if (isPlaying) {
-            clearInterval(playInterval);
-            isPlaying = false;
-            this.textContent = '▶';
-            resetHideTimer(); // Auto-hide when stopped
-          } else {
-            isPlaying = true;
-            this.textContent = '⏸';
-            // Keep expanded while playing
-          }
-        };
-        
-        // Start hide timer on load
-        resetHideTimer();
-        
-        // Zoom button handlers
-        document.getElementById('zoomInBtn').onclick = function() {
-          map.zoomIn();
-          resetHideTimer();
-        };
-        document.getElementById('zoomOutBtn').onclick = function() {
-          map.zoomOut();
-          resetHideTimer();
-        };
       </script>
     </body>
     </html>
@@ -477,7 +353,7 @@ export default function RouteScreen() {
   const params = useLocalSearchParams();
   const [routeData, setRouteData] = useState<RouteData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const [activeTab, setActiveTab] = useState<'conditions' | 'directions' | 'alerts'>('conditions');
   const [isSpeaking, setIsSpeaking] = useState(false);
   
   // Radar map state
@@ -486,7 +362,7 @@ export default function RouteScreen() {
   // Expanded alert state - track which cards are expanded
   const [expandedCards, setExpandedCards] = useState<Set<number>>(new Set());
   
-  // Toggle card expansion (for alerts)
+  // Toggle card expansion
   const toggleCardExpand = (index: number) => {
     const newExpanded = new Set(expandedCards);
     if (newExpanded.has(index)) {
@@ -495,63 +371,53 @@ export default function RouteScreen() {
       newExpanded.add(index);
     }
     setExpandedCards(newExpanded);
-  }  
-
-  // Toggle card expansion (for bridge alerts)
-  const toggleCard = (index: number) => {
-    const newExpanded = new Set(expandedCards);
-    if (newExpanded.has(index)) {
-      newExpanded.delete(index);
-    } else {
-      newExpanded.add(index);
-    }
-    setExpandedCards(newExpanded);
-  }  
+  };
   
+  // AI Chat state
+  const [showChat, setShowChat] = useState(false);
+  const [chatMessage, setChatMessage] = useState('');
+  const [chatHistory, setChatHistory] = useState<{role: 'user' | 'ai', text: string}[]>([]);
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatSuggestions, setChatSuggestions] = useState<string[]>(['Road condition tips', 'Safe driving advice', 'Weather questions']);
   const [isListening, setIsListening] = useState(false);
 
   useEffect(() => {
-    if (!params.routeData) {
-      Alert.alert(
-        'Missing Route Data',
-        'No route data was provided. Please try again from the home screen.',
-        [
-          { text: 'OK', onPress: () => router.back() }
-        ]
-      );
-      setLoading(false);
-      return;
-    }
-    try {
-      const data = JSON.parse(params.routeData as string);
-      if (!data || !data.origin || !data.destination) {
-        throw new Error('Missing required route fields');
+    if (params.routeData) {
+      try {
+        const data = JSON.parse(params.routeData as string);
+        setRouteData(data);
+      } catch (e) {
+        console.error('Error parsing route data:', e);
       }
-      setRouteData(data);
-      
-    } catch (e) {
-      console.error('Error parsing route data:', e);
-      Alert.alert(
-        'Invalid Route Data',
-        'Could not load route details. Please try again from the home screen.',
-        [
-          { text: 'OK', onPress: () => router.back() }
-        ]
-      );
     }
     setLoading(false);
   }, [params.routeData]);
 
-  // Pull to refresh handler
-  const onRefresh = async () => {
-    setRefreshing(true);
+  // AI Chat functions
+  const sendChatMessage = async (message?: string) => {
+    const msgToSend = message || chatMessage;
+    if (!msgToSend.trim()) return;
+    
+    setChatLoading(true);
+    setChatHistory(prev => [...prev, { role: 'user', text: msgToSend }]);
+    setChatMessage('');
+    
     try {
-      const data = JSON.parse(params.routeData as string);
-      setRouteData(data);
-    } catch (e) {
-      console.error('Error refreshing route data:', e);
+      const routeContext = routeData ? `${routeData.origin} to ${routeData.destination}, ${routeData.road_condition_summary}` : null;
+      const response = await axios.post(`${API_BASE}/api/chat`, {
+        message: msgToSend,
+        route_context: routeContext
+      });
+      
+      setChatHistory(prev => [...prev, { role: 'ai', text: response.data.response }]);
+      if (response.data.suggestions) {
+        setChatSuggestions(response.data.suggestions);
+      }
+    } catch (err) {
+      setChatHistory(prev => [...prev, { role: 'ai', text: "Sorry, I couldn't process that. Please try again." }]);
+    } finally {
+      setChatLoading(false);
     }
-    setRefreshing(false);
   };
 
   // Voice recognition
@@ -587,10 +453,14 @@ export default function RouteScreen() {
 
       recognition.onstart = () => {
         setIsListening(true);
+        setChatMessage('');
       };
 
       recognition.onresult = (event: any) => {
-        // No-op: chat removed
+        const transcript = Array.from(event.results)
+          .map((result: any) => result[0].transcript)
+          .join('');
+        setChatMessage(transcript);
       };
 
       recognition.onerror = () => setIsListening(false);
@@ -601,18 +471,6 @@ export default function RouteScreen() {
       alert('Failed to start voice recognition.');
       setIsListening(false);
     }
-  };
-
-  // Clean location for voice: remove country, zip codes
-  const cleanLocationForVoice = (location: string): string => {
-    return location
-      .replace(/, United States.*$/i, '') // Remove ", United States" and anything after
-      .replace(/\b\d{5}(-\d{4})?\b/g, '') // Remove zip codes
-      .replace(/,\s*,/g, ',') // Remove double commas
-      .replace(/,\s*$/,
-
- '') // Remove trailing comma
-      .trim();
   };
 
   const speakSummary = async () => {
@@ -627,9 +485,7 @@ export default function RouteScreen() {
     setIsSpeaking(true);
     
     const parts: string[] = [];
-    const cleanOrigin = cleanLocationForVoice(routeData.origin);
-    const cleanDestination = cleanLocationForVoice(routeData.destination);
-    parts.push(`Route from ${cleanOrigin} to ${cleanDestination}.`);
+    parts.push(`Route from ${routeData.origin} to ${routeData.destination}.`);
     
     if (routeData.total_distance_miles) {
       parts.push(`Total distance: ${Math.round(routeData.total_distance_miles)} miles.`);
@@ -718,8 +574,15 @@ export default function RouteScreen() {
   }
 
   if (!routeData) {
-    // Defensive: Don't render anything if routeData is missing, as Alert will show
-    return null;
+    return (
+      <SafeAreaView style={styles.errorContainer}>
+        <Ionicons name="alert-circle" size={48} color="#ef4444" />
+        <Text style={styles.errorText}>Unable to load route data</Text>
+        <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
+          <Text style={styles.backButtonText}>Go Back</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
   }
 
   const getSafetyColor = (score: number) => {
@@ -737,13 +600,31 @@ export default function RouteScreen() {
           <Ionicons name="arrow-back" size={24} color="#fff" />
           <Text style={styles.backText}>Back</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={() => router.push('/radar-map')} style={styles.radarBtn}>
-          <Ionicons name="radio-outline" size={18} color="#22c55e" />
-          <Text style={styles.radarBtnText}>Radar</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={speakSummary} style={styles.speakBtn}>
-          <Ionicons name={isSpeaking ? "stop-circle" : "volume-high"} size={22} color={isSpeaking ? "#ef4444" : "#60a5fa"} />
-        </TouchableOpacity>
+        <View style={styles.headerActions}>
+          <TouchableOpacity onPress={() => setShowRadarMap(true)} style={styles.radarBtn}>
+            <Ionicons name="radio-outline" size={18} color="#22c55e" />
+            <Text style={styles.radarBtnText}>Radar</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={speakSummary} style={styles.speakBtn}>
+            <Ionicons name={isSpeaking ? "stop-circle" : "volume-high"} size={22} color={isSpeaking ? "#ef4444" : "#60a5fa"} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={shareRoute} style={styles.shareBtn}>
+            <Ionicons name="share-outline" size={22} color="#fff" />
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Route Stats Bar */}
+      <View style={styles.statsBar}>
+        <View style={styles.statItem}>
+          <Ionicons name="speedometer-outline" size={16} color="#60a5fa" />
+          <Text style={styles.statValue}>{routeData.total_distance_miles ? `${Math.round(routeData.total_distance_miles)} mi` : '--'}</Text>
+        </View>
+        <View style={styles.statDivider} />
+        <View style={styles.statItem}>
+          <Ionicons name="time-outline" size={16} color="#60a5fa" />
+          <Text style={styles.statValue}>{routeData.total_duration_minutes ? formatDuration(routeData.total_duration_minutes) : '--'}</Text>
+        </View>
       </View>
 
       {/* Radar Map Modal */}
@@ -807,12 +688,19 @@ export default function RouteScreen() {
         </TouchableOpacity>
       )}
 
-      {/* Pro Features Row */}
+      {/* Road Condition Summary */}
+      <View style={styles.conditionSummary}>
+        <Text style={styles.conditionSummaryText}>
+          {routeData.road_condition_summary || '✅ Good road conditions expected'}
+        </Text>
+      </View>
+
+      {/* Features Row */}
       <View style={styles.proFeaturesRow}>
         {/* Boondockers */}
         <TouchableOpacity 
           style={styles.proFeatureCard}
-          onPress={() => router.push('/boondockers-pro')}
+          onPress={() => router.push('/boondockers')}
         >
           <View style={[styles.proFeatureIcon, { backgroundColor: '#8b4513' }]}>
             <Ionicons name="bonfire" size={20} color="#fff" />
@@ -823,210 +711,137 @@ export default function RouteScreen() {
         {/* Tractor Trailer */}
         <TouchableOpacity 
           style={styles.proFeatureCard}
-          onPress={() => router.push('/tractor-trailer-pro')}
+          onPress={() => router.push('/tractor-trailer')}
         >
           <View style={[styles.proFeatureIcon, { backgroundColor: '#3b82f6' }]}>
             <Ionicons name="bus" size={20} color="#fff" />
           </View>
           <Text style={styles.proFeatureTitle}>Tractor Trailer</Text>
         </TouchableOpacity>
+
+        {/* User Guide */}
+        <TouchableOpacity 
+          style={styles.proFeatureCard}
+          onPress={() => router.push('/user-guide')}
+        >
+          <View style={[styles.proFeatureIcon, { backgroundColor: '#8b5cf6' }]}>
+            <Ionicons name="book" size={20} color="#fff" />
+          </View>
+          <Text style={styles.proFeatureTitle}>Guide</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Tabs */}
+      <View style={styles.tabs}>
+        <TouchableOpacity 
+          style={[styles.tab, activeTab === 'conditions' && styles.tabActive]}
+          onPress={() => setActiveTab('conditions')}
+        >
+          <Ionicons name="car" size={18} color={activeTab === 'conditions' ? '#eab308' : '#6b7280'} />
+          <Text style={[styles.tabText, activeTab === 'conditions' && styles.tabTextActive]}>Road</Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={[styles.tab, activeTab === 'directions' && styles.tabActive]}
+          onPress={() => setActiveTab('directions')}
+        >
+          <Ionicons name="navigate" size={18} color={activeTab === 'directions' ? '#eab308' : '#6b7280'} />
+          <Text style={[styles.tabText, activeTab === 'directions' && styles.tabTextActive]}>Directions</Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={[styles.tab, activeTab === 'alerts' && styles.tabActive]}
+          onPress={() => setActiveTab('alerts')}
+        >
+          <Ionicons name="warning" size={18} color={activeTab === 'alerts' ? '#ef4444' : '#6b7280'} />
+          <Text style={[styles.tabText, activeTab === 'alerts' && styles.tabTextActive]}>Alerts</Text>
+          {routeData.hazard_alerts?.length > 0 && (
+            <View style={styles.tabBadge}>
+              <Text style={styles.tabBadgeText}>{routeData.hazard_alerts.length}</Text>
+            </View>
+          )}
+        </TouchableOpacity>
       </View>
 
       {/* Content */}
-      <ScrollView 
-        style={styles.content} 
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            tintColor="#3b82f6"
-            colors={['#3b82f6']}
-          />
-        }
-      >
-        {/* Trucker Alerts Button */}
-        {routeData.trucker_warnings && routeData.trucker_warnings.length > 0 && (
-          <TouchableOpacity
-            style={styles.truckerAlertsButton}
-            onPress={() => router.push({
-              pathname: '/truckerAlerts',
-              params: { routeData: JSON.stringify(routeData) }
-            })}
-            activeOpacity={0.7}
-          >
-            <Text style={styles.truckerAlertsButtonIcon}>🚛</Text>
-            <View style={styles.truckerAlertsButtonContent}>
-              <Text style={styles.truckerAlertsButtonTitle}>
-                Trucker Alerts ({routeData.trucker_warnings.length})
-              </Text>
-              <Text style={styles.truckerAlertsButtonSubtitle}>
-                Tap to view all alerts and safety tips
-              </Text>
-            </View>
-            <Text style={styles.truckerAlertsButtonArrow}>›</Text>
-          </TouchableOpacity>
-        )}
+      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        
+        {/* Road Conditions Tab */}
+        {activeTab === 'conditions' && (
+          <View style={styles.conditionsTab}>
+            {/* Trucker Warnings */}
+            {routeData.trucker_warnings && routeData.trucker_warnings.length > 0 && (
+              <View style={styles.truckerBox}>
+                <Text style={styles.truckerTitle}>🚛 TRUCKER ALERTS</Text>
+                {routeData.trucker_warnings.map((warning, idx) => (
+                  <Text key={idx} style={styles.truckerWarning}>{warning}</Text>
+                ))}
+              </View>
+            )}
 
-        {/* Tabs for Weather Alerts, Bridge Alerts, and Weather Radar */}
-        <View style={styles.tabsContainer}>
-          <TouchableOpacity
-            style={styles.tab}
-            onPress={() => router.push({
-              pathname: '/weather-alerts',
-              params: { routeData: JSON.stringify(routeData) }
-            })}
-          >
-            <Text style={styles.tabText}>
-              Weather Alerts{routeData.hazard_alerts && routeData.hazard_alerts.length > 0 && ` (${routeData.hazard_alerts.length})`}
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.tab}
-            onPress={() => router.push({
-              pathname: '/truckerAlerts',
-              params: { routeData: JSON.stringify(routeData) }
-            })}
-          >
-            <Text style={styles.tabText}>
-              Bridge Alerts{routeData.bridge_warnings && routeData.bridge_warnings.length > 0 && ` (${routeData.bridge_warnings.length})`}
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={styles.tab}
-            onPress={() => router.push('/radar-map')}
-          >
-            <Text style={styles.tabText}>
-              Weather Radar
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Road Conditions - Always Visible */}
-        <Text style={styles.sectionTitle}>🛣️ Road Conditions Along Route</Text>
-        <Text style={styles.sectionSubtitle}>Weather-based road surface conditions</Text>
-        {routeData.waypoints && Array.isArray(routeData.waypoints) && routeData.waypoints.map((wp, index) => {
+            {/* Waypoint Road Conditions */}
+            <Text style={styles.sectionTitle}>🛣️ Road Conditions Along Route</Text>
+            <Text style={styles.sectionSubtitle}>Weather-based road surface conditions</Text>
+            {routeData.waypoints.map((wp, index) => {
               // Derive road condition from weather ONLY (no alerts shown here)
               const temp = wp.weather?.temperature || 50;
-              const conditions = (wp.weather?.conditions || 'Clear').toLowerCase();
-              const actualConditions = wp.weather?.conditions || 'Clear';
-              const isDaytime = wp.weather?.is_daytime !== false; // Default to true if not specified
+              const conditions = (wp.weather?.conditions || '').toLowerCase();
               const windSpeed = wp.weather?.wind_speed ? parseInt(wp.weather.wind_speed) : 0;
-              
-              // Adjust conditions text for nighttime
-              let displayConditions = actualConditions;
-              if (!isDaytime) {
-                // Replace daytime terms with nighttime equivalents
-                displayConditions = displayConditions
-                  .replace(/Sunny/gi, 'Clear')
-                  .replace(/Partly Cloudy/gi, 'Partly Cloudy Night')
-                  .replace(/Mostly Sunny/gi, 'Mostly Clear')
-                  .replace(/Mostly Cloudy/gi, 'Mostly Cloudy Night');
-              }
-              
-              // Check if weather data is missing
-              const hasWeatherData = wp.weather && wp.weather.temperature !== null && wp.weather.conditions;
               
               let condIcon = '✓';
               let condLabel = 'DRY';
               let condColor = '#22c55e';
-              let condDesc = displayConditions; // Use adjusted conditions
+              let condDesc = 'Clear';
               let roadSurface = 'Normal driving conditions';
               
-              // If no weather data, show warning
-              if (!hasWeatherData) {
-                condIcon = '⚠️';
-                condLabel = 'N/A';
-                condColor = '#6b7280';
-                condDesc = 'Weather data unavailable';
-                roadSurface = 'Check local road conditions before traveling';
-              } else {
-                // Road conditions based ONLY on weather - NO alerts here
-                // Check for sleet, freezing rain, ice pellets first (most dangerous)
-                if (conditions.includes('sleet') || conditions.includes('ice pellets') || conditions.includes('freezing rain') || conditions.includes('wintry mix')) {
-                  condIcon = '🧊';
-                  condLabel = 'ICY';
-                  condColor = '#ef4444';
-                  condDesc = `Sleet/Ice pellets - Extremely hazardous`;
-                  roadSurface = `DANGEROUS: Road surfaces covered in ice at ${temp}°F. Sleet creates immediate black ice. Avoid travel if possible, reduce speed to 25mph or less.`;
-                } else if (temp <= 32 && (conditions.includes('rain') || conditions.includes('freezing') || conditions.includes('drizzle'))) {
-                  condIcon = '🧊';
-                  condLabel = 'ICY';
-                  condColor = '#ef4444';
-                  condDesc = `Freezing rain - Black ice forming`;
-                  roadSurface = `DANGEROUS: Road surfaces are icy at ${temp}°F. Bridges and overpasses freeze first. Reduce speed significantly, increase following distance.`;
-                } else if (temp <= 32 && conditions.includes('snow')) {
-                  condIcon = '❄️';
-                  condLabel = 'SNOW';
-                  condColor = '#60a5fa';
-                  condDesc = `Active snowfall - accumulation likely`;
-                  roadSurface = `HAZARDOUS: Snow-covered road surfaces at ${temp}°F. Expect reduced traction, poor visibility, and potential lane markings obscured.`;
-                } else if (temp > 32 && temp <= 40 && conditions.includes('snow')) {
-                  condIcon = '🌨️';
-                  condLabel = 'SLUSH';
-                  condColor = '#f59e0b';
-                  condDesc = `Wet snow - slushy conditions`;
-                  roadSurface = `CAUTION: Slushy road surfaces at ${temp}°F. Reduced traction, hydroplaning risk, slush buildup in wheel wells.`;
-                } else if (conditions.includes('fog') || conditions.includes('mist')) {
-                  condIcon = '🌫️';
-                  condLabel = 'FOG';
-                  condColor = '#9ca3af';
-                  condDesc = 'Dense fog - visibility under 1/4 mile';
-                  roadSurface = 'VISIBILITY HAZARD: Road may be obscured by fog. Use low beams only, reduce speed, use fog lines for guidance.';
-                } else if (conditions.includes('rain') || conditions.includes('shower') || conditions.includes('drizzle')) {
-                  condIcon = '💧';
-                  condLabel = 'WET';
-                  condColor = '#3b82f6';
-                  condDesc = 'Active precipitation - wet pavement';
-                  roadSurface = 'WET ROADS: Road surfaces slippery when wet. Watch for hydroplaning above 45mph, increase braking distance, avoid sudden movements.';
-                } else if (conditions.includes('thunder') || conditions.includes('storm')) {
-                  condIcon = '⛈️';
-                  condLabel = 'STORM';
-                  condColor = '#7c3aed';
-                  condDesc = 'Severe weather - thunderstorms';
-                  roadSurface = 'SEVERE: Heavy rain reducing visibility, road flooding possible. Lightning hazard. Consider delaying travel or seeking shelter.';
-                } else if (windSpeed > 30) {
-                  condIcon = '💨';
-                  condLabel = 'WINDY';
-                  condColor = '#f59e0b';
-                  condDesc = `High winds - ${windSpeed} mph gusts`;
-                  roadSurface = `WIND HAZARD: Strong crosswinds at ${windSpeed} mph. High-profile vehicles at risk, debris on roadways possible, maintain firm steering.`;
-                } else if (conditions.includes('cloud') || conditions.includes('overcast')) {
-                  condIcon = '☁️';
-                  condLabel = 'DRY';
-                  condColor = '#6b7280';
-                  condDesc = displayConditions;
-                  roadSurface = 'Road surfaces dry, normal driving conditions expected';
-                } else if (conditions.includes('partly') || conditions.includes('sun') || conditions.includes('clear')) {
-                  condIcon = isDaytime ? '☀️' : '🌙';
-                  condLabel = 'DRY';
-                  condColor = '#22c55e';
-                  condDesc = displayConditions;
-                  roadSurface = 'Road surfaces dry, normal driving conditions expected';
-                }
+              // Road conditions based ONLY on weather - NO alerts here
+              if (temp <= 32 && (conditions.includes('rain') || conditions.includes('freezing') || conditions.includes('drizzle'))) {
+                condIcon = '🧊';
+                condLabel = 'ICY';
+                condColor = '#ef4444';
+                condDesc = `Black ice likely`;
+                roadSurface = `${temp}°F - Reduce speed significantly`;
+              } else if (temp <= 32 && conditions.includes('snow')) {
+                condIcon = '❄️';
+                condLabel = 'SNOW';
+                condColor = '#60a5fa';
+                condDesc = `Snow-covered`;
+                roadSurface = `${temp}°F - Use caution`;
+              } else if (temp > 32 && temp <= 40 && conditions.includes('snow')) {
+                condIcon = '🌨️';
+                condLabel = 'SLUSH';
+                condColor = '#f59e0b';
+                condDesc = `Slushy`;
+                roadSurface = `${temp}°F - Reduced traction`;
+              } else if (conditions.includes('fog') || conditions.includes('mist')) {
+                condIcon = '🌫️';
+                condLabel = 'FOG';
+                condColor = '#9ca3af';
+                condDesc = 'Low visibility';
+                roadSurface = 'Use low beams';
+              } else if (conditions.includes('rain') || conditions.includes('shower') || conditions.includes('drizzle')) {
+                condIcon = '💧';
+                condLabel = 'WET';
+                condColor = '#3b82f6';
+                condDesc = 'Wet roads';
+                roadSurface = 'Watch for hydroplaning';
+              } else if (conditions.includes('thunder') || conditions.includes('storm')) {
+                condIcon = '⛈️';
+                condLabel = 'STORM';
+                condColor = '#7c3aed';
+                condDesc = 'Storm conditions';
+                roadSurface = 'Heavy rain possible';
+              } else if (windSpeed > 30) {
+                condIcon = '💨';
+                condLabel = 'WINDY';
+                condColor = '#f59e0b';
+                condDesc = `Windy - ${windSpeed} mph`;
+                roadSurface = 'Watch for crosswinds';
               }
               
               const mileMarker = Math.round(wp.waypoint.distance_from_start || 0);
               const locationName = wp.waypoint.name || 'Unknown';
-              const isExpanded = expandedCards.has(index + 2000); // Offset to avoid collision with alert cards
               
               return (
-                <TouchableOpacity 
-                  key={index} 
-                  style={styles.conditionCard}
-                  onPress={() => {
-                    setExpandedCards(prev => {
-                      const newSet = new Set(prev);
-                      if (newSet.has(index + 2000)) {
-                        newSet.delete(index + 2000);
-                      } else {
-                        newSet.add(index + 2000);
-                      }
-                      return newSet;
-                    });
-                  }}
-                  activeOpacity={0.7}
-                >
+                <View key={index} style={styles.conditionCard}>
                   <View style={styles.conditionCardMain}>
                     <View style={styles.mileMarkerBox}>
                       <Text style={styles.mileMarkerLabel}>MILE</Text>
@@ -1037,7 +852,7 @@ export default function RouteScreen() {
                       <Text style={styles.conditionLabel}>{condLabel}</Text>
                     </View>
                     <View style={styles.conditionInfo}>
-                      <Text style={styles.conditionLocation} numberOfLines={isExpanded ? undefined : 1}>
+                      <Text style={styles.conditionLocation} numberOfLines={1}>
                         {locationName}
                       </Text>
                       <Text style={styles.conditionDesc}>{condDesc}</Text>
@@ -1047,9 +862,162 @@ export default function RouteScreen() {
                       </Text>
                     </View>
                   </View>
-                </TouchableOpacity>
+                </View>
               );
             })}
+          </View>
+        )}
+
+        {/* Turn-by-Turn Directions Tab */}
+        {activeTab === 'directions' && (
+          <View style={styles.directionsTab}>
+            <TouchableOpacity style={styles.openMapsBtn} onPress={openInMaps}>
+              <Ionicons name="navigate" size={20} color="#fff" />
+              <Text style={styles.openMapsText}>Open in Maps App</Text>
+            </TouchableOpacity>
+
+            <Text style={styles.sectionTitle}>Turn-by-Turn with Road Conditions</Text>
+            
+            {routeData.turn_by_turn && routeData.turn_by_turn.length > 0 ? (
+              routeData.turn_by_turn.map((step, index) => (
+                <View key={index} style={[styles.stepCard, step.has_alert && styles.stepCardAlert]}>
+                  <View style={styles.stepIcon}>
+                    <Ionicons 
+                      name={getManeuverIcon(step.maneuver) as any} 
+                      size={20} 
+                      color={step.has_alert ? '#ef4444' : '#60a5fa'} 
+                    />
+                  </View>
+                  <View style={styles.stepContent}>
+                    <Text style={styles.stepInstruction}>{step.instruction}</Text>
+                    <Text style={styles.stepRoad}>{step.road_name}</Text>
+                    <View style={styles.stepMeta}>
+                      <Text style={styles.stepDistance}>{step.distance_miles} mi</Text>
+                      {step.road_condition && (
+                        <View style={[styles.stepConditionBadge, { backgroundColor: step.road_condition.color }]}>
+                          <Text style={styles.stepConditionText}>
+                            {step.road_condition.icon} {step.road_condition.label}
+                          </Text>
+                        </View>
+                      )}
+                      {step.temperature && (
+                        <Text style={styles.stepTemp}>{step.temperature}°F</Text>
+                      )}
+                    </View>
+                  </View>
+                </View>
+              ))
+            ) : (
+              <View style={styles.noDirections}>
+                <Ionicons name="navigate-outline" size={48} color="#6b7280" />
+                <Text style={styles.noDirectionsText}>Tap "Open in Maps App" for navigation</Text>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Alerts Tab */}
+        {activeTab === 'alerts' && (
+          <View style={styles.alertsTab}>
+            <Text style={styles.sectionTitle}>⚠️ Weather Alerts Along Route</Text>
+            <Text style={styles.sectionSubtitle}>Tap any alert to see full details</Text>
+            
+            {routeData.hazard_alerts && routeData.hazard_alerts.length > 0 ? (
+              routeData.hazard_alerts.map((alert, index) => {
+                const isExpanded = expandedCards.has(index + 1000); // Use offset to differentiate from road cards
+                
+                return (
+                  <TouchableOpacity 
+                    key={index} 
+                    style={[
+                      styles.alertCard,
+                      alert.severity === 'extreme' ? styles.alertExtreme :
+                      alert.severity === 'high' ? styles.alertHigh : styles.alertMedium,
+                      isExpanded && styles.alertCardExpanded
+                    ]}
+                    onPress={() => toggleCardExpand(index + 1000)}
+                    activeOpacity={0.8}
+                  >
+                    <View style={styles.alertHeader}>
+                      <Ionicons 
+                        name={
+                          alert.type === 'ice' ? 'snow' :
+                          alert.type === 'rain' ? 'rainy' :
+                          alert.type === 'wind' ? 'cloudy' :
+                          'warning'
+                        } 
+                        size={28} 
+                        color="#fff" 
+                      />
+                      <View style={styles.alertInfo}>
+                        <Text style={styles.alertCountdown}>{alert.countdown_text}</Text>
+                        <Text style={styles.alertMessage}>{alert.message}</Text>
+                      </View>
+                      <Ionicons 
+                        name={isExpanded ? "chevron-up" : "chevron-down"} 
+                        size={20} 
+                        color="#fff" 
+                      />
+                    </View>
+                    
+                    {/* Expanded Alert Details */}
+                    {isExpanded && (
+                      <View style={styles.alertExpandedContent}>
+                        <View style={styles.alertFullDescription}>
+                          <Text style={styles.alertFullTitle}>Full Alert Details:</Text>
+                          <Text style={styles.alertFullText}>
+                            {alert.full_description || alert.description || 
+                             `This ${alert.message || 'weather alert'} is active for your route area. ` +
+                             `Exercise caution and monitor local weather updates. ` +
+                             `Conditions may include reduced visibility, slippery roads, or other hazards.`}
+                          </Text>
+                        </View>
+                        
+                        {alert.instruction && (
+                          <View style={styles.alertInstructionBox}>
+                            <Text style={styles.alertInstructionTitle}>📋 What To Do:</Text>
+                            <Text style={styles.alertInstructionText}>{alert.instruction}</Text>
+                          </View>
+                        )}
+                        
+                        <View style={styles.alertAction}>
+                          <Ionicons name="checkmark-circle" size={16} color="#22c55e" />
+                          <Text style={styles.alertRec}>{alert.recommendation}</Text>
+                        </View>
+                      </View>
+                    )}
+                    
+                    {!isExpanded && (
+                      <>
+                        <View style={styles.alertAction}>
+                          <Ionicons name="checkmark-circle" size={16} color="#22c55e" />
+                          <Text style={styles.alertRec}>{alert.recommendation}</Text>
+                        </View>
+                        <View style={styles.alertMeta}>
+                          <Text style={styles.alertDistance}>📍 {Math.round(alert.distance_miles)} mi</Text>
+                          <Text style={styles.alertEta}>⏱ {alert.eta_minutes} min</Text>
+                        </View>
+                      </>
+                    )}
+                    
+                    {isExpanded && (
+                      <View style={styles.alertMeta}>
+                        <Text style={styles.alertDistance}>📍 {Math.round(alert.distance_miles)} mi away</Text>
+                        <Text style={styles.alertEta}>⏱ ETA: {alert.eta_minutes} min</Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                );
+              })
+            ) : (
+              <View style={styles.noAlerts}>
+                <Ionicons name="checkmark-circle" size={64} color="#22c55e" />
+                <Text style={styles.noAlertsTitle}>All Clear!</Text>
+                <Text style={styles.noAlertsText}>No significant hazards on your route</Text>
+              </View>
+            )}
+          </View>
+        )}
         
         <View style={styles.bottomPadding} />
       </ScrollView>
@@ -1062,7 +1030,7 @@ export default function RouteScreen() {
         </TouchableOpacity>
         <TouchableOpacity style={styles.navBtn} onPress={openInMaps}>
           <Ionicons name="navigate" size={24} color="#fff" />
-          <Text style={styles.navText}>Google Maps Navigation</Text>
+          <Text style={styles.navText}>Start Navigation</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.actionBtn} onPress={speakSummary}>
           <Ionicons name={isSpeaking ? "stop" : "volume-high"} size={22} color="#fff" />
@@ -1070,7 +1038,91 @@ export default function RouteScreen() {
         </TouchableOpacity>
       </View>
 
-      // ...existing code...
+      {/* AI Chat Modal */}
+      {showChat && (
+        <Modal transparent animationType="slide">
+          <View style={styles.chatModalOverlay}>
+            <View style={styles.chatModalContent}>
+              <View style={styles.chatHeader}>
+                <View style={styles.chatHeaderLeft}>
+                  <Ionicons name="chatbubbles" size={24} color="#eab308" />
+                  <Text style={styles.chatTitle}>Ask Routecast AI</Text>
+                </View>
+                <TouchableOpacity onPress={() => setShowChat(false)}>
+                  <Ionicons name="close" size={24} color="#fff" />
+                </TouchableOpacity>
+              </View>
+              
+              <ScrollView style={styles.chatMessages} showsVerticalScrollIndicator={false}>
+                {chatHistory.length === 0 && (
+                  <View style={styles.chatWelcome}>
+                    <Text style={styles.chatWelcomeText}>👋 Ask about your route!</Text>
+                    <Text style={styles.chatWelcomeSubtext}>I can help with road conditions, weather, and safe driving tips.</Text>
+                  </View>
+                )}
+                
+                {chatHistory.map((msg, idx) => (
+                  <View key={idx} style={[styles.chatBubble, msg.role === 'user' ? styles.userBubble : styles.aiBubble]}>
+                    <Text style={styles.chatBubbleText}>{msg.text}</Text>
+                  </View>
+                ))}
+                
+                {chatLoading && (
+                  <View style={styles.chatTyping}>
+                    <ActivityIndicator size="small" color="#eab308" />
+                    <Text style={styles.chatTypingText}>Thinking...</Text>
+                  </View>
+                )}
+              </ScrollView>
+              
+              <View style={styles.chatSuggestions}>
+                {chatSuggestions.map((suggestion, idx) => (
+                  <TouchableOpacity 
+                    key={idx} 
+                    style={styles.chatSuggestionBtn}
+                    onPress={() => sendChatMessage(suggestion)}
+                  >
+                    <Text style={styles.chatSuggestionText}>{suggestion}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              
+              {isListening && (
+                <View style={styles.listeningIndicator}>
+                  <Text style={styles.listeningText}>🎤 Listening...</Text>
+                </View>
+              )}
+              
+              <View style={styles.chatInputRow}>
+                <TouchableOpacity style={[styles.micBtn, isListening && styles.micBtnActive]} onPress={startVoiceRecognition}>
+                  <Ionicons name={isListening ? "radio-button-on" : "mic"} size={22} color={isListening ? "#ef4444" : "#fff"} />
+                </TouchableOpacity>
+                <TextInput
+                  style={styles.chatInput}
+                  placeholder="Type or tap mic to speak..."
+                  placeholderTextColor="#6b7280"
+                  value={chatMessage}
+                  onChangeText={setChatMessage}
+                  onSubmitEditing={() => sendChatMessage()}
+                  returnKeyType="send"
+                />
+                <TouchableOpacity 
+                  style={[styles.chatSendBtn, !chatMessage.trim() && styles.chatSendBtnDisabled]}
+                  onPress={() => sendChatMessage()}
+                  disabled={!chatMessage.trim() || chatLoading}
+                >
+                  <Ionicons name="send" size={20} color="#fff" />
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {/* Floating Chat Button */}
+      <TouchableOpacity style={styles.chatFab} onPress={() => setShowChat(true)}>
+        <Ionicons name="chatbubble-ellipses" size={24} color="#fff" />
+      </TouchableOpacity>
     </SafeAreaView>
   );
 }
@@ -1119,8 +1171,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 12,
-    paddingTop: 20,
-    paddingBottom: 10,
+    paddingVertical: 10,
     backgroundColor: '#27272a',
     borderBottomWidth: 1,
     borderBottomColor: '#3f3f46',
@@ -1130,7 +1181,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 6,
     gap: 4,
-    minWidth: 80,
   },
   backText: {
     color: '#60a5fa',
@@ -1142,18 +1192,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
-  navBtn: {
-    flex: 1,
+  shareBtn: {
+    padding: 6,
+  },
+  statsBar: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#2563eb',
-    borderRadius: 8,
-    marginHorizontal: 8,
+    backgroundColor: '#1f1f23',
     paddingVertical: 10,
-    paddingHorizontal: 12,
-    gap: 6,
-    marginBottom: 18, // Move button up
+    paddingHorizontal: 16,
+    gap: 16,
   },
   statItem: {
     flexDirection: 'row',
@@ -1186,8 +1235,6 @@ const styles = StyleSheet.create({
   },
   speakBtn: {
     padding: 6,
-    minWidth: 80,
-    alignItems: 'flex-end',
   },
   safetyBanner: {
     flexDirection: 'row',
@@ -1268,93 +1315,47 @@ const styles = StyleSheet.create({
     fontSize: 13,
     textAlign: 'center',
   },
-  boondockersProSection: {
+  tabs: {
     flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#1f1f23',
     marginHorizontal: 16,
     marginTop: 12,
-    marginBottom: 8,
-    padding: 14,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#8b4513',
-  },
-  boondockersProIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#fef3c7',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  boondockersProContent: {
-    flex: 1,
-  },
-  boondockersProTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#fff',
-    marginBottom: 2,
-  },
-  boondockersProDesc: {
-    fontSize: 12,
-    color: '#a1a1aa',
-  },
-  proFeaturesRow: {
-    flexDirection: 'row',
-    gap: 12,
-    paddingHorizontal: 16,
-    marginBottom: 16,
-  },
-  proFeatureCard: {
-    flex: 1,
-    backgroundColor: '#1a1a1a',
-    borderRadius: 12,
-    padding: 12,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#27272a',
-  },
-  proFeatureIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  proFeatureTitle: {
-    color: '#fff',
-    fontSize: 13,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  tabsContainer: {
-    flexDirection: 'row',
-    marginTop: 16,
-    marginBottom: 8,
-    gap: 8,
+    backgroundColor: '#27272a',
+    borderRadius: 10,
+    padding: 4,
   },
   tab: {
     flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 8,
+    flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#27272a',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 10,
+    borderRadius: 8,
   },
   tabActive: {
-    backgroundColor: '#eab308',
+    backgroundColor: '#3f3f46',
   },
   tabText: {
-    color: '#a1a1aa',
-    fontSize: 14,
+    color: '#6b7280',
+    fontSize: 13,
     fontWeight: '600',
   },
   tabTextActive: {
-    color: '#000',
+    color: '#eab308',
+  },
+  tabBadge: {
+    backgroundColor: '#ef4444',
+    borderRadius: 10,
+    minWidth: 18,
+    height: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+  },
+  tabBadgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '700',
   },
   content: {
     flex: 1,
@@ -1392,38 +1393,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginBottom: 4,
   },
-  truckerAlertsButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#422006',
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#f59e0b',
-  },
-  truckerAlertsButtonIcon: {
-    fontSize: 24,
-    marginRight: 12,
-  },
-  truckerAlertsButtonContent: {
-    flex: 1,
-  },
-  truckerAlertsButtonTitle: {
-    color: '#fbbf24',
-    fontSize: 14,
-    fontWeight: '700',
-    marginBottom: 4,
-  },
-  truckerAlertsButtonSubtitle: {
-    color: '#fde68a',
-    fontSize: 12,
-  },
-  truckerAlertsButtonArrow: {
-    color: '#f59e0b',
-    fontSize: 20,
-    marginLeft: 8,
-  },
   conditionCard: {
     backgroundColor: '#27272a',
     borderRadius: 10,
@@ -1436,7 +1405,7 @@ const styles = StyleSheet.create({
   },
   conditionCardMain: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     gap: 8,
   },
   expandIndicator: {
@@ -1755,75 +1724,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginTop: 4,
   },
-  bridgeAlertCard: {
-    backgroundColor: '#3f3f46',
-    borderRadius: 12,
-    padding: 16,
-    marginHorizontal: 16,
-    marginBottom: 12,
-    borderLeftWidth: 4,
-    borderLeftColor: '#eab308',
-  },
-  bridgeAlertCardExpanded: {
-    backgroundColor: '#27272a',
-  },
-  bridgeAlertHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  bridgeAlertIconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#eab30820',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  bridgeAlertIcon: {
-    fontSize: 24,
-  },
-  bridgeAlertInfo: {
-    flex: 1,
-  },
-  bridgeAlertTitle: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  bridgeAlertSubtitle: {
-    color: '#9ca3af',
-    fontSize: 13,
-    marginTop: 2,
-  },
-  bridgeAlertDetails: {
-    marginTop: 16,
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: '#52525b',
-    gap: 12,
-  },
-  bridgeAlertWarningText: {
-    color: '#e5e7eb',
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  bridgeAlertTip: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-    backgroundColor: '#eab30810',
-    padding: 12,
-    borderRadius: 8,
-  },
-  bridgeAlertTipText: {
-    flex: 1,
-    color: '#fbbf24',
-    fontSize: 13,
-    lineHeight: 18,
-  },
   bottomPadding: {
-    height: Platform.OS === 'ios' ? 120 : 100,
+    height: 100,
   },
   actionBar: {
     flexDirection: 'row',
@@ -1832,7 +1734,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#27272a',
     paddingVertical: 12,
     paddingHorizontal: 16,
-    paddingBottom: Platform.OS === 'android' ? 40 : 24,
     borderTopWidth: 1,
     borderTopColor: '#3f3f46',
   },
@@ -1845,6 +1746,15 @@ const styles = StyleSheet.create({
     fontSize: 11,
     marginTop: 4,
   },
+  navBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#2563eb',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 25,
+    gap: 8,
+  },
   navText: {
     color: '#fff',
     fontSize: 14,
@@ -1855,9 +1765,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#14532d',
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 16,
+    marginRight: 8,
     gap: 4,
   },
   radarBtnText: {
@@ -2060,5 +1971,36 @@ const styles = StyleSheet.create({
   },
   micBtnActive: {
     backgroundColor: '#7f1d1d',
+  },
+  // Features Row Styles
+  proFeaturesRow: {
+    flexDirection: 'row',
+    gap: 12,
+    paddingHorizontal: 16,
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  proFeatureCard: {
+    flex: 1,
+    backgroundColor: '#1a1a1a',
+    borderRadius: 12,
+    padding: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#27272a',
+  },
+  proFeatureIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  proFeatureTitle: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
   },
 });

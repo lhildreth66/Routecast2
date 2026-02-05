@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import { API_BASE } from './apiConfig';
+import { API_BASE } from '../lib/apiConfig';
 
 export default function WindShelterScreen() {
   const router = useRouter();
@@ -68,7 +68,7 @@ export default function WindShelterScreen() {
     setResult(null);
     setError('');
     try {
-      const resp = await axios.post(`${API_BASE}/api/pro/wind-shelter/orientation`, {
+      const resp = await axios.post(`${API_BASE}/api/wind-shelter/orientation`, {
         predominant_dir_deg: parseInt(windDirection, 10),
         gust_mph: parseInt(gustSpeed, 10),
       });
