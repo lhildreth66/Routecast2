@@ -12,8 +12,9 @@ import { useState, useCallback, useEffect } from 'react';
 import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
+import { API_BASE } from '../apiConfig';
 
-const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:8000/api';
+const API_URL = API_BASE;
 
 interface RouteWaypoint {
   latitude: number;

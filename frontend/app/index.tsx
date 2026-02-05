@@ -204,7 +204,7 @@ export default function HomeScreen() {
       const startTime = Date.now();
       console.log('[DEBUG] Testing connection to:', API_BASE);
       
-      const response = await axios.get(`${API_BASE}/health`, {
+      const response = await axios.get(`${API_BASE}/api/health`, {
         timeout: 10000,
       });
       

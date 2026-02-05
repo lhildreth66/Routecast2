@@ -7,8 +7,7 @@
 
 import { useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-
-const API_BASE = process.env.EXPO_PUBLIC_API_BASE || 'http://localhost:8000';
+import { API_BASE } from '../apiConfig';
 
 // Type-safe interfaces matching API models
 

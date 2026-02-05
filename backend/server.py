@@ -5372,10 +5372,25 @@ async def get_truck_alerts(request: TruckAlertRequest):
 
 
 # Add CORS middleware first, before including router
+# Note: Mobile apps (React Native/Expo) bypass CORS entirely
+# CORS only matters if you add a web dashboard/admin panel in the future
+ALLOWED_ORIGINS = [
+    # Local development only (for testing API in browser/Postman)
+    "http://localhost:8000",
+    "http://localhost:8081",
+    "http://localhost:19006",
+    "http://localhost:3000",
+]
+
+# Add environment variable for additional origins if you deploy a web frontend later
+if os.environ.get('ALLOWED_ORIGINS'):
+    extra_origins = os.environ.get('ALLOWED_ORIGINS').split(',')
+    ALLOWED_ORIGINS.extend([origin.strip() for origin in extra_origins])
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
