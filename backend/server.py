@@ -1770,6 +1770,23 @@ def analyze_route_conditions(waypoints_weather: List[WaypointWeather]) -> tuple:
     
     return summary, worst_condition, reroute_needed, reroute_reason
 
+
+def parse_lat_lng(value: Optional[str]) -> Optional[Dict[str, float]]:
+    """Parse a "lat,lng" string into a coordinate dict if valid."""
+    if not value:
+        return None
+    parts = [p.strip() for p in value.split(",")]
+    if len(parts) != 2:
+        return None
+    try:
+        lat_val = float(parts[0])
+        lon_val = float(parts[1])
+        if -90.0 <= lat_val <= 90.0 and -180.0 <= lon_val <= 180.0:
+            return {"lat": lat_val, "lon": lon_val}
+    except Exception:
+        return None
+    return None
+
 async def generate_ai_summary(waypoints_weather: List[WaypointWeather], origin: str, destination: str, packing: List[PackingSuggestion]) -> Optional[str]:
     """Generate AI-powered weather summary using Gemini Flash."""
     if not (CHAT_AVAILABLE and GOOGLE_API_KEY):
@@ -1928,12 +1945,20 @@ async def get_route_weather(request: RouteRequest):
     else:
         departure_time = datetime.now()
     
-    # Geocode origin and destination
-    origin_coords = await geocode_location(request.origin)
+    # Resolve origin and destination (support direct lat,lng)
+    origin_coords = parse_lat_lng(request.origin)
+    if origin_coords:
+        logger.info("Using direct coordinates for origin")
+    else:
+        origin_coords = await geocode_location(request.origin)
     if not origin_coords:
         raise HTTPException(status_code=400, detail=f"Could not geocode origin: {request.origin}")
-    
-    dest_coords = await geocode_location(request.destination)
+
+    dest_coords = parse_lat_lng(request.destination)
+    if dest_coords:
+        logger.info("Using direct coordinates for destination")
+    else:
+        dest_coords = await geocode_location(request.destination)
     if not dest_coords:
         raise HTTPException(status_code=400, detail=f"Could not geocode destination: {request.destination}")
     
@@ -1941,7 +1966,7 @@ async def get_route_weather(request: RouteRequest):
     stop_coords = []
     if request.stops:
         for stop in request.stops:
-            coords = await geocode_location(stop.location)
+            coords = parse_lat_lng(stop.location) or await geocode_location(stop.location)
             if coords:
                 stop_coords.append(coords)
     
