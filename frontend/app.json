@@ -30,7 +30,7 @@
     },
     "android": {
       "package": "com.routecast.app",
-      "versionCode": 124,
+      "versionCode": 125,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#0a0a0a"
