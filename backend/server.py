@@ -883,6 +883,18 @@ async def reverse_geocode(lat: float, lon: float) -> Optional[str]:
 async def geocode_location(location: str) -> Optional[Dict[str, float]]:
     """Geocode a location string using active provider."""
     try:
+        # Accept raw "lat,lon" inputs to bypass geocoding for numeric coordinates
+        if location:
+            parts = [p.strip() for p in location.split(",")]
+            if len(parts) == 2:
+                try:
+                    lat_val = float(parts[0])
+                    lon_val = float(parts[1])
+                    if -90.0 <= lat_val <= 90.0 and -180.0 <= lon_val <= 180.0:
+                        return {"lat": lat_val, "lon": lon_val}
+                except ValueError:
+                    pass
+
         require_mapbox_token()
         return await get_providers().geocode.geocode(location)
     except HTTPException:
