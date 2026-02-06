@@ -52,7 +52,8 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # MongoDB connection (optional for testing)
-mongo_url = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
+mongo_url = os.environ.get("MONGODB_URI") or os.environ.get('MONGO_URL')
+db_name = os.environ.get('DB_NAME', 'routecast_test')
 client = None
 db = None
 
@@ -60,11 +61,18 @@ db = None
 async def connect_to_mongo():
     global client, db
     try:
+        url_source = "MONGODB_URI" if os.environ.get("MONGODB_URI") else "MONGO_URL" if os.environ.get("MONGO_URL") else None
+        if not mongo_url or not url_source:
+            logger.warning("Mongo URL not configured (MONGODB_URI/MONGO_URL); database features disabled")
+            client = None
+            db = None
+            return False
+
+        logger.info("Initializing MongoDB client db=%s via %s", db_name, url_source)
         temp_client = AsyncIOMotorClient(mongo_url, serverSelectionTimeoutMS=5000)
-        # Test connection
         await temp_client.admin.command('ping')
         client = temp_client
-        db = client[os.environ.get('DB_NAME', 'routecast_test')]
+        db = client[db_name]
         logger.info("MongoDB connection successful")
         return True
     except Exception as e:
@@ -75,7 +83,22 @@ async def connect_to_mongo():
 
 # API Keys
 MAPBOX_ACCESS_TOKEN = os.environ.get('MAPBOX_ACCESS_TOKEN', '')
+ROUTECAST_MODE = os.environ.get('ROUTECAST_MODE', 'prod').lower()
 GOOGLE_API_KEY = os.environ.get('GEMINI_API_KEY', '') or os.environ.get('GOOGLE_API_KEY', '')
+GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-2.0-flash-exp')
+
+# Log Mapbox token presence without exposing the secret
+if MAPBOX_ACCESS_TOKEN:
+    logger.info("Mapbox token configured")
+else:
+    logger.error("MAPBOX_ACCESS_TOKEN is missing - Mapbox directions/geocoding will fail.")
+
+
+def require_mapbox_token():
+    if MAPBOX_ACCESS_TOKEN or ROUTECAST_MODE in {"demo", "test"}:
+        return
+    logger.error("MAPBOX_ACCESS_TOKEN missing for Mapbox request")
+    raise HTTPException(status_code=500, detail="MAPBOX_ACCESS_TOKEN not set on backend")
 
 # NOAA API Headers
 NOAA_USER_AGENT = os.environ.get('NOAA_USER_AGENT', 'Routecast/1.0 (contact@routecast.app)')
@@ -169,9 +192,17 @@ class RouteRequest(BaseModel):
     destination: str
     departure_time: Optional[str] = None  # ISO format datetime
     stops: Optional[List[StopPoint]] = []
-    vehicle_type: Optional[str] = "car"  # car, suv, truck, semi, rv, motorcycle, trailer
+    vehicle_type: Optional[str] = None  # car, suv, truck, semi, rv, motorcycle, trailer
+    mode: Optional[str] = None  # standard, boondocker, truck
     trucker_mode: Optional[bool] = False  # Enable trucker-specific warnings
     vehicle_height_ft: Optional[float] = None  # Vehicle height in feet for clearance warnings
+    vehicle_weight_lbs: Optional[int] = None
+    vehicle_length_ft: Optional[float] = None
+    axle_count: Optional[int] = None
+    hazmat: Optional[bool] = None
+    avoid_highways: Optional[bool] = None
+    avoid_tolls: Optional[bool] = None
+    prefer_campgrounds: Optional[bool] = None
 
 class HazardAlert(BaseModel):
     type: str  # wind, ice, visibility, rain, snow, etc.
@@ -849,16 +880,22 @@ async def reverse_geocode(lat: float, lon: float) -> Optional[str]:
 async def geocode_location(location: str) -> Optional[Dict[str, float]]:
     """Geocode a location string using active provider."""
     try:
+        require_mapbox_token()
         return await get_providers().geocode.geocode(location)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Geocoding error for {location}: {e}")
         return None
 
 
-async def get_mapbox_route(origin_coords: Dict, dest_coords: Dict, waypoints: List[Dict] = None) -> Optional[Dict]:
+async def get_mapbox_route(origin_coords: Dict, dest_coords: Dict, waypoints: List[Dict] = None, options: Optional[Dict[str, Any]] = None) -> Optional[Dict]:
     """Get route using active directions provider (Mapbox in prod, fixtures in demo)."""
     try:
-        return await get_providers().directions.route(origin_coords, dest_coords, waypoints)
+        require_mapbox_token()
+        return await get_providers().directions.route(origin_coords, dest_coords, waypoints, options)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Directions provider error: {e}")
         return None
@@ -1620,6 +1657,7 @@ async def get_turn_by_turn_directions(origin_coords: tuple, dest_coords: tuple, 
             
             response = await client.get(url, params=params)
             if response.status_code != 200:
+                logger.warning("Turn-by-turn request failed status=%s body=%s", response.status_code, response.text[:200])
                 return steps
                 
             data = response.json()
@@ -1676,7 +1714,7 @@ async def get_turn_by_turn_directions(origin_coords: tuple, dest_coords: tuple, 
                         ))
     
     except Exception as e:
-        logger.error(f"Turn-by-turn directions error: {e}")
+        logger.warning(f"Turn-by-turn directions error: {e}")
     
     return steps[:50]  # Limit to 50 steps
 
@@ -1717,13 +1755,16 @@ def analyze_route_conditions(waypoints_weather: List[WaypointWeather]) -> tuple:
     
     return summary, worst_condition, reroute_needed, reroute_reason
 
-async def generate_ai_summary(waypoints_weather: List[WaypointWeather], origin: str, destination: str, packing: List[PackingSuggestion]) -> str:
+async def generate_ai_summary(waypoints_weather: List[WaypointWeather], origin: str, destination: str, packing: List[PackingSuggestion]) -> Optional[str]:
     """Generate AI-powered weather summary using Gemini Flash."""
+    if not (CHAT_AVAILABLE and GOOGLE_API_KEY):
+        logger.info("AI summary skipped: Gemini SDK or API key not configured")
+        return None
+
     try:
-        # Build weather context
-        weather_info = []
-        all_alerts = []
-        
+        weather_info: List[str] = []
+        all_alerts: List[str] = []
+
         for wp in waypoints_weather:
             if wp.weather:
                 info = f"- {wp.waypoint.name} ({wp.waypoint.distance_from_start} mi): "
@@ -1732,14 +1773,14 @@ async def generate_ai_summary(waypoints_weather: List[WaypointWeather], origin: 
                 if wp.waypoint.arrival_time:
                     info += f" (ETA: {wp.waypoint.arrival_time[:16]})"
                 weather_info.append(info)
-            
+
             for alert in wp.alerts:
                 all_alerts.append(f"- {alert.event}: {alert.headline}")
-        
+
         weather_text = "\n".join(weather_info) if weather_info else "No weather data available"
         alerts_text = "\n".join(set(all_alerts)) if all_alerts else "No active alerts"
         packing_text = ", ".join([p.item for p in packing[:5]]) if packing else "Standard travel items"
-        
+
         prompt = f"""You are a helpful travel weather assistant. Provide a brief, driver-friendly weather summary for a road trip.
 
 Route: {origin} to {destination}
@@ -1759,23 +1800,20 @@ Provide a 2-3 sentence summary focusing on:
 
 Be concise and practical."""
 
-        # Use Gemini for summary if available
-        if CHAT_AVAILABLE and GOOGLE_API_KEY:
-            client = genai.Client(api_key=GOOGLE_API_KEY)
-            loop = asyncio.get_event_loop()
-            response_obj = await loop.run_in_executor(
-                None,
-                lambda: client.models.generate_content(
-                    model='gemini-2.0-flash-exp',
-                    contents=prompt
-                )
+        model_name = GEMINI_MODEL or 'gemini-2.0-flash-exp'
+        client = genai.Client(api_key=GOOGLE_API_KEY)
+        loop = asyncio.get_event_loop()
+        response_obj = await loop.run_in_executor(
+            None,
+            lambda: client.models.generate_content(
+                model=model_name,
+                contents=prompt
             )
-            return response_obj.text
-        else:
-            return "Weather summary unavailable. AI features require Google API key."
+        )
+        return getattr(response_obj, "text", None) or None
     except Exception as e:
-        logger.error(f"AI summary error: {e}")
-        return f"Weather summary unavailable. Check individual waypoints for conditions."
+        logger.warning("AI summary generation failed (model=%s): %s", GEMINI_MODEL, e)
+        return None
 
 # ==================== API Routes ====================
 
@@ -1785,12 +1823,85 @@ async def root():
 
 @api_router.get("/health")
 async def health_check():
-    return {"status": "healthy", "timestamp": datetime.utcnow().isoformat()}
+    return {"status": "ok", "time": datetime.utcnow().isoformat()}
 
 @api_router.post("/route/weather", response_model=RouteWeatherResponse)
 async def get_route_weather(request: RouteRequest):
     """Get weather along a route from origin to destination."""
     logger.info(f"Route weather request: {request.origin} -> {request.destination}")
+
+    if not request.mode and not request.vehicle_type:
+        raise HTTPException(status_code=400, detail="missing mode/vehicleType")
+
+    vehicle_type = request.vehicle_type or "car"
+    mode = request.mode
+    if not mode:
+        if request.trucker_mode or vehicle_type in {"semi", "truck", "trailer", "tractor_trailer"}:
+            mode = "truck"
+        elif vehicle_type == "rv":
+            mode = "boondocker"
+        else:
+            mode = "standard"
+
+    # Validate truck/tractor trailer requirements
+    if mode == "truck":
+        required = {
+            "vehicle_height_ft": request.vehicle_height_ft,
+            "vehicle_weight_lbs": request.vehicle_weight_lbs,
+            "vehicle_length_ft": request.vehicle_length_ft,
+            "axle_count": request.axle_count,
+        }
+        missing = [field for field, value in required.items() if value is None]
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "missing fields",
+                    "message": "Provide heavy-vehicle dimensions for tractor_trailer",
+                    "missing": missing,
+                },
+            )
+
+    # Validate boondocker preferences
+    if mode == "boondocker":
+        required = {
+            "avoid_highways": request.avoid_highways,
+            "avoid_tolls": request.avoid_tolls,
+        }
+        missing = [field for field, value in required.items() if value is None]
+        if missing:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "error": "missing fields",
+                    "message": "Provide boondocker preferences",
+                    "missing": missing,
+                },
+            )
+
+    provider_label = "mapbox"
+    if mode == "truck":
+        provider_label = "mapbox (truck)"
+    elif mode == "boondocker":
+        provider_label = "mapbox (boondocker)"
+
+    routing_options: Dict[str, Any] = {}
+    if mode == "boondocker":
+        excludes = []
+        if request.avoid_tolls:
+            excludes.append("toll")
+        if request.avoid_highways:
+            excludes.append("motorway")
+        if excludes:
+            routing_options["exclude"] = ",".join(excludes)
+
+    logger.info(
+        "Routing provider=%s mode=%s vehicle_type=%s options=%s",
+        provider_label,
+        mode,
+        vehicle_type,
+        routing_options or None,
+    )
     
     # Parse departure time
     departure_time = None
@@ -1820,7 +1931,7 @@ async def get_route_weather(request: RouteRequest):
                 stop_coords.append(coords)
     
     # Get route from Mapbox
-    route_data = await get_mapbox_route(origin_coords, dest_coords, stop_coords if stop_coords else None)
+    route_data = await get_mapbox_route(origin_coords, dest_coords, stop_coords if stop_coords else None, routing_options or None)
     if not route_data:
         # Provide helpful error message for unreachable routes
         raise HTTPException(
@@ -1896,7 +2007,6 @@ async def get_route_weather(request: RouteRequest):
     ai_summary = await generate_ai_summary(list(waypoints_weather), request.origin, request.destination, packing_suggestions)
     
     # NEW: Calculate safety score based on vehicle type
-    vehicle_type = request.vehicle_type or "car"
     safety_score = calculate_safety_score(list(waypoints_weather), vehicle_type)
     
     # NEW: Generate hazard alerts with countdown
@@ -1951,14 +2061,17 @@ async def get_route_weather(request: RouteRequest):
         reroute_reason=reroute_reason
     )
     
-    # Save to database
+    # Save to database when configured
     try:
-        route_doc = response.model_dump()
-        # Ensure created_at is serializable
-        if 'created_at' in route_doc and isinstance(route_doc['created_at'], datetime):
-            route_doc['created_at'] = route_doc['created_at']
-        await db.routes.insert_one(route_doc)
-        logger.info(f"Saved route {response.id} to database")
+        if db is None:
+            logger.warning("DB not initialized; skipping route save")
+        else:
+            route_doc = response.model_dump()
+            # Ensure created_at is serializable
+            if 'created_at' in route_doc and isinstance(route_doc['created_at'], datetime):
+                route_doc['created_at'] = route_doc['created_at']
+            await db.routes.insert_one(route_doc)
+            logger.info(f"Saved route {response.id} to database")
     except Exception as e:
         logger.error(f"Error saving route: {e}", exc_info=True)
     
@@ -1972,6 +2085,7 @@ async def get_route_history():
         return []
     try:
         routes = await db.routes.find().sort("created_at", -1).limit(10).to_list(10)
+        logger.info("Route history fetched: count=%s", len(routes))
         return [SavedRoute(
             id=str(r.get('_id', r.get('id'))),
             origin=r['origin'],
@@ -1992,6 +2106,7 @@ async def get_favorite_routes():
         return []
     try:
         routes = await db.favorites.find().sort("created_at", -1).limit(20).to_list(20)
+        logger.info("Favorites fetched: count=%s", len(routes))
         return [SavedRoute(
             id=r.get('id', str(r.get('_id'))),
             origin=r['origin'],
@@ -2021,6 +2136,7 @@ async def add_favorite_route(request: FavoriteRouteRequest):
             "created_at": datetime.utcnow()
         }
         await db.favorites.insert_one(favorite)
+        logger.info("Favorite saved id=%s origin=%s destination=%s stops=%s", favorite["id"], favorite["origin"], favorite["destination"], len(favorite.get("stops", [])))
         return {"success": True, "id": favorite["id"]}
     except Exception as e:
         logger.error(f"Error saving favorite: {e}")
@@ -2044,6 +2160,7 @@ async def remove_favorite_route(route_id: str):
                 pass
         if result.deleted_count == 0:
             raise HTTPException(status_code=404, detail="Favorite not found")
+        logger.info("Favorite removed id=%s deleted=%s", route_id, result.deleted_count)
         return {"success": True}
     except HTTPException:
         raise
@@ -2069,6 +2186,7 @@ async def get_route_by_id(route_id: str):
 @geocode_router.post("")
 async def geocode(location: str):
     """Geocode a location string."""
+    require_mapbox_token()
     coords = await geocode_location(location)
     if not coords:
         raise HTTPException(status_code=404, detail="Location not found")
@@ -2077,9 +2195,10 @@ async def geocode(location: str):
 @geocode_router.get("/autocomplete")
 async def autocomplete_location(query: str, limit: int = 5):
     """Get autocomplete suggestions for a location query using Mapbox."""
-    logger.info(f"Autocomplete request: query={query}, limit={limit}")
     if not query or len(query) < 2:
         return []
+
+    require_mapbox_token()
     
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -2115,9 +2234,11 @@ async def autocomplete_location(query: str, limit: int = 5):
                 })
             
             return suggestions
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Autocomplete error for '{query}': {e}")
-        return []
+        raise HTTPException(status_code=500, detail="Autocomplete failed")
 
 # ==================== Billing ====================
 
@@ -5406,7 +5527,12 @@ app.include_router(api_router)
 # Simple health endpoint for liveness checks (non-prefixed)
 @app.get("/health")
 async def root_health():
-    return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
+    return {"status": "ok", "time": datetime.utcnow().isoformat()}
+
+# Alias to match prefixed route for clients expecting /api/health
+@app.get("/api/health")
+async def api_health_alias():
+    return {"status": "ok", "time": datetime.utcnow().isoformat()}
 
 @app.on_event("startup")
 async def startup_db_client():
