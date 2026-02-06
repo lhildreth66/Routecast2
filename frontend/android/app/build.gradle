@@ -91,8 +91,8 @@ android {
         applicationId 'com.routecast.app'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 115
-        versionName "1.0.115"
+        versionCode 120
+        versionName "1.0.120"
     }
     signingConfigs {
         debug {
