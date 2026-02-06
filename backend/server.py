@@ -50,6 +50,9 @@ load_dotenv(ROOT_DIR / '.env')
 # Set up logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+# Silence httpx/httpcore info logs to avoid leaking query params (e.g., access_token)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 # MongoDB connection (optional for testing)
 mongo_url = os.environ.get("MONGODB_URI") or os.environ.get('MONGO_URL')
@@ -2171,6 +2174,9 @@ async def remove_favorite_route(route_id: str):
 @api_router.get("/routes/{route_id}", response_model=RouteWeatherResponse)
 async def get_route_by_id(route_id: str):
     """Get a specific route by ID."""
+    if db is None:
+        logger.warning("Database not available for route lookup")
+        raise HTTPException(status_code=503, detail="Database not available")
     try:
         route = await db.routes.find_one({"id": route_id})
         if not route:
