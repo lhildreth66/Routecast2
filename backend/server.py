@@ -1772,12 +1772,25 @@ def analyze_route_conditions(waypoints_weather: List[WaypointWeather]) -> tuple:
 
 
 def parse_lat_lng(value: Optional[str]) -> Optional[Dict[str, float]]:
-    """Parse a "lat,lng" string into a coordinate dict if valid."""
+    """Parse a coordinate pair from flexible input (lat,lng or space-separated)."""
     if not value:
         return None
-    parts = [p.strip() for p in value.split(",")]
+    import re
+
+    # Quick comma/space split first
+    if "," in value:
+        parts = [p.strip() for p in value.split(",") if p.strip()]
+    else:
+        parts = [p.strip() for p in value.split() if p.strip()]
+
     if len(parts) != 2:
-        return None
+        # Fallback: extract first two numbers from the string
+        nums = re.findall(r"[-+]?\d*\.?\d+", value)
+        if len(nums) >= 2:
+            parts = nums[:2]
+        else:
+            return None
+
     try:
         lat_val = float(parts[0])
         lon_val = float(parts[1])
