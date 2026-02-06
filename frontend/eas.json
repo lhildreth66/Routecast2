@@ -5,7 +5,11 @@
   },
   "build": {
     "production": {
-      "node": "20.11.1"
+      "node": "20.11.1",
+      "env": {
+        "EXPO_PUBLIC_BACKEND_URL": "https://routecast-backend.onrender.com",
+        "EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN": "unset"
+      }
     },
     "development": {
       "developmentClient": true,
