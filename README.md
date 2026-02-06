@@ -243,6 +243,32 @@ routecast/
 - Check backend is running on the expected port
 - For mobile: use your computer's IP address, not `localhost`
 
+### Windows curl returns 422 for `/api/route/weather`
+On Windows **CMD**, line continuations with `\` break the request body. Use a single-line curl instead:
+
+```
+curl -i -X POST "https://routecast-backend.onrender.com/api/route/weather" -H "Content-Type: application/json" -d "{\"mode\":\"truck\",\"vehicle_type\":\"semi\",\"vehicle_height_ft\":13.5,\"vehicle_weight_lbs\":80000,\"vehicle_length_ft\":70,\"axle_count\":5,\"origin\":\"lat 41.8781 lon -87.6298\",\"destination\":\"41.7606 -87.6169\"}"
+```
+
+PowerShell version (cleaner):
+
+```powershell
+$body = @{
+   mode = "truck"
+   vehicle_type = "semi"
+   vehicle_height_ft = 13.5
+   vehicle_weight_lbs = 80000
+   vehicle_length_ft = 70
+   axle_count = 5
+   origin = "lat 41.8781 lon -87.6298"
+   destination = "41.7606 -87.6169"
+} | ConvertTo-Json -Compress
+
+curl -i -X POST "https://routecast-backend.onrender.com/api/route/weather" -H "Content-Type: application/json" -d $body
+```
+
+If the first line is not `HTTP/1.1 200 OK`, note the status and any `detail` field.
+
 ### EAS Build fails
 - Run `eas diagnostics` to check setup
 - Verify `app.json` has valid `expo.android.package`

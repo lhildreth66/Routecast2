@@ -1775,30 +1775,30 @@ def parse_lat_lng(value: Optional[str]) -> Optional[Dict[str, float]]:
     """Parse a coordinate pair from flexible input (lat,lng or space-separated)."""
     if not value:
         return None
-    import re
 
-    # Quick comma/space split first
+    # Try comma split first, otherwise whitespace split
     if "," in value:
         parts = [p.strip() for p in value.split(",") if p.strip()]
     else:
         parts = [p.strip() for p in value.split() if p.strip()]
 
+    # Fallback: extract first two numbers anywhere in the string
     if len(parts) != 2:
-        # Fallback: extract first two numbers from the string
         nums = re.findall(r"[-+]?\d*\.?\d+", value)
-        if len(nums) >= 2:
-            parts = nums[:2]
-        else:
+        if len(nums) < 2:
             return None
+        parts = nums[:2]
 
     try:
         lat_val = float(parts[0])
         lon_val = float(parts[1])
-        if -90.0 <= lat_val <= 90.0 and -180.0 <= lon_val <= 180.0:
-            return {"lat": lat_val, "lon": lon_val}
     except Exception:
         return None
-    return None
+
+    if not (-90 <= lat_val <= 90 and -180 <= lon_val <= 180):
+        return None
+
+    return {"lat": lat_val, "lng": lon_val}
 
 async def generate_ai_summary(waypoints_weather: List[WaypointWeather], origin: str, destination: str, packing: List[PackingSuggestion]) -> Optional[str]:
     """Generate AI-powered weather summary using Gemini Flash."""
@@ -5552,28 +5552,30 @@ async def get_truck_alerts(request: TruckAlertRequest):
 
 
 # Add CORS middleware first, before including router
-# Note: Mobile apps (React Native/Expo) bypass CORS entirely
-# CORS only matters if you add a web dashboard/admin panel in the future
-ALLOWED_ORIGINS = [
-    # Local development only (for testing API in browser/Postman)
-    "http://localhost:8000",
-    "http://localhost:8081",
-    "http://localhost:19006",
-    "http://localhost:3000",
-]
-
-# Add environment variable for additional origins if you deploy a web frontend later
-if os.environ.get('ALLOWED_ORIGINS'):
-    extra_origins = os.environ.get('ALLOWED_ORIGINS').split(',')
-    ALLOWED_ORIGINS.extend([origin.strip() for origin in extra_origins])
-
 app.add_middleware(
     CORSMiddleware,
-    allow_credentials=True,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origins=[
+        "http://localhost:8081",
+        "http://localhost:19006",
+        "http://localhost:3000",
+        "http://127.0.0.1:8081",
+        "http://127.0.0.1:19006",
+        "http://127.0.0.1:3000",
+    ],
+    allow_origin_regex=r"^https:\/\/.*\.app\.github\.dev$",
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
+
+@app.middleware("http")
+async def log_origin(request, call_next):
+    origin = request.headers.get("origin")
+    response = await call_next(request)
+    if origin:
+        logger.info(f"CORS DEBUG origin={origin} acao={response.headers.get('access-control-allow-origin')}")
+    return response
 
 # Include routers in the main app
 app.include_router(geocode_router, prefix="/api/geocode")

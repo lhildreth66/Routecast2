@@ -39,16 +39,15 @@ const NoAutofillInput = forwardRef<any, TextInputProps>((props, ref) => {
 });
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, usePathname, useSegments } from 'expo-router';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { format } from 'date-fns';
 import { WebView } from 'react-native-webview';
+import { API_BASE, API_BASE_ERROR, API_BASE_SOURCE } from './apiConfig';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-
-const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 // Vehicle types for safety scoring
 const VEHICLE_TYPES = [
@@ -127,6 +126,11 @@ export default function HomeScreen() {
   // Radar map state
   const [showRadarMap, setShowRadarMap] = useState(false);
 
+  const pathname = usePathname();
+  const segments = useSegments();
+
+  const showApiBaseError = __DEV__ && !!API_BASE_ERROR;
+
   // Check for speech recognition support on web
   useEffect(() => {
     if (Platform.OS === 'web') {
@@ -139,6 +143,8 @@ export default function HomeScreen() {
     fetchRecentRoutes();
     fetchFavoriteRoutes();
     loadCachedRoute();
+    console.log('BACKEND:', process.env.EXPO_PUBLIC_BACKEND_URL);
+    console.log('[startup] API_BASE', API_BASE, 'source', API_BASE_SOURCE);
   }, []);
 
   const loadCachedRoute = async () => {
@@ -149,7 +155,7 @@ export default function HomeScreen() {
         // Optionally pre-fill from cache
       }
     } catch (e) {
-      console.log('No cached route');
+      // ignore cache errors
     }
   };
 
@@ -180,7 +186,7 @@ export default function HomeScreen() {
         setShowDestSuggestions(response.data.length > 0);
       }
     } catch (err) {
-      console.log('Autocomplete error:', err);
+      console.warn('Autocomplete error');
     } finally {
       setAutocompleteLoading(false);
     }
@@ -287,7 +293,6 @@ export default function HomeScreen() {
       recognition.lang = 'en-US';
 
       recognition.onstart = () => {
-        console.log('Voice recognition started');
         setIsListening(true);
         setChatMessage('');
       };
@@ -326,19 +331,21 @@ export default function HomeScreen() {
 
   const fetchRecentRoutes = async () => {
     try {
-      const response = await axios.get(`${API_BASE}/api/routes/history`);
+      const path = `${API_BASE}/api/routes/history`;
+      const response = await axios.get(path);
       setRecentRoutes(response.data.slice(0, 5));
     } catch (err) {
-      console.log('Error fetching history:', err);
+      console.warn('Error fetching history');
     }
   };
 
   const fetchFavoriteRoutes = async () => {
     try {
-      const response = await axios.get(`${API_BASE}/api/routes/favorites`);
+      const path = `${API_BASE}/api/routes/favorites`;
+      const response = await axios.get(path);
       setFavoriteRoutes(response.data);
     } catch (err) {
-      console.log('Error fetching favorites:', err);
+      console.warn('Error fetching favorites');
     }
   };
 
@@ -353,17 +360,47 @@ export default function HomeScreen() {
     setError('');
 
     try {
+      const resolvedMode = truckerMode || vehicleType === 'semi' || vehicleType === 'truck' ? 'truck' : vehicleType === 'rv' ? 'boondocker' : 'standard';
+      const truckProfile = resolvedMode === 'truck'
+        ? {
+            vehicle_height_ft: 13.5,
+            vehicle_weight_lbs: 80000,
+            vehicle_length_ft: 53,
+            axle_count: 5,
+            hazmat: false,
+          }
+        : undefined;
+      const boondockerPrefs = resolvedMode === 'boondocker'
+        ? {
+            avoid_highways: true,
+            avoid_tolls: true,
+            prefer_campgrounds: true,
+          }
+        : undefined;
+
       const requestData: any = {
         origin: origin.trim(),
         destination: destination.trim(),
         stops: stops,
         vehicle_type: vehicleType,
         trucker_mode: truckerMode,
+        mode: resolvedMode,
+        ...truckProfile,
+        ...boondockerPrefs,
       };
       
       if (useCustomTime) {
         requestData.departure_time = departureTime.toISOString();
       }
+
+      console.log('[route-request]', {
+        endpoint: `${API_BASE}/api/route/weather`,
+        mode: resolvedMode,
+        vehicleType,
+        trucker_mode: truckerMode,
+        truckProfile,
+        boondockerPrefs,
+      });
 
       const response = await axios.post(`${API_BASE}/api/route/weather`, requestData);
       
@@ -400,7 +437,8 @@ export default function HomeScreen() {
     }
 
     try {
-      await axios.post(`${API_BASE}/api/routes/favorites`, {
+      const path = `${API_BASE}/api/routes/favorites`;
+      const res = await axios.post(path, {
         origin: origin.trim(),
         destination: destination.trim(),
         stops: stops,
@@ -413,7 +451,8 @@ export default function HomeScreen() {
 
   const removeFavorite = async (id: string) => {
     try {
-      await axios.delete(`${API_BASE}/api/routes/favorites/${id}`);
+      const path = `${API_BASE}/api/routes/favorites/${id}`;
+      const res = await axios.delete(path);
       fetchFavoriteRoutes();
     } catch (err) {
       console.error('Error removing favorite:', err);
@@ -649,6 +688,11 @@ export default function HomeScreen() {
 
   return (
     <View style={styles.container}>
+      {showApiBaseError && (
+        <View style={styles.bannerError}>
+          <Text style={styles.bannerErrorText}>Backend URL missing. Set EXPO_PUBLIC_BACKEND_URL.</Text>
+        </View>
+      )}
       <View style={styles.mapBackground}>
         <View style={styles.mapOverlay} />
       </View>
@@ -1306,6 +1350,15 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#0f0f0f',
+  },
+  bannerError: {
+    backgroundColor: '#ef4444',
+    padding: 10,
+    alignItems: 'center',
+  },
+  bannerErrorText: {
+    color: '#fff',
+    fontWeight: '700',
   },
   mapBackground: {
     ...StyleSheet.absoluteFillObject,

@@ -40,8 +40,8 @@ async def test_directions_fixture_reused():
     providers = get_providers()
     origin = {"lat": 47.6062, "lon": -122.3321}
     dest = {"lat": 45.5152, "lon": -122.6784}
-    first = await providers.directions.route(origin, dest, None)
-    second = await providers.directions.route(origin, dest, None)
+    first = await providers.directions.route(origin, dest, None, None)
+    second = await providers.directions.route(origin, dest, None, None)
     assert first == second
     assert first["geometry"]
     assert first["duration"] == 180

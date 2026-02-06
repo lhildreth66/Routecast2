@@ -22,6 +22,7 @@ class DirectionsProvider(Protocol):
         origin_coords: Dict[str, float],
         dest_coords: Dict[str, float],
         waypoints: Optional[List[Dict[str, float]]],
+        options: Optional[Dict[str, Any]],
     ) -> Optional[Dict[str, float]]:
         ...
 

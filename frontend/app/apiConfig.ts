@@ -1,30 +1,15 @@
-import Constants from 'expo-constants';
+import axios from 'axios';
 
 // Determine API base URL with strict validation
-// Priority: 1) EAS build env, 2) app.json extra, 3) ERROR in production
+// Priority: 1) EAS build env
 const getApiBase = (): string => {
-  // First: Check EAS environment variable (set in eas.json production profile)
-  const easEnvUrl = process.env.EXPO_PUBLIC_BACKEND_URL;
+  // Only use the EAS environment variable (set in eas.json / .env)
+  const apiBase = process.env.EXPO_PUBLIC_BACKEND_URL;
   
-  // Second: Check app.json extra config
-  const appJsonUrl = Constants.expoConfig?.extra?.API_BASE;
-  
-  // Determine which to use
-  const apiBase = easEnvUrl || appJsonUrl;
-  
-  // In production builds, REQUIRE a valid backend URL
-  // Do NOT silently fall back to prevent shipping wrong backend
+  // REQUIRE a valid backend URL; no fallback to avoid misrouting traffic
   if (!apiBase) {
-    const errorMsg = '❌ CRITICAL: No backend URL configured! Set EXPO_PUBLIC_BACKEND_URL in eas.json';
+    const errorMsg = '❌ CRITICAL: No backend URL configured! Set EXPO_PUBLIC_BACKEND_URL in your env (.env or eas.json).';
     console.error('[apiConfig]', errorMsg);
-    
-    // In production, this should never happen if eas.json is correct
-    // For dev/testing, you can temporarily use a fallback, but we force awareness:
-    if (__DEV__) {
-      console.warn('[apiConfig] DEV MODE: Using localhost fallback');
-      return 'http://localhost:8000';
-    }
-    
     throw new Error(errorMsg);
   }
   
@@ -32,7 +17,44 @@ const getApiBase = (): string => {
 };
 
 export const API_BASE = getApiBase();
+export const API_BASE_SOURCE = process.env.EXPO_PUBLIC_BACKEND_URL ? 'env:EXPO_PUBLIC_BACKEND_URL' : 'missing';
+export const API_BASE_ERROR = !API_BASE ? 'No backend URL configured' : '';
 
-// Log once at module load to confirm which backend the app will use
-console.log('[apiConfig] Backend URL:', API_BASE);
-console.log('[apiConfig] Source:', process.env.EXPO_PUBLIC_BACKEND_URL ? 'EAS env' : 'app.json');
+console.log('[apiConfig] API_BASE resolved', { base: API_BASE, source: API_BASE_SOURCE });
+
+// Axios request/response logging (no secrets)
+axios.interceptors.request.use((config) => {
+  const fullUrl = config.baseURL ? `${config.baseURL}${config.url}` : config.url;
+  const method = (config.method || 'get').toUpperCase();
+  const hasAuth = !!config.headers?.Authorization;
+  console.log('[api] request', { method, url: fullUrl, auth: hasAuth });
+  return config;
+});
+
+axios.interceptors.response.use(
+  (response) => {
+    const fullUrl = response.config.baseURL ? `${response.config.baseURL}${response.config.url}` : response.config.url;
+    const method = (response.config.method || 'get').toUpperCase();
+    console.log('[api] response', { method, url: fullUrl, status: response.status });
+    return response;
+  },
+  (error) => {
+    const cfg = error.config || {};
+    const fullUrl = cfg.baseURL ? `${cfg.baseURL}${cfg.url}` : cfg.url;
+    const method = (cfg.method || 'get').toUpperCase();
+    const status = error.response?.status;
+    const body = error.response?.data;
+    let truncatedBody = body;
+    if (typeof body === 'string') {
+      truncatedBody = body.slice(0, 200);
+    } else if (body) {
+      try {
+        truncatedBody = JSON.stringify(body).slice(0, 200);
+      } catch (e) {
+        truncatedBody = '[unserializable body]';
+      }
+    }
+    console.warn('[api] error', { method, url: fullUrl, status, body: truncatedBody });
+    return Promise.reject(error);
+  }
+);
