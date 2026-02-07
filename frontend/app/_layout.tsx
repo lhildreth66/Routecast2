@@ -3,6 +3,7 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
+import { registerDevicePushTokenOnce } from './pushRegistration';
 
 // Configure notifications
 Notifications.setNotificationHandler({
@@ -10,10 +11,20 @@ Notifications.setNotificationHandler({
     shouldShowAlert: true,
     shouldPlaySound: true,
     shouldSetBadge: false,
-    shouldShowBanner: true,
-    shouldShowList: true,
   }),
 });
+
+async function ensureAndroidChannel() {
+  if (Platform.OS !== 'android') return;
+
+  await Notifications.setNotificationChannelAsync('default', {
+    name: 'Default',
+    importance: Notifications.AndroidImportance.MAX,
+    sound: 'default',
+    vibrationPattern: [0, 250, 250, 250],
+    lightColor: '#FF231F7C',
+  });
+}
 
 export default function RootLayout() {
   useEffect(() => {
@@ -27,6 +38,8 @@ export default function RootLayout() {
       }
     }
     requestPermissions();
+    ensureAndroidChannel();
+    registerDevicePushTokenOnce();
   }, []);
 
   return (

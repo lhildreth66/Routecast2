@@ -18,6 +18,7 @@ from typing import Dict, Any, Optional, List, Set
 
 import httpx
 from fastapi import APIRouter, HTTPException
+from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
 from pymongo import MongoClient
 from exponent_server_sdk import PushClient, PushMessage
@@ -171,10 +172,29 @@ async def send_push_notification(request: SendNotificationRequest):
         logger.error("Error sending notifications: %s", exc)
         raise HTTPException(status_code=500, detail=f"Error sending notifications: {exc}")
 
-    success = sum(1 for r in responses if getattr(r, "status", "ok") == "ok")
+    tickets_raw = jsonable_encoder(responses)
+
+    def _flatten(items):
+        for item in items:
+            if isinstance(item, list):
+                yield from _flatten(item)
+            else:
+                yield item
+
+    tickets_flat = list(_flatten(tickets_raw))
+    success = sum(1 for resp in tickets_flat if isinstance(resp, dict) and resp.get("status") == "ok")
+
+    for ticket in tickets_flat:
+        if not isinstance(ticket, dict):
+            logger.error("[notifications] unexpected ticket type", extra={"ticket": ticket})
+            continue
+        if ticket.get("status") != "ok":
+            logger.error("[notifications] push ticket error", extra={"ticket": ticket})
+
     return {
-        "success": success,
         "attempted": len(messages),
+        "success": success,
+        "tickets": tickets_flat,
     }
 
 

@@ -331,8 +331,8 @@ export default function HomeScreen() {
 
         pushDebugLog(`[push] saving token to backend token=${token}`);
         try {
-          const response = await axios.post(`${API_BASE}/notifications/register`, {
-            push_token: token,
+          const response = await axios.post(`${API_BASE}/api/notifications/register`, {
+            expoPushToken: token,
             enabled: true,
           });
           const msg = JSON.stringify(response?.data || {});
@@ -357,8 +357,8 @@ export default function HomeScreen() {
 
         if (pushToken) {
           try {
-            const disableResponse = await axios.post(`${API_BASE}/notifications/register`, {
-              push_token: pushToken,
+            const disableResponse = await axios.post(`${API_BASE}/api/notifications/register`, {
+              expoPushToken: pushToken,
               enabled: false,
             });
             const msg = JSON.stringify(disableResponse?.data || {});
@@ -390,9 +390,7 @@ export default function HomeScreen() {
 
     pushDebugLog(`[push] sending test notification for token ${pushToken}`);
     try {
-      const response = await axios.post(`${API_BASE}/notifications/test`, {
-        push_token: pushToken,
-      });
+      const response = await axios.post(`${API_BASE}/api/notifications/send`, {});
       const msg = JSON.stringify(response?.data || {});
       setLastTestResult(msg);
       AsyncStorage.setItem('pushLastTestResult', msg).catch(() => {});
