@@ -14,12 +14,13 @@ API router:
 import logging
 import os
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List, Set
 
 import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from pymongo import MongoClient
+from exponent_server_sdk import PushClient, PushMessage
 
 from .smart_delay import SmartDelayOptimizer, BestDelayResult
 from .models import PlannedTrip, PushToken, SmartDelayNotification
@@ -46,18 +47,22 @@ if _mongo_url:
 else:
     logger.warning("[notifications] Mongo URL missing; push tokens not persisted")
 
+# In-memory token cache as fallback when DB is unavailable
+_in_memory_tokens: Set[str] = set()
 
-class PushTokenRequest(BaseModel):
+
+class ExpoRegisterRequest(BaseModel):
     """Request payload for saving Expo push tokens."""
 
-    push_token: Optional[str] = None
-    token: Optional[str] = None
-    platform: Optional[str] = None
+    expoPushToken: str
+    userId: Optional[str] = None
     enabled: bool = True
 
 
-class TestNotificationRequest(BaseModel):
-    push_token: str
+class SendNotificationRequest(BaseModel):
+    title: Optional[str] = "🚛 Routecast Test Alert"
+    body: Optional[str] = "Push notifications are working!"
+    data: Optional[Dict[str, Any]] = None
 
 
 async def send_expo_notification(push_token: str, title: str, body: str, data: Dict[str, Any] = None) -> bool:
@@ -89,31 +94,45 @@ async def notifications_health():
     return {"ok": True}
 
 
+def _store_token(token: str, user_id: Optional[str], enabled: bool) -> None:
+    """Persist token to Mongo when available and cache in memory."""
+    _in_memory_tokens.add(token)
+    if _db is not None:
+        _db.push_tokens.update_one(
+            {"push_token": token},
+            {
+                "$set": {
+                    "push_token": token,
+                    "user_id": user_id,
+                    "enabled": enabled,
+                    "created_at": datetime.utcnow(),
+                    "last_used": datetime.utcnow(),
+                }
+            },
+            upsert=True,
+        )
+
+
+def _load_tokens_from_db() -> List[str]:
+    if _db is None:
+        return []
+    try:
+        docs = _db.push_tokens.find({"enabled": True}, {"push_token": 1})
+        return [d.get("push_token") for d in docs if d.get("push_token")]
+    except Exception as exc:
+        logger.warning("[notifications] Failed to load tokens from DB: %s", exc)
+        return []
+
+
 @router.post("/register")
-async def register_push_token(request: PushTokenRequest):
-    """Register or update a user's push notification token."""
-    token = request.push_token or request.token
-    if not token:
-        raise HTTPException(status_code=400, detail="Missing token")
+async def register_push_token(request: ExpoRegisterRequest):
+    """Register or update a user's Expo push token."""
+    token = request.expoPushToken
+    if not token.startswith("ExponentPushToken"):
+        raise HTTPException(status_code=400, detail="Invalid Expo push token")
 
     try:
-        if _db is not None:
-            _db.push_tokens.update_one(
-                {"push_token": token},
-                {
-                    "$set": {
-                        "push_token": token,
-                        "platform": request.platform,
-                        "enabled": request.enabled,
-                        "created_at": datetime.utcnow(),
-                        "last_used": datetime.utcnow(),
-                    }
-                },
-                upsert=True,
-            )
-        else:
-            logger.warning("[notifications] Database not available, token not persisted")
-
+        _store_token(token, request.userId, request.enabled)
         return {
             "ok": True,
             "token": token[:20] + "...",
@@ -123,43 +142,40 @@ async def register_push_token(request: PushTokenRequest):
         raise HTTPException(status_code=500, detail=f"Error registering token: {exc}")
 
 
-@router.post("/test")
-async def send_test_notification(request: TestNotificationRequest):
-    """Send a test push notification to verify setup."""
-    try:
-        success = await send_expo_notification(
-            push_token=request.push_token,
-            title="🚛 Routecast Test Alert",
-            body="Push notifications are working! You'll receive weather alerts for your routes.",
-            data={
-                "type": "test",
-                "timestamp": datetime.utcnow().isoformat(),
-            },
+@router.post("/send")
+async def send_push_notification(request: SendNotificationRequest):
+    """Send a test push notification to all stored tokens."""
+    # Gather tokens from memory and DB
+    tokens = set(_in_memory_tokens)
+    tokens.update(_load_tokens_from_db())
+
+    if not tokens:
+        raise HTTPException(status_code=400, detail="No Expo push tokens registered")
+
+    messages = [
+        PushMessage(
+            to=token,
+            sound="default",
+            title=request.title,
+            body=request.body,
+            data=request.data or {"type": "test"},
         )
+        for token in tokens
+    ]
 
-        if success:
-            if _db is not None:
-                _db.push_tokens.update_one(
-                    {"push_token": request.push_token},
-                    {"$set": {"last_used": datetime.utcnow()}},
-                    upsert=True,
-                )
-
-            return {
-                "success": True,
-                "message": "Test notification sent successfully",
-            }
-        else:
-            return {
-                "success": False,
-                "message": "Failed to send notification via Expo service",
-            }
+    client = PushClient()
+    try:
+        # expo-server-sdk is synchronous; run in thread if needed
+        responses = client.publish_multiple(messages)
     except Exception as exc:
-        logger.error("Error sending test notification: %s", exc)
-        return {
-            "success": False,
-            "message": f"Error sending test notification: {exc}",
-        }
+        logger.error("Error sending notifications: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Error sending notifications: {exc}")
+
+    success = sum(1 for r in responses if getattr(r, "status", "ok") == "ok")
+    return {
+        "success": success,
+        "attempted": len(messages),
+    }
 
 
 __all__ = [
