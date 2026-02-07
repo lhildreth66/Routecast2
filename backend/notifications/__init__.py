@@ -18,7 +18,6 @@ from typing import Dict, Any, Optional, List, Set
 
 import httpx
 from fastapi import APIRouter, HTTPException
-from fastapi.encoders import jsonable_encoder
 from pydantic import BaseModel
 from pymongo import MongoClient
 from exponent_server_sdk import PushClient, PushMessage
@@ -125,6 +124,16 @@ def _load_tokens_from_db() -> List[str]:
         return []
 
 
+def _remove_token(token: str) -> None:
+    """Remove a token from both in-memory cache and Mongo (if available)."""
+    _in_memory_tokens.discard(token)
+    if _db is not None:
+        try:
+            _db.push_tokens.delete_one({"push_token": token})
+        except Exception as exc:
+            logger.warning("[notifications] Failed to delete token %s: %s", token, exc)
+
+
 @router.post("/register")
 async def register_push_token(request: ExpoRegisterRequest):
     """Register or update a user's Expo push token."""
@@ -153,15 +162,18 @@ async def send_push_notification(request: SendNotificationRequest):
     if not tokens:
         raise HTTPException(status_code=400, detail="No Expo push tokens registered")
 
+    tokens_list = list(tokens)
+
     messages = [
         PushMessage(
             to=token,
-            sound="default",
             title=request.title,
             body=request.body,
+            sound="default",
+            channel_id="default",
             data=request.data or {"type": "test"},
         )
-        for token in tokens
+        for token in tokens_list
     ]
 
     client = PushClient()
@@ -172,29 +184,32 @@ async def send_push_notification(request: SendNotificationRequest):
         logger.error("Error sending notifications: %s", exc)
         raise HTTPException(status_code=500, detail=f"Error sending notifications: {exc}")
 
-    tickets_raw = jsonable_encoder(responses)
+    tickets: List[Dict[str, Any]] = []
+    success = 0
 
-    def _flatten(items):
-        for item in items:
-            if isinstance(item, list):
-                yield from _flatten(item)
-            else:
-                yield item
+    for token, resp in zip(tokens_list, responses):
+        ticket = {
+            "to": token,
+            "status": getattr(resp, "status", None),
+            "id": getattr(resp, "id", None),
+            "message": getattr(resp, "message", None),
+            "details": getattr(resp, "details", None),
+        }
 
-    tickets_flat = list(_flatten(tickets_raw))
-    success = sum(1 for resp in tickets_flat if isinstance(resp, dict) and resp.get("status") == "ok")
-
-    for ticket in tickets_flat:
-        if not isinstance(ticket, dict):
-            logger.error("[notifications] unexpected ticket type", extra={"ticket": ticket})
-            continue
-        if ticket.get("status") != "ok":
+        if ticket.get("status") == "ok":
+            success += 1
+        else:
             logger.error("[notifications] push ticket error", extra={"ticket": ticket})
+            details = ticket.get("details") or {}
+            if details.get("error") == "DeviceNotRegistered":
+                _remove_token(token)
+
+        tickets.append(ticket)
 
     return {
-        "attempted": len(messages),
+        "attempted": len(tokens_list),
         "success": success,
-        "tickets": tickets_flat,
+        "tickets": tickets,
     }
 
 
