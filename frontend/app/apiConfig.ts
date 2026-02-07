@@ -22,6 +22,38 @@ export const API_BASE_ERROR = !API_BASE ? 'No backend URL configured' : '';
 
 console.log('[apiConfig] API_BASE resolved', { base: API_BASE, source: API_BASE_SOURCE });
 
+// Global fetch logging wrapper for network triage
+if (typeof global !== 'undefined' && typeof global.fetch === 'function') {
+  const originalFetch = global.fetch;
+  global.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === 'string' || input instanceof URL ? input.toString() : String(input);
+    const method = (init?.method || 'GET').toUpperCase();
+    try {
+      const response = await originalFetch(input as any, init as any);
+      const contentType = response.headers.get('content-type') || '';
+      const isHtml = contentType.includes('text/html');
+      const status = response.status;
+      console.log('[net] request', { method, url, status, isHtml });
+
+      if (isHtml || status >= 300) {
+        try {
+          const text = await response.clone().text();
+          if (text.includes('<!DOCTYPE') || text.includes('<html')) {
+            console.warn('[net] HTML response detected', { url, status, snippet: text.slice(0, 200) });
+          }
+        } catch (e) {
+          console.warn('[net] unable to read response text', { url, status, error: String(e) });
+        }
+      }
+
+      return response;
+    } catch (err: any) {
+      console.warn('[net] fetch error', { method, url, error: String(err) });
+      throw err;
+    }
+  };
+}
+
 // Axios request/response logging (no secrets)
 axios.interceptors.request.use((config) => {
   const fullUrl = config.baseURL ? `${config.baseURL}${config.url}` : config.url;

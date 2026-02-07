@@ -31,14 +31,14 @@ from connectivity_prediction_service import cell_bars_probability, obstruction_r
 from campsite_index_service import SiteFactors, Weights, score as campsite_score
 from claim_log_service import HazardEvent as ClaimHazardEvent, WeatherSnapshot as ClaimWeatherSnapshot, build_claim_log
 from claim_log_pdf import export_claim_log_to_pdf
-from notifications import NotificationService, ExpoPushClient
+from notifications import NotificationService, ExpoPushClient, router as notifications_router
 from notifications.smart_delay import SmartDelayOptimizer
 from common.features import SMART_DELAY_ALERTS
 from radar_alerts import radar_router  # Weather radar & alerts integration
 
 # Google Gemini for chat
 try:
-    from google import genai
+    import google.generativeai as genai
     CHAT_AVAILABLE = True
 except ImportError:
     CHAT_AVAILABLE = False
@@ -87,8 +87,7 @@ async def connect_to_mongo():
 # API Keys
 MAPBOX_ACCESS_TOKEN = os.environ.get('MAPBOX_ACCESS_TOKEN', '')
 ROUTECAST_MODE = os.environ.get('ROUTECAST_MODE', 'prod').lower()
-GOOGLE_API_KEY = os.environ.get('GEMINI_API_KEY', '') or os.environ.get('GOOGLE_API_KEY', '')
-GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-2.0-flash-exp')
+GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-1.5-flash-latest')
 
 # Log Mapbox token presence without exposing the secret
 if MAPBOX_ACCESS_TOKEN:
@@ -131,6 +130,26 @@ def get_notification_service() -> NotificationService:
         expo_client = ExpoPushClient()
         _notification_service_instance = NotificationService(sync_db, expo_client)
     return _notification_service_instance
+
+
+def get_gemini_model() -> "genai.GenerativeModel":
+    """Construct a Gemini GenerativeModel using the required API key.
+
+    Raises HTTP 500 if the SDK or key is missing.
+    """
+    if not CHAT_AVAILABLE or genai is None:
+        logger.error("Gemini SDK not installed")
+        raise HTTPException(status_code=500, detail="Gemini SDK not installed")
+
+    try:
+        api_key = os.environ["GEMINI_API_KEY"]
+    except KeyError:
+        logger.error("GEMINI_API_KEY is not set")
+        raise HTTPException(status_code=500, detail="GEMINI_API_KEY is not set")
+
+    genai.configure(api_key=api_key)
+    model_name = os.environ.get("GEMINI_MODEL", GEMINI_MODEL)
+    return genai.GenerativeModel(model_name)
 
 # ==================== Models ====================
 
@@ -358,13 +377,6 @@ class FavoriteRouteRequest(BaseModel):
     destination: str
     stops: Optional[List[StopPoint]] = []
     name: Optional[str] = None
-
-class PushTokenRequest(BaseModel):
-    push_token: str
-    enabled: bool = True
-
-class TestNotificationRequest(BaseModel):
-    push_token: str
 
 class SubscriptionRequest(BaseModel):
     """Stub request for subscription validation"""
@@ -1802,31 +1814,27 @@ def parse_lat_lng(value: Optional[str]) -> Optional[Dict[str, float]]:
 
 async def generate_ai_summary(waypoints_weather: List[WaypointWeather], origin: str, destination: str, packing: List[PackingSuggestion]) -> Optional[str]:
     """Generate AI-powered weather summary using Gemini Flash."""
-    if not (CHAT_AVAILABLE and GOOGLE_API_KEY):
-        logger.info("AI summary skipped: Gemini SDK or API key not configured")
-        return None
 
-    try:
-        weather_info: List[str] = []
-        all_alerts: List[str] = []
+    weather_info: List[str] = []
+    all_alerts: List[str] = []
 
-        for wp in waypoints_weather:
-            if wp.weather:
-                info = f"- {wp.waypoint.name} ({wp.waypoint.distance_from_start} mi): "
-                info += f"{wp.weather.temperature}°{wp.weather.temperature_unit}, "
-                info += f"{wp.weather.conditions}, Wind: {wp.weather.wind_speed} {wp.weather.wind_direction}"
-                if wp.waypoint.arrival_time:
-                    info += f" (ETA: {wp.waypoint.arrival_time[:16]})"
-                weather_info.append(info)
+    for wp in waypoints_weather:
+        if wp.weather:
+            info = f"- {wp.waypoint.name} ({wp.waypoint.distance_from_start} mi): "
+            info += f"{wp.weather.temperature}°{wp.weather.temperature_unit}, "
+            info += f"{wp.weather.conditions}, Wind: {wp.weather.wind_speed} {wp.weather.wind_direction}"
+            if wp.waypoint.arrival_time:
+                info += f" (ETA: {wp.waypoint.arrival_time[:16]})"
+            weather_info.append(info)
 
-            for alert in wp.alerts:
-                all_alerts.append(f"- {alert.event}: {alert.headline}")
+        for alert in wp.alerts:
+            all_alerts.append(f"- {alert.event}: {alert.headline}")
 
-        weather_text = "\n".join(weather_info) if weather_info else "No weather data available"
-        alerts_text = "\n".join(set(all_alerts)) if all_alerts else "No active alerts"
-        packing_text = ", ".join([p.item for p in packing[:5]]) if packing else "Standard travel items"
+    weather_text = "\n".join(weather_info) if weather_info else "No weather data available"
+    alerts_text = "\n".join(set(all_alerts)) if all_alerts else "No active alerts"
+    packing_text = ", ".join([p.item for p in packing[:5]]) if packing else "Standard travel items"
 
-        prompt = f"""You are a helpful travel weather assistant. Provide a brief, driver-friendly weather summary for a road trip.
+    prompt = f"""You are a helpful travel weather assistant. Provide a brief, driver-friendly weather summary for a road trip.
 
 Route: {origin} to {destination}
 
@@ -1845,20 +1853,13 @@ Provide a 2-3 sentence summary focusing on:
 
 Be concise and practical."""
 
-        model_name = GEMINI_MODEL or 'gemini-2.0-flash-exp'
-        client = genai.Client(api_key=GOOGLE_API_KEY)
-        loop = asyncio.get_event_loop()
-        response_obj = await loop.run_in_executor(
-            None,
-            lambda: client.models.generate_content(
-                model=model_name,
-                contents=prompt
-            )
-        )
-        return getattr(response_obj, "text", None) or None
-    except Exception as e:
-        logger.warning("AI summary generation failed (model=%s): %s", GEMINI_MODEL, e)
-        return None
+    model = get_gemini_model()
+    loop = asyncio.get_event_loop()
+    response_obj = await loop.run_in_executor(
+        None,
+        lambda: model.generate_content(prompt)
+    )
+    return getattr(response_obj, "text", None) or None
 
 # ==================== API Routes ====================
 
@@ -1868,72 +1869,58 @@ async def root():
 
 @api_router.get("/health")
 async def health_check():
-    return {"status": "ok", "time": datetime.utcnow().isoformat()}
+    return {"ok": True, "time": datetime.utcnow().isoformat()}
 
 @api_router.post("/route/weather", response_model=RouteWeatherResponse)
 async def get_route_weather(request: RouteRequest):
     """Get weather along a route from origin to destination."""
-    logger.info(f"Route weather request: {request.origin} -> {request.destination}")
+    # Build the user message with optional route context and system instructions
+    system_message = """You are Routecast AI, a helpful driving assistant that helps drivers with:
+- Weather and road condition questions
+- Safe driving tips based on weather
+- Route planning advice
+- What to pack for a trip
+- Rest stop recommendations
+- Understanding weather alerts and hazards
 
-    if not request.mode and not request.vehicle_type:
-        raise HTTPException(status_code=400, detail="missing mode/vehicleType")
+Keep responses concise (2-3 sentences max) and actionable. Use emojis sparingly.
+If asked about specific locations, provide general advice since you don't have real-time data in this chat.
+Always prioritize safety in your recommendations."""
 
-    vehicle_type = request.vehicle_type or "car"
-    mode = request.mode
-    if not mode:
-        if request.trucker_mode or vehicle_type in {"semi", "truck", "trailer", "tractor_trailer"}:
-            mode = "truck"
-        elif vehicle_type == "rv":
-            mode = "boondocker"
-        else:
-            mode = "standard"
+    message_text = request.message
+    if request.route_context:
+        message_text = f"[Route context: {request.route_context}]\n\nUser question: {request.message}"
 
-    # Validate truck/tractor trailer requirements
-    if mode == "truck":
-        required = {
-            "vehicle_height_ft": request.vehicle_height_ft,
-            "vehicle_weight_lbs": request.vehicle_weight_lbs,
-            "vehicle_length_ft": request.vehicle_length_ft,
-            "axle_count": request.axle_count,
-        }
-        missing = [field for field, value in required.items() if value is None]
-        if missing:
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": "missing fields",
-                    "message": "Provide heavy-vehicle dimensions for tractor_trailer",
-                    "missing": missing,
-                },
-            )
+    model = get_gemini_model()
 
-    # Validate boondocker preferences
-    if mode == "boondocker":
-        required = {
-            "avoid_highways": request.avoid_highways,
-            "avoid_tolls": request.avoid_tolls,
-        }
-        missing = [field for field, value in required.items() if value is None]
-        if missing:
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error": "missing fields",
-                    "message": "Provide boondocker preferences",
-                    "missing": missing,
-                },
-            )
+    loop = asyncio.get_event_loop()
+    response_obj = await loop.run_in_executor(
+        None,
+        lambda: model.generate_content(system_message + "\n\n" + message_text)
+    )
+    response = response_obj.text
 
-    provider_label = "mapbox"
-    if mode == "truck":
-        provider_label = "mapbox (truck)"
-    elif mode == "boondocker":
-        provider_label = "mapbox (boondocker)"
+    # Generate quick suggestions based on the question
+    suggestions = []
+    question_lower = request.message.lower()
 
-    routing_options: Dict[str, Any] = {}
-    if mode == "boondocker":
-        excludes = []
-        if request.avoid_tolls:
+    if "ice" in question_lower or "snow" in question_lower:
+        suggestions = ["What speed should I drive in snow?", "Do I need chains?", "Black ice tips"]
+    elif "rain" in question_lower:
+        suggestions = ["Hydroplaning prevention", "Following distance in rain", "When to pull over"]
+    elif "wind" in question_lower:
+        suggestions = ["Safe driving in high winds", "Should I delay my trip?"]
+    elif "fog" in question_lower:
+        suggestions = ["Fog driving tips", "What lights to use in fog"]
+    elif "tired" in question_lower or "fatigue" in question_lower:
+        suggestions = ["Rest stop tips", "Signs of drowsy driving", "Coffee vs. nap"]
+    else:
+        suggestions = ["Check road conditions", "Safest time to drive", "Packing tips"]
+
+    return ChatResponse(
+        response=response,
+        suggestions=suggestions[:3]
+    )
             excludes.append("toll")
         if request.avoid_highways:
             excludes.append("motorway")
@@ -2363,12 +2350,6 @@ async def camp_prep_chat(request: CampPrepChatRequest):
 @api_router.post("/chat", response_model=ChatResponse)
 async def driver_chat(request: ChatMessage):
     """AI-powered chat for drivers to ask questions about weather, routes, and driving."""
-    if not CHAT_AVAILABLE or not GOOGLE_API_KEY:
-        return ChatResponse(
-            response="Chat feature is not available. Please check your route conditions on the main screen or contact support.",
-            suggestions=["Check road conditions", "View weather alerts", "Contact support"]
-        )
-    
     try:
         # Build the user message with optional route context and system instructions
         system_message = """You are Routecast AI, a helpful driving assistant that helps drivers with:
@@ -2388,14 +2369,14 @@ Always prioritize safety in your recommendations."""
             message_text = f"[Route context: {request.route_context}]\n\nUser question: {request.message}"
         
         # Use Gemini Flash for fast responses with new API
-        client = genai.Client(api_key=GOOGLE_API_KEY)
+        client = get_gemini_client()
         
         # Get response
         loop = asyncio.get_event_loop()
         response_obj = await loop.run_in_executor(
             None,
             lambda: client.models.generate_content(
-                model='gemini-2.0-flash-exp',
+                model=GEMINI_MODEL,
                 contents=system_message + "\n\n" + message_text
             )
         )
@@ -2426,109 +2407,7 @@ Always prioritize safety in your recommendations."""
     except Exception as e:
         logger.error(f"Chat error: {type(e).__name__}: {str(e)}", exc_info=True)
         # More specific error message for debugging
-        error_msg = f"I'm having trouble connecting right now. Error: {type(e).__name__}"
-        if "API" in str(e) or "key" in str(e).lower():
-            error_msg = "AI service authentication failed. Please contact support."
-        return ChatResponse(
-            response=error_msg,
-            suggestions=["Check road conditions", "View weather alerts", "Contact support"]
-        )
-
-# ==================== Push Notification Endpoints ====================
-
-async def send_expo_notification(push_token: str, title: str, body: str, data: Dict[str, Any] = None) -> bool:
-    """Send a push notification via Expo Push Service."""
-    try:
-        async with httpx.AsyncClient() as client:
-            response = await client.post(
-                'https://exp.host/--/api/v2/push/send',
-                json={
-                    'to': push_token,
-                    'sound': 'default',
-                    'title': title,
-                    'body': body,
-                    'data': data or {},
-                    'badge': 1,
-                    'priority': 'high',
-                },
-                headers={'Accept': 'application/json', 'Accept-Encoding': 'gzip, deflate'},
-            )
-            return response.status_code == 200
-    except Exception as e:
-        logger.error(f"Error sending Expo notification: {e}")
-        return False
-
-@api_router.post("/notifications/register")
-async def register_push_token(request: PushTokenRequest):
-    """Register or update user's push notification token."""
-    try:
-        # Save token to MongoDB if available
-        if db is not None:
-            result = await db.push_tokens.update_one(
-                {'push_token': request.push_token},
-                {
-                    '$set': {
-                        'push_token': request.push_token,
-                        'enabled': request.enabled,
-                        'created_at': datetime.utcnow(),
-                        'last_used': datetime.utcnow(),
-                    }
-                },
-                upsert=True
-            )
-        else:
-            logger.warning("[NOTIFICATIONS] Database not available, token not persisted")
-        
-        return {
-            'success': True,
-            'message': 'Push token registered successfully',
-            'token': request.push_token[:20] + '...',
-        }
-    except Exception as e:
-        logger.error(f"Error registering push token: {e}")
-        return {
-            'success': False,
-            'message': f'Error registering token: {str(e)}',
-        }
-
-@api_router.post("/notifications/test")
-async def send_test_notification(request: TestNotificationRequest):
-    """Send a test push notification to verify setup."""
-    try:
-        success = await send_expo_notification(
-            push_token=request.push_token,
-            title='🚛 Routecast Test Alert',
-            body='Push notifications are working! You\'ll receive weather alerts for your routes.',
-            data={
-                'type': 'test',
-                'timestamp': datetime.utcnow().isoformat(),
-            }
-        )
-        
-        if success:
-            # Update last_used timestamp if database available
-            if db is not None:
-                await db.push_tokens.update_one(
-                    {'push_token': request.push_token},
-                    {'$set': {'last_used': datetime.utcnow()}},
-                    upsert=True
-                )
-            
-            return {
-                'success': True,
-                'message': 'Test notification sent successfully',
-            }
-        else:
-            return {
-                'success': False,
-                'message': 'Failed to send notification via Expo service',
-            }
-    except Exception as e:
-        logger.error(f"Error sending test notification: {e}")
-        return {
-            'success': False,
-            'message': f'Error sending test notification: {str(e)}',
-        }
+        raise
 
 # ==================== Subscription/Billing Endpoints ====================
 
@@ -5089,6 +4968,7 @@ class WeighStationResponse(BaseModel):
     stations: List[WeighStation]
 
 @api_router.post("/pro/weigh-stations/search", response_model=WeighStationResponse)
+@api_router.post("/weigh-stations/search", response_model=WeighStationResponse)
 async def search_weigh_stations(request: WeighStationRequest):
     """Find weigh stations along highways."""
     try:
@@ -5176,6 +5056,7 @@ class TruckRestrictionResponse(BaseModel):
     restrictions: List[TruckRestriction]
 
 @api_router.post("/pro/truck-restrictions/search", response_model=TruckRestrictionResponse)
+@api_router.post("/truck-restrictions/search", response_model=TruckRestrictionResponse)
 async def search_truck_restrictions(request: TruckRestrictionRequest):
     """Find roads with truck restrictions using OpenStreetMap."""
     # TESTING: Paywalls disabled - require_premium(request.subscription_id, TRUCK_RESTRICTIONS)
@@ -5577,26 +5458,33 @@ async def log_origin(request, call_next):
         logger.info(f"CORS DEBUG origin={origin} acao={response.headers.get('access-control-allow-origin')}")
     return response
 
-# Include routers in the main app
-app.include_router(geocode_router, prefix="/api/geocode")
-app.include_router(radar_router, prefix="/api")  # Radar router already has /radar prefix
-app.include_router(api_router)
-
-# Simple health endpoint for liveness checks (non-prefixed)
-@app.get("/health")
-async def root_health():
-    return {"status": "ok", "time": datetime.utcnow().isoformat()}
-
-# Alias to match prefixed route for clients expecting /api/health
-@app.get("/api/health")
-async def api_health_alias():
-    return {"status": "ok", "time": datetime.utcnow().isoformat()}
 
 @app.on_event("startup")
 async def startup_db_client():
-    await connect_to_mongo()
+    """Initialize external services and log readiness."""
+    try:
+        mongo_ok = await connect_to_mongo()
+        if mongo_ok:
+            logger.info("[startup] MongoDB connected db=%s", db_name)
+    except Exception as exc:
+        logger.warning("[startup] MongoDB init failed: %s", exc)
 
-@app.on_event("shutdown")
-async def shutdown_db_client():
-    if client is not None:
-        client.close()
+    if CHAT_AVAILABLE and genai is not None:
+        model_name = os.environ.get("GEMINI_MODEL", GEMINI_MODEL)
+        try:
+            get_gemini_model()
+            logger.info("[startup] gemini configured model=%s", model_name)
+        except Exception as exc:
+            logger.warning("[startup] gemini not ready: %s", exc)
+    else:
+        logger.warning("[startup] gemini SDK unavailable")
+
+
+app.include_router(api_router)
+app.include_router(geocode_router, prefix="/api/geocode")
+app.include_router(radar_router, prefix="/api")
+app.include_router(
+    notifications_router,
+    prefix="/api/notifications",
+    tags=["notifications"],
+)

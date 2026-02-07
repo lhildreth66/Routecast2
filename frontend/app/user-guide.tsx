@@ -3,6 +3,7 @@ import {
   View, 
   Text, 
   StyleSheet, 
+  Pressable,
   TouchableOpacity, 
   ScrollView, 
   Dimensions 
@@ -317,9 +318,9 @@ export default function UserGuideScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color="#fff" />
-        </TouchableOpacity>
+        <Pressable onPress={() => router.back()} style={styles.backButton}>
+          <Text style={styles.backText}>← Back</Text>
+        </Pressable>
         <Text style={styles.headerTitle}>User Guide</Text>
         <View style={{ width: 40 }} />
       </View>
@@ -500,10 +501,15 @@ const styles = StyleSheet.create({
     borderBottomColor: '#1f1f1f',
   },
   backButton: {
-    width: 40,
-    height: 40,
-    justifyContent: 'center',
-    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: '#1f2937',
+  },
+  backText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
   headerTitle: {
     color: '#fff',

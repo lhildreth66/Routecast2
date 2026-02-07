@@ -14,7 +14,10 @@ import {
   Switch,
   Modal,
   Dimensions,
+  Alert,
+  ToastAndroid,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 
 // Custom TextInput that disables browser autofill on web
 const NoAutofillInput = forwardRef<any, TextInputProps>((props, ref) => {
@@ -40,6 +43,8 @@ const NoAutofillInput = forwardRef<any, TextInputProps>((props, ref) => {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, usePathname, useSegments } from 'expo-router';
+import Constants from 'expo-constants';
+import * as Notifications from 'expo-notifications';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -88,8 +93,19 @@ export default function HomeScreen() {
   const [alertsEnabled, setAlertsEnabled] = useState(false);
   const [recentRoutes, setRecentRoutes] = useState<SavedRoute[]>([]);
   const [favoriteRoutes, setFavoriteRoutes] = useState<SavedRoute[]>([]);
+  const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
   const [showFavorites, setShowFavorites] = useState(false);
   const [saveMessage, setSaveMessage] = useState('');
+  const [pushToken, setPushToken] = useState<string | null>(null);
+  const [pushPermissionStatus, setPushPermissionStatus] = useState<Notifications.PermissionStatus | 'unsupported' | 'error' | null>(null);
+  const [pushToggleLoading, setPushToggleLoading] = useState(false);
+  const [pushDebugLines, setPushDebugLines] = useState<string[]>([]);
+  const [lastToggleAt, setLastToggleAt] = useState<string | null>(null);
+  const [lastRegisterResult, setLastRegisterResult] = useState<string | null>(null);
+  const [lastTestResult, setLastTestResult] = useState<string | null>(null);
+  const [healthStatus, setHealthStatus] = useState<string>('pending');
+  const [healthSnippet, setHealthSnippet] = useState<string>('');
+  const [healthStatusCode, setHealthStatusCode] = useState<number | null>(null);
   
   // Autocomplete state
   const [originSuggestions, setOriginSuggestions] = useState<AutocompleteSuggestion[]>([]);
@@ -145,6 +161,49 @@ export default function HomeScreen() {
     loadCachedRoute();
     console.log('BACKEND:', process.env.EXPO_PUBLIC_BACKEND_URL);
     console.log('[startup] API_BASE', API_BASE, 'source', API_BASE_SOURCE);
+    runHealthCheck();
+  }, []);
+
+  useEffect(() => {
+    const loadPushPreferences = async () => {
+      try {
+        const storedEnabled = await AsyncStorage.getItem('pushAlertsEnabled');
+        if (storedEnabled !== null) {
+          setAlertsEnabled(storedEnabled === 'true');
+        }
+        const storedToken = await AsyncStorage.getItem('expoPushToken');
+        if (storedToken) {
+          setPushToken(storedToken);
+        }
+        const storedDebug = await AsyncStorage.getItem('pushDebugLog');
+        if (storedDebug) {
+          setPushDebugLines(JSON.parse(storedDebug));
+        }
+        const storedToggle = await AsyncStorage.getItem('pushLastToggleAt');
+        if (storedToggle) {
+          setLastToggleAt(storedToggle);
+        }
+        const storedRegister = await AsyncStorage.getItem('pushLastRegisterResult');
+        if (storedRegister) {
+          setLastRegisterResult(storedRegister);
+        }
+        const storedTest = await AsyncStorage.getItem('pushLastTestResult');
+        if (storedTest) {
+          setLastTestResult(storedTest);
+        }
+      } catch (e) {
+        console.log('[push] error loading stored preferences', e);
+      }
+    };
+
+    loadPushPreferences();
+
+    if (Platform.OS === 'android') {
+      Notifications.setNotificationChannelAsync('default', {
+        name: 'default',
+        importance: Notifications.AndroidImportance.MAX,
+      }).catch((err) => console.log('[push] channel setup error', err));
+    }
   }, []);
 
   const loadCachedRoute = async () => {
@@ -157,6 +216,220 @@ export default function HomeScreen() {
     } catch (e) {
       // ignore cache errors
     }
+  };
+
+  const runHealthCheck = async () => {
+    const url = `${API_BASE}/health`;
+    try {
+      const res = await fetch(url, { method: 'GET' });
+      const text = await res.text();
+      const snippet = text.slice(0, 120);
+      setHealthStatusCode(res.status);
+      setHealthSnippet(snippet);
+      setHealthStatus(res.ok ? 'ok' : 'error');
+      console.log('[net] health', { base: API_BASE, status: res.status, body: snippet });
+    } catch (err) {
+      setHealthStatus('error');
+      setHealthSnippet(String(err).slice(0, 120));
+      console.log('[net] health error', { base: API_BASE, error: String(err) });
+    }
+  };
+
+  const showToast = (message: string) => {
+    if (Platform.OS === 'android') {
+      ToastAndroid.show(message, ToastAndroid.SHORT);
+    } else {
+      Alert.alert('Favorites', message);
+    }
+  };
+
+  const showPushMessage = (message: string) => {
+    if (Platform.OS === 'android') {
+      ToastAndroid.show(message, ToastAndroid.SHORT);
+    } else {
+      Alert.alert('Push Notifications', message);
+    }
+  };
+
+  const pushDebugLog = async (message: string) => {
+    console.log(message);
+    setPushDebugLines((prev) => {
+      const next = [...prev, `${new Date().toISOString()} ${message}`].slice(-50);
+      AsyncStorage.setItem('pushDebugLog', JSON.stringify(next)).catch((err) =>
+        console.log('[push] failed to persist debug log', err)
+      );
+      return next;
+    });
+  };
+
+  const registerForPushNotificationsAsync = async (): Promise<{
+    status: Notifications.PermissionStatus | 'unsupported' | 'error';
+    token: string | null;
+  }> => {
+    if (Platform.OS === 'web') {
+      pushDebugLog('[push] web platform - notifications unsupported');
+      setPushPermissionStatus('unsupported');
+      return { status: 'unsupported', token: null };
+    }
+
+    pushDebugLog('[push] before requesting permissions');
+    try {
+      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      let finalStatus = existingStatus;
+
+      if (existingStatus !== 'granted') {
+        const permissionResponse = await Notifications.requestPermissionsAsync();
+        finalStatus = permissionResponse.status;
+      }
+
+      pushDebugLog(`[push] permission status ${finalStatus}`);
+      setPushPermissionStatus(finalStatus);
+
+      if (finalStatus !== 'granted') {
+        return { status: finalStatus, token: null };
+      }
+
+      const projectId = Constants?.expoConfig?.extra?.eas?.projectId;
+      const tokenResponse = await Notifications.getExpoPushTokenAsync(
+        projectId ? { projectId } : undefined
+      );
+      pushDebugLog(`[push] obtained expo push token ${tokenResponse?.data}`);
+      setPushToken(tokenResponse?.data || null);
+      await AsyncStorage.setItem('expoPushToken', tokenResponse?.data || '');
+
+      return { status: finalStatus, token: tokenResponse?.data || null };
+    } catch (err) {
+      pushDebugLog(`[push] error during registration ${String(err)}`);
+      setPushPermissionStatus('error');
+      return { status: 'error', token: null };
+    }
+  };
+
+  const handleTogglePushNotifications = async (nextValue: boolean) => {
+    const previousValue = alertsEnabled;
+    setLastToggleAt(new Date().toISOString());
+    AsyncStorage.setItem('pushLastToggleAt', new Date().toISOString()).catch(() => {});
+    pushDebugLog(`[push] toggle pressed old=${previousValue} new=${nextValue}`);
+    setAlertsEnabled(nextValue);
+    setPushToggleLoading(true);
+
+    try {
+      if (nextValue) {
+        const { status, token } = await registerForPushNotificationsAsync();
+
+        if (status !== 'granted' || !token) {
+          pushDebugLog(`[push] permission denied or token missing status=${status}`);
+          setAlertsEnabled(false);
+          await AsyncStorage.setItem('pushAlertsEnabled', 'false');
+          showPushMessage(
+            status === 'unsupported'
+              ? 'Push notifications require a physical device; web/emulator will not prompt. Please try on a real device.'
+              : 'Push notifications need permission. Please enable in Settings.'
+          );
+          return;
+        }
+
+        pushDebugLog(`[push] saving token to backend token=${token}`);
+        try {
+          const response = await axios.post(`${API_BASE}/notifications/register`, {
+            push_token: token,
+            enabled: true,
+          });
+          const msg = JSON.stringify(response?.data || {});
+          setLastRegisterResult(msg);
+          AsyncStorage.setItem('pushLastRegisterResult', msg).catch(() => {});
+          pushDebugLog(`[push] backend save response ${msg}`);
+          await AsyncStorage.setItem('pushAlertsEnabled', 'true');
+          showPushMessage('Push weather alerts enabled');
+        } catch (backendErr) {
+          const errMsg = backendErr?.message || String(backendErr);
+          setLastRegisterResult(errMsg);
+          AsyncStorage.setItem('pushLastRegisterResult', errMsg).catch(() => {});
+          pushDebugLog(`[push] backend save failed ${errMsg}`);
+          setAlertsEnabled(false);
+          await AsyncStorage.setItem('pushAlertsEnabled', 'false');
+          showPushMessage('Could not save push token. Try again.');
+        }
+      } else {
+        pushDebugLog('[push] toggled off - clearing local state');
+        await AsyncStorage.setItem('pushAlertsEnabled', 'false');
+        setPushPermissionStatus(null);
+
+        if (pushToken) {
+          try {
+            const disableResponse = await axios.post(`${API_BASE}/notifications/register`, {
+              push_token: pushToken,
+              enabled: false,
+            });
+            const msg = JSON.stringify(disableResponse?.data || {});
+            setLastRegisterResult(msg);
+            AsyncStorage.setItem('pushLastRegisterResult', msg).catch(() => {});
+            pushDebugLog(`[push] backend disable response ${msg}`);
+          } catch (disableErr) {
+            const errMsg = disableErr?.message || String(disableErr);
+            setLastRegisterResult(errMsg);
+            AsyncStorage.setItem('pushLastRegisterResult', errMsg).catch(() => {});
+            pushDebugLog(`[push] backend disable failed ${errMsg}`);
+          }
+        }
+      }
+    } catch (err) {
+      pushDebugLog(`[push] toggle error ${String(err)}`);
+      setAlertsEnabled(previousValue);
+      showPushMessage('Unable to update push notifications right now.');
+    } finally {
+      setPushToggleLoading(false);
+    }
+  };
+
+  const handleSendTestNotification = async () => {
+    if (!pushToken) {
+      showPushMessage('Enable push alerts first so we can generate a token.');
+      return;
+    }
+
+    pushDebugLog(`[push] sending test notification for token ${pushToken}`);
+    try {
+      const response = await axios.post(`${API_BASE}/notifications/test`, {
+        push_token: pushToken,
+      });
+      const msg = JSON.stringify(response?.data || {});
+      setLastTestResult(msg);
+      AsyncStorage.setItem('pushLastTestResult', msg).catch(() => {});
+      pushDebugLog(`[push] test notification response ${msg}`);
+      showPushMessage(response?.data?.success ? 'Test notification sent (check device)' : 'Test notification failed');
+    } catch (err) {
+      const errMsg = err?.message || String(err);
+      setLastTestResult(errMsg);
+      AsyncStorage.setItem('pushLastTestResult', errMsg).catch(() => {});
+      pushDebugLog(`[push] test notification error ${errMsg}`);
+      showPushMessage('Test notification failed');
+    }
+  };
+
+  const copyPushDebugLogs = async () => {
+    const payload = [
+      `API_BASE: ${API_BASE}`,
+      `lastToggleAt: ${lastToggleAt || 'n/a'}`,
+      `permission: ${pushPermissionStatus || 'unknown'}`,
+      `tokenPresent: ${!!pushToken}`,
+      `lastRegister: ${lastRegisterResult || 'n/a'}`,
+      `lastTest: ${lastTestResult || 'n/a'}`,
+      'recentLogs:',
+      ...pushDebugLines.slice(-6),
+    ].join('\n');
+    await Clipboard.setStringAsync(payload);
+    showPushMessage('Push debug logs copied');
+  };
+
+  const stopsKey = (list?: StopPoint[]) => JSON.stringify(list || []);
+
+  const routesMatch = (route: SavedRoute, originText: string, destinationText: string, compareStops: StopPoint[]) => {
+    return (
+      route.origin === originText &&
+      route.destination === destinationText &&
+      stopsKey(route.stops) === stopsKey(compareStops)
+    );
   };
 
   // Debounced autocomplete function
@@ -344,6 +617,7 @@ export default function HomeScreen() {
       const path = `${API_BASE}/api/routes/favorites`;
       const response = await axios.get(path);
       setFavoriteRoutes(response.data);
+      setFavoriteIds(new Set(response.data.map((r: SavedRoute) => r.id)));
     } catch (err) {
       console.warn('Error fetching favorites');
     }
@@ -430,32 +704,161 @@ export default function HomeScreen() {
     }
   };
 
-  const addToFavorites = async () => {
-    if (!origin.trim() || !destination.trim()) {
+  const toggleFavorite = async (route: SavedRoute) => {
+    if (!route?.id) {
+      return;
+    }
+
+    const currentlyFavorite = favoriteIds.has(route.id);
+
+    // Optimistic UI update
+    setFavoriteIds((prev) => {
+      const next = new Set(prev);
+      if (currentlyFavorite) {
+        next.delete(route.id);
+      } else {
+        next.add(route.id);
+      }
+      return next;
+    });
+
+    setFavoriteRoutes((prev) => {
+      if (currentlyFavorite) {
+        return prev.filter((r) => r.id !== route.id);
+      }
+      const exists = prev.some((r) => r.id === route.id);
+      return exists ? prev : [...prev, route];
+    });
+
+    try {
+      if (currentlyFavorite) {
+        await axios.delete(`${API_BASE}/api/routes/favorites/${route.id}`);
+      } else {
+        await axios.post(`${API_BASE}/api/routes/favorites`, {
+          origin: route.origin,
+          destination: route.destination,
+          stops: route.stops || [],
+        });
+      }
+
+      // Sync store with server response
+      fetchFavoriteRoutes();
+    } catch (err) {
+      // Revert optimistic change on error
+      setFavoriteIds((prev) => {
+        const next = new Set(prev);
+        if (currentlyFavorite) {
+          next.add(route.id);
+        } else {
+          next.delete(route.id);
+        }
+        return next;
+      });
+
+      setFavoriteRoutes((prev) => {
+        if (currentlyFavorite) {
+          const exists = prev.some((r) => r.id === route.id);
+          return exists ? prev : [...prev, route];
+        }
+        return prev.filter((r) => r.id !== route.id);
+      });
+
+      console.error('Error updating favorite:', err);
+      showToast('Failed to update favorite. Please try again.');
+    }
+  };
+
+  const toggleCurrentRouteFavorite = async () => {
+    const trimmedOrigin = origin.trim();
+    const trimmedDestination = destination.trim();
+
+    if (!trimmedOrigin || !trimmedDestination) {
       setError('Enter a route first to save as favorite');
       return;
     }
 
-    try {
-      const path = `${API_BASE}/api/routes/favorites`;
-      const res = await axios.post(path, {
-        origin: origin.trim(),
-        destination: destination.trim(),
-        stops: stops,
-      });
-      fetchFavoriteRoutes();
-    } catch (err) {
-      console.error('Error saving favorite:', err);
-    }
-  };
+    const existing = favoriteRoutes.find((r) =>
+      routesMatch(r, trimmedOrigin, trimmedDestination, stops)
+    );
 
-  const removeFavorite = async (id: string) => {
+    const tempId = `temp-${Date.now()}`;
+    const optimisticRoute: SavedRoute = existing || {
+      id: tempId,
+      origin: trimmedOrigin,
+      destination: trimmedDestination,
+      stops,
+      created_at: new Date().toISOString(),
+      is_favorite: true,
+    };
+
+    const currentlyFavorite = !!existing;
+
+    // Optimistic state change
+    setFavoriteIds((prev) => {
+      const next = new Set(prev);
+      if (currentlyFavorite && existing) {
+        next.delete(existing.id);
+      } else {
+        next.add(optimisticRoute.id);
+      }
+      return next;
+    });
+
+    setFavoriteRoutes((prev) => {
+      if (currentlyFavorite && existing) {
+        return prev.filter((r) => r.id !== existing.id);
+      }
+      return [...prev, optimisticRoute];
+    });
+
     try {
-      const path = `${API_BASE}/api/routes/favorites/${id}`;
-      const res = await axios.delete(path);
+      if (currentlyFavorite && existing) {
+        await axios.delete(`${API_BASE}/api/routes/favorites/${existing.id}`);
+      } else {
+        const res = await axios.post(`${API_BASE}/api/routes/favorites`, {
+          origin: trimmedOrigin,
+          destination: trimmedDestination,
+          stops,
+        });
+
+        if (res?.data?.id) {
+          const savedRoute: SavedRoute = res.data;
+          setFavoriteIds((prev) => {
+            const next = new Set(prev);
+            next.delete(optimisticRoute.id);
+            next.add(savedRoute.id);
+            return next;
+          });
+
+          setFavoriteRoutes((prev) =>
+            prev.map((r) => (r.id === optimisticRoute.id ? savedRoute : r))
+          );
+        }
+      }
+
       fetchFavoriteRoutes();
     } catch (err) {
-      console.error('Error removing favorite:', err);
+      // Revert on failure
+      setFavoriteIds((prev) => {
+        const next = new Set(prev);
+        if (currentlyFavorite && existing) {
+          next.add(existing.id);
+        } else {
+          next.delete(optimisticRoute.id);
+        }
+        return next;
+      });
+
+      setFavoriteRoutes((prev) => {
+        if (currentlyFavorite && existing) {
+          const exists = prev.some((r) => r.id === existing.id);
+          return exists ? prev : [...prev, existing];
+        }
+        return prev.filter((r) => r.id !== optimisticRoute.id);
+      });
+
+      console.error('Error saving favorite:', err);
+      showToast('Failed to update favorite. Please try again.');
     }
   };
 
@@ -686,6 +1089,13 @@ export default function HomeScreen() {
     `;
   };
 
+  const trimmedOrigin = origin.trim();
+  const trimmedDestination = destination.trim();
+  const currentFavoriteForInput = favoriteRoutes.find((r) =>
+    routesMatch(r, trimmedOrigin, trimmedDestination, stops)
+  );
+  const isCurrentRouteFavorite = !!currentFavoriteForInput;
+
   return (
     <View style={styles.container}>
       {showApiBaseError && (
@@ -727,9 +1137,13 @@ export default function HomeScreen() {
                 </TouchableOpacity>
                 <TouchableOpacity 
                   style={styles.favoriteButton}
-                  onPress={addToFavorites}
+                  onPress={toggleCurrentRouteFavorite}
                 >
-                  <Ionicons name="heart-outline" size={24} color="#eab308" />
+                  <Ionicons
+                    name={isCurrentRouteFavorite ? 'heart' : 'heart-outline'}
+                    size={24}
+                    color={isCurrentRouteFavorite ? '#ef4444' : '#eab308'}
+                  />
                 </TouchableOpacity>
               </View>
 
@@ -911,6 +1325,18 @@ export default function HomeScreen() {
                 />
               </View>
 
+              {/* Health Check */}
+              <View style={styles.healthCard}>
+                <Text style={styles.healthTitle}>Health Check</Text>
+                <Text style={styles.healthLine}>API Base: {API_BASE}</Text>
+                <Text style={styles.healthLine}>Status: {healthStatus} ({healthStatusCode ?? 'n/a'})</Text>
+                <Text style={styles.healthLine}>Body: {healthSnippet || 'pending...'}</Text>
+                <TouchableOpacity style={styles.healthButton} onPress={runHealthCheck}>
+                  <Ionicons name="refresh" size={16} color="#0f172a" />
+                  <Text style={styles.healthButtonText}>Refresh Health</Text>
+                </TouchableOpacity>
+              </View>
+
               {/* Weather Alerts Toggle */}
               <View style={styles.alertsToggle}>
                 <View style={styles.alertsLeft}>
@@ -919,10 +1345,47 @@ export default function HomeScreen() {
                 </View>
                 <Switch
                   value={alertsEnabled}
-                  onValueChange={setAlertsEnabled}
+                  onValueChange={handleTogglePushNotifications}
+                  disabled={pushToggleLoading}
                   trackColor={{ false: '#3f3f46', true: '#eab30880' }}
                   thumbColor={alertsEnabled ? '#eab308' : '#71717a'}
                 />
+              </View>
+
+              <View style={styles.pushActionsRow}>
+                <Text style={styles.pushStatusText}>
+                  {alertsEnabled
+                    ? `Push alerts on${pushPermissionStatus ? ` (perm: ${pushPermissionStatus})` : ''}`
+                    : 'Push alerts off'}
+                </Text>
+                <TouchableOpacity
+                  style={[
+                    styles.pushTestButton,
+                    (!pushToken || !alertsEnabled || pushToggleLoading) && styles.pushTestButtonDisabled,
+                  ]}
+                  onPress={handleSendTestNotification}
+                  disabled={!pushToken || !alertsEnabled || pushToggleLoading}
+                >
+                  <Ionicons name="paper-plane-outline" size={16} color="#eab308" />
+                  <Text style={styles.pushTestButtonText}>Send Test Notification</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.pushDebugSection}>
+                <Text style={styles.debugTitle}>Push Debug</Text>
+                <Text style={styles.debugLine}>Last toggle: {lastToggleAt || 'n/a'}</Text>
+                <Text style={styles.debugLine}>Permission: {pushPermissionStatus || 'unknown'}</Text>
+                <Text style={styles.debugLine}>Token present: {pushToken ? 'yes' : 'no'}</Text>
+                <Text style={styles.debugLine}>Last register: {lastRegisterResult || 'n/a'}</Text>
+                <Text style={styles.debugLine}>Last test: {lastTestResult || 'n/a'}</Text>
+                <Text style={styles.debugLine}>Recent logs:</Text>
+                {pushDebugLines.slice(-6).map((line, idx) => (
+                  <Text key={idx} style={styles.debugLine}>• {line}</Text>
+                ))}
+                <TouchableOpacity style={styles.copyLogsButton} onPress={copyPushDebugLogs}>
+                  <Ionicons name="copy-outline" size={16} color="#0f172a" />
+                  <Text style={styles.copyLogsButtonText}>Copy Debug Logs</Text>
+                </TouchableOpacity>
               </View>
 
               {/* Error Message */}
@@ -1537,6 +2000,103 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#ffffff',
+  },
+  pushDebugSection: {
+    backgroundColor: '#1f2937',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#374151',
+    gap: 4,
+  },
+  debugTitle: {
+    color: '#e5e7eb',
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  debugLine: {
+    color: '#cbd5e1',
+    fontSize: 12,
+  },
+  copyLogsButton: {
+    marginTop: 6,
+    backgroundColor: '#eab308',
+    borderRadius: 8,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  copyLogsButtonText: {
+    color: '#0f172a',
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  pushActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+    gap: 10,
+  },
+  pushStatusText: {
+    color: '#a1a1aa',
+    fontSize: 12,
+    flex: 1,
+  },
+  pushTestButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#27272a',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    gap: 6,
+    borderWidth: 1,
+    borderColor: '#3f3f46',
+  },
+  pushTestButtonDisabled: {
+    opacity: 0.6,
+  },
+  pushTestButtonText: {
+    color: '#eab308',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  healthCard: {
+    backgroundColor: '#1f2937',
+    borderRadius: 10,
+    padding: 10,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#374151',
+    gap: 4,
+  },
+  healthTitle: {
+    color: '#e5e7eb',
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  healthLine: {
+    color: '#cbd5e1',
+    fontSize: 12,
+  },
+  healthButton: {
+    marginTop: 6,
+    backgroundColor: '#22c55e',
+    borderRadius: 8,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  healthButtonText: {
+    color: '#0f172a',
+    fontWeight: '700',
+    fontSize: 13,
   },
   errorContainer: {
     flexDirection: 'row',
