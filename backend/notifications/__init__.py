@@ -155,12 +155,12 @@ async def register_push_token(request: ExpoRegisterRequest):
 @router.post("/send")
 async def send_push_notification(request: SendNotificationRequest):
     """Send a test push notification to all stored tokens."""
-    # Gather tokens from memory and DB
-    tokens = set(_in_memory_tokens)
-    tokens.update(_load_tokens_from_db())
+    # Gather tokens from memory and DB, drop blanks and known placeholder
+    tokens = {t for t in _in_memory_tokens if t and t != "ExponentPushToken[fake-token]"}
+    tokens.update(t for t in _load_tokens_from_db() if t and t != "ExponentPushToken[fake-token]")
 
     if not tokens:
-        raise HTTPException(status_code=400, detail="No Expo push tokens registered")
+        raise HTTPException(status_code=400, detail="No tokens registered")
 
     tokens_list = list(tokens)
 
