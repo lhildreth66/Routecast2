@@ -1852,7 +1852,6 @@ Provide a 2-3 sentence summary focusing on:
 3. Key recommendations for the driver
 
 Be concise and practical."""
-
     model = get_gemini_model()
     loop = asyncio.get_event_loop()
     response_obj = await loop.run_in_executor(
@@ -1921,11 +1920,6 @@ Always prioritize safety in your recommendations."""
         response=response,
         suggestions=suggestions[:3]
     )
-            excludes.append("toll")
-        if request.avoid_highways:
-            excludes.append("motorway")
-        if excludes:
-            routing_options["exclude"] = ",".join(excludes)
 
     logger.info(
         "Routing provider=%s mode=%s vehicle_type=%s options=%s",
