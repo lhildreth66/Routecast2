@@ -2770,18 +2770,14 @@ async def predict_cell_probability(request: ConnectivityCellRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail="Unable to compute cell probability at this time")
 
-@api_router.post("/pro/connectivity/starlink-risk", response_model=ConnectivityStarlinkResponse)
+@api_router.post("/connectivity/starlink-risk", response_model=ConnectivityStarlinkResponse)
 async def predict_starlink_risk(request: ConnectivityStarlinkRequest):
-    """Premium-gated Starlink obstruction risk prediction (Task A7)."""
-    # Premium gating
-    # TESTING: Paywalls disabled - require_premium(request.subscription_id, CELL_STARLINK)
-
+    """Starlink obstruction risk prediction (Task A7)."""
     try:
         res = obstruction_risk(
             horizon_south_deg=request.horizonSouthDeg,
             canopy_pct=request.canopyPct,
         )
-        logger.info(f"[PREMIUM] Starlink risk computed: risk_level={res.risk_level} score={res.obstruction_score}")
         return ConnectivityStarlinkResponse(
             risk_level=res.risk_level,
             obstruction_score=res.obstruction_score,
@@ -2790,10 +2786,8 @@ async def predict_starlink_risk(request: ConnectivityStarlinkRequest):
             is_premium_locked=False,
         )
     except ValueError as e:
-        logger.error(f"[PREMIUM] Invalid parameters for Starlink risk: {e}")
         raise HTTPException(status_code=400, detail=f"Invalid parameters: {str(e)}")
     except Exception as e:
-        logger.error(f"[PREMIUM] Unexpected error computing Starlink risk: {e}")
         raise HTTPException(status_code=500, detail="Unable to compute Starlink risk at this time")
 
 # ==================== Campsite Index Endpoints (A8) ====================
@@ -3045,14 +3039,9 @@ async def _fetch_passability_score(client: httpx.AsyncClient, lat: float, lon: f
         return 75.0  # Default
 
 
-@api_router.post("/pro/campsite-index", response_model=CampsiteIndexResponse)
+@api_router.post("/campsite-index", response_model=CampsiteIndexResponse)
 async def calculate_campsite_index(request: CampsiteIndexRequest):
-    """Premium-gated Campsite Index scoring (Task A8)."""
-    logger.info(f"[PREMIUM] Campsite index calculation requested")
-    
-    # Check premium entitlement
-    # TESTING: Paywalls disabled - require_premium(request.subscription_id, CAMPSITE_INDEX)
-
+    """Campsite Index scoring (Task A8)."""
     try:
         factors = SiteFactors(
             wind_gust_mph=request.wind_gust_mph,
@@ -3063,7 +3052,6 @@ async def calculate_campsite_index(request: CampsiteIndexRequest):
             road_passability_score=request.road_passability_score,
         )
         result = campsite_score(factors)
-        logger.info(f"[PREMIUM] Campsite index computed: score={result.score}")
         return CampsiteIndexResponse(
             score=result.score,
             breakdown=result.breakdown,
@@ -3071,40 +3059,22 @@ async def calculate_campsite_index(request: CampsiteIndexRequest):
             is_premium_locked=False,
         )
     except ValueError as e:
-        logger.error(f"[PREMIUM] Invalid parameters for campsite index: {e}")
         raise HTTPException(status_code=400, detail=f"Invalid parameters: {str(e)}")
     except Exception as e:
-        logger.error(f"[PREMIUM] Unexpected error computing campsite index: {e}")
         raise HTTPException(status_code=500, detail="Unable to compute campsite index at this time")
 
 
-@api_router.post("/pro/campsite-index/auto", response_model=CampsiteIndexResponse)
+@api_router.post("/campsite-index/auto", response_model=CampsiteIndexResponse)
 async def calculate_campsite_index_auto(request: CampsiteIndexAutoRequest):
-    """Premium-gated Campsite Index with automatic data fetching."""
-    logger.info(f"[PREMIUM] Auto campsite index for lat={request.latitude}, lon={request.longitude}")
-    
-    # Check premium entitlement
-    # TESTING: Paywalls disabled - require_premium(request.subscription_id, CAMPSITE_INDEX)
-
+    """Campsite Index with automatic data fetching."""
     try:
-        # Fetch real data from various sources
         async with httpx.AsyncClient(timeout=30.0) as client:
-            # 1. Get current weather for wind
             wind_gust_mph = await _fetch_wind_data(client, request.latitude, request.longitude)
-            
-            # 2. Get terrain data for slope and shade
             slope_pct, shade_score = await _fetch_terrain_data(client, request.latitude, request.longitude)
-            
-            # 3. Get road access score from OSM
             access_score = await _fetch_access_score(client, request.latitude, request.longitude)
-            
-            # 4. Get cell signal estimate
             signal_score = await _fetch_signal_score(request.latitude, request.longitude)
-            
-            # 5. Get road passability
             road_passability_score = await _fetch_passability_score(client, request.latitude, request.longitude)
 
-        # Calculate the score using the real data
         factors = SiteFactors(
             wind_gust_mph=wind_gust_mph,
             shade_score=shade_score,
@@ -3114,8 +3084,6 @@ async def calculate_campsite_index_auto(request: CampsiteIndexAutoRequest):
             road_passability_score=road_passability_score,
         )
         result = campsite_score(factors)
-        
-        logger.info(f"[PREMIUM] Auto campsite index computed: score={result.score}")
         return CampsiteIndexResponse(
             score=result.score,
             breakdown=result.breakdown,
@@ -3123,10 +3091,8 @@ async def calculate_campsite_index_auto(request: CampsiteIndexAutoRequest):
             is_premium_locked=False,
         )
     except ValueError as e:
-        logger.error(f"[PREMIUM] Invalid parameters for auto campsite index: {e}")
         raise HTTPException(status_code=400, detail=f"Invalid parameters: {str(e)}")
     except Exception as e:
-        logger.error(f"[PREMIUM] Unexpected error computing auto campsite index: {e}")
         raise HTTPException(status_code=500, detail="Unable to compute campsite index at this time")
 
 # ==================== Claim Log Endpoints (A9) ====================
@@ -3157,21 +3123,17 @@ def _to_claim_weather(weather: ClaimWeatherSnapshotModel) -> ClaimWeatherSnapsho
     )
 
 
-@api_router.post("/pro/claim-log/build", response_model=ClaimLogResponse)
+@api_router.post("/claim-log/build", response_model=ClaimLogResponse)
 async def build_claim_log_endpoint(request: ClaimLogRequest):
-    """Premium-gated Claim Log builder (Task A9).
+    """Claim Log builder (Task A9).
 
     Accepts hazard events and weather snapshot, returns structured ClaimLog JSON.
     """
-    # Premium gating
-    # TESTING: Paywalls disabled - require_premium(request.subscription_id, CLAIM_LOG)
-
     try:
         hazards = _to_claim_hazards(request.hazards)
         weather = _to_claim_weather(request.weatherSnapshot)
         claim_log = build_claim_log(route_id=request.routeId, hazards=hazards, weather_snapshot=weather)
 
-        # Build response dict via dataclass helper
         return ClaimLogResponse(
             schema_version=claim_log.schema_version,
             route_id=claim_log.route_id,
@@ -3183,10 +3145,8 @@ async def build_claim_log_endpoint(request: ClaimLogRequest):
             is_premium_locked=False,
         )
     except ValueError as e:
-        logger.error(f"[PREMIUM] Invalid parameters for claim log: {e}")
         raise HTTPException(status_code=400, detail=f"Invalid parameters: {str(e)}")
     except Exception as e:
-        logger.error(f"[PREMIUM] Unexpected error building claim log: {e}")
         raise HTTPException(status_code=500, detail="Unable to build claim log at this time")
 
 
@@ -3198,20 +3158,15 @@ class ClaimLogPdfRequest(BaseModel):
     subscription_id: Optional[str] = None
 
 
-@api_router.post("/pro/claim-log/pdf")
+@api_router.post("/claim-log/pdf")
 async def claim_log_pdf_endpoint(request: ClaimLogPdfRequest):
-    """Premium-gated Claim Log PDF export (Task A9).
+    """Claim Log PDF export (Task A9).
 
     Accepts either raw inputs (routeId, hazards, weatherSnapshot) or a full ClaimLog JSON.
     Returns a PDF binary.
     """
-    # Premium gating
-    # TESTING: Paywalls disabled - require_premium(request.subscription_id, CLAIM_LOG)
-
     try:
-        # Determine source of ClaimLog
         if request.claimLog:
-            # Build from provided ClaimLog JSON
             data = request.claimLog
             hazards_data = data.get("hazards", [])
             hazards = [
@@ -3241,7 +3196,6 @@ async def claim_log_pdf_endpoint(request: ClaimLogPdfRequest):
                 schema_version=data.get("schema_version", "1.0"),
             )
         else:
-            # Build from raw inputs
             if not request.routeId or not request.hazards or not request.weatherSnapshot:
                 raise ValueError("Either claimLog or routeId/hazards/weatherSnapshot must be provided")
             hazards = _to_claim_hazards(request.hazards)
@@ -3253,10 +3207,8 @@ async def claim_log_pdf_endpoint(request: ClaimLogPdfRequest):
             "Content-Disposition": f"attachment; filename=claim_log_{claim_log.route_id}.pdf"
         })
     except ValueError as e:
-        logger.error(f"[PREMIUM] Invalid parameters for claim log PDF: {e}")
         raise HTTPException(status_code=400, detail=f"Invalid parameters: {str(e)}")
     except Exception as e:
-        logger.error(f"[PREMIUM] Unexpected error exporting claim log PDF: {e}")
         raise HTTPException(status_code=500, detail="Unable to export claim log PDF at this time")
 
 
