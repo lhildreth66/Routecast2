@@ -3362,7 +3362,7 @@ async def check_notification(request: CheckNotificationRequest):
 
 # ==================== Free Camping Finder Endpoint ====================
 
-@api_router.post("/pro/free-camping/search", response_model=FreeCampingResponse)
+@api_router.post("/free-camping/search", response_model=FreeCampingResponse)
 async def search_free_camping(request: FreeCampingRequest):
     """Find free camping spots (BLM, National Forest, etc.) near given coordinates using OpenStreetMap data."""
     # TESTING: Paywalls disabled - require_premium(request.subscription_id, CAMPSITE_INDEX)  # Reuse campsite_index feature for now
@@ -3553,7 +3553,7 @@ async def search_free_camping(request: FreeCampingRequest):
         # Limit to 20 results
         spots = spots[:20]
         
-        logger.info(f"[PREMIUM] Free camping search completed: found {len(spots)} spots from OSM within {request.radius_miles} miles")
+        logger.info(f"Free camping search completed: found {len(spots)} spots from OSM within {request.radius_miles} miles")
         
         return FreeCampingResponse(
             spots=spots,
@@ -3561,13 +3561,13 @@ async def search_free_camping(request: FreeCampingRequest):
         )
     
     except httpx.HTTPError as e:
-        logger.error(f"[PREMIUM] Overpass API error: {e}")
+        logger.error(f"Overpass API error: {e}")
         raise HTTPException(
             status_code=503,
             detail="Camping data service temporarily unavailable"
         )
     except Exception as e:
-        logger.error(f"[PREMIUM] Error searching free camping: {e}")
+        logger.error(f"Error searching free camping: {e}")
         raise HTTPException(
             status_code=500,
             detail="Unable to search for camping spots at this time"
@@ -3576,7 +3576,7 @@ async def search_free_camping(request: FreeCampingRequest):
 
 # ==================== Dump Station Finder Endpoint ====================
 
-@api_router.post("/pro/dump-stations/search", response_model=DumpStationResponse)
+@api_router.post("/dump-stations/search", response_model=DumpStationResponse)
 async def search_dump_stations(request: DumpStationRequest):
     """Find RV dump stations near given coordinates using OpenStreetMap data."""
     # TESTING: Paywalls disabled - require_premium(request.subscription_id, CAMPSITE_INDEX)  # Reuse campsite_index feature
@@ -3745,7 +3745,7 @@ async def search_dump_stations(request: DumpStationRequest):
         # Limit to 20 results
         stations = stations[:20]
         
-        logger.info(f"[PREMIUM] Dump station search completed: found {len(stations)} stations from OSM within {request.radius_miles} miles")
+        logger.info(f"Dump station search completed: found {len(stations)} stations from OSM within {request.radius_miles} miles")
         
         return DumpStationResponse(
             stations=stations,
@@ -3753,13 +3753,13 @@ async def search_dump_stations(request: DumpStationRequest):
         )
     
     except httpx.HTTPError as e:
-        logger.error(f"[PREMIUM] Overpass API error for dump stations: {e}")
+        logger.error(f"Overpass API error for dump stations: {e}")
         raise HTTPException(
             status_code=503,
             detail="Dump station data service temporarily unavailable. The mapping service may be experiencing high load. Please try again in a few moments."
         )
     except Exception as e:
-        logger.error(f"[PREMIUM] Error searching dump stations: {e}")
+        logger.error(f"Error searching dump stations: {e}")
         raise HTTPException(
             status_code=500,
             detail="Unable to search for dump stations. Please check your internet connection and try again."
@@ -3768,7 +3768,7 @@ async def search_dump_stations(request: DumpStationRequest):
 
 # ==================== Last Chance Supply Finder Endpoint ====================
 
-@api_router.post("/pro/last-chance/search", response_model=LastChanceResponse)
+@api_router.post("/last-chance/search", response_model=LastChanceResponse)
 async def search_last_chance_supplies(request: LastChanceRequest):
     """Find grocery stores, propane refill, and hardware stores near given coordinates using OpenStreetMap data."""
     # TESTING: Paywalls disabled - require_premium(request.subscription_id, CAMPSITE_INDEX)  # Reuse campsite_index feature
@@ -3967,7 +3967,7 @@ async def search_last_chance_supplies(request: LastChanceRequest):
         # Limit to 30 results
         supplies = supplies[:30]
         
-        logger.info(f"[PREMIUM] Last chance supply search completed: found {len(supplies)} locations from OSM within {request.radius_miles} miles")
+        logger.info(f"Last chance supply search completed: found {len(supplies)} locations from OSM within {request.radius_miles} miles")
         
         return LastChanceResponse(
             supplies=supplies,
@@ -3975,13 +3975,13 @@ async def search_last_chance_supplies(request: LastChanceRequest):
         )
     
     except httpx.HTTPError as e:
-        logger.error(f"[PREMIUM] Overpass API error for last chance supplies: {e}")
+        logger.error(f"Overpass API error for last chance supplies: {e}")
         raise HTTPException(
             status_code=503,
             detail="Supply data service temporarily unavailable. The mapping service may be experiencing high load. Please try again in a few moments."
         )
     except Exception as e:
-        logger.error(f"[PREMIUM] Error searching last chance supplies: {e}")
+        logger.error(f"Error searching last chance supplies: {e}")
         raise HTTPException(
             status_code=500,
             detail="Unable to search for supply points. Please check your internet connection and try again."
@@ -3990,7 +3990,7 @@ async def search_last_chance_supplies(request: LastChanceRequest):
 
 # ==================== RV Dealership Finder Endpoint ====================
 
-@api_router.post("/pro/rv-dealerships/search", response_model=RVDealershipResponse)
+@api_router.post("/rv-dealerships/search", response_model=RVDealershipResponse)
 async def search_rv_dealerships(request: RVDealershipRequest):
     """Find RV dealerships, service centers, and parts stores near given coordinates using OpenStreetMap data."""
     # TESTING: Paywalls disabled - require_premium(request.subscription_id, CAMPSITE_INDEX)  # Reuse campsite_index feature
@@ -4168,7 +4168,7 @@ async def search_rv_dealerships(request: RVDealershipRequest):
         # Limit to 10 results (only looking within 10 miles anyway)
         dealerships = dealerships[:10]
         
-        logger.info(f"[PREMIUM] RV dealership search completed: found {len(dealerships)} dealerships from OSM within {request.radius_miles} miles")
+        logger.info(f"RV dealership search completed: found {len(dealerships)} dealerships from OSM within {request.radius_miles} miles")
         
         return RVDealershipResponse(
             dealerships=dealerships,
@@ -4176,13 +4176,13 @@ async def search_rv_dealerships(request: RVDealershipRequest):
         )
     
     except httpx.HTTPError as e:
-        logger.error(f"[PREMIUM] Overpass API error for RV dealerships: {e}")
+        logger.error(f"Overpass API error for RV dealerships: {e}")
         raise HTTPException(
             status_code=503,
             detail="RV dealership data service temporarily unavailable. The mapping service may be experiencing high load. Please try again in a few moments."
         )
     except Exception as e:
-        logger.error(f"[PREMIUM] Error searching RV dealerships: {e}")
+        logger.error(f"Error searching RV dealerships: {e}")
         raise HTTPException(
             status_code=500,
             detail="Unable to search for RV dealerships. Please check your internet connection and try again."
@@ -4234,7 +4234,6 @@ class TruckStopResponse(BaseModel):
     stops: List[TruckStop]
 
 @api_router.post("/truck-stops/search", response_model=TruckStopResponse)
-@api_router.post("/pro/truck-stops/search", response_model=TruckStopResponse)
 async def search_truck_stops(request: TruckStopRequest):
     """Find truck stops with fuel and amenities using OpenStreetMap."""
     # TESTING: Paywalls disabled - require_premium(request.subscription_id, TRUCK_STOPS)
