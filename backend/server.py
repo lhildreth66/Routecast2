@@ -1989,8 +1989,15 @@ async def get_route_weather(request: RouteRequest):
     # Build weather timeline
     weather_timeline = build_weather_timeline(list(waypoints_weather))
     
-    # Generate AI summary
-    ai_summary = await generate_ai_summary(list(waypoints_weather), request.origin, request.destination, packing_suggestions)
+    # Generate AI summary when Gemini is available/configured; degrade gracefully otherwise
+    ai_summary = None
+    if CHAT_AVAILABLE and os.getenv("GEMINI_API_KEY"):
+        try:
+            ai_summary = await generate_ai_summary(list(waypoints_weather), request.origin, request.destination, packing_suggestions)
+        except Exception as e:
+            logger.warning("AI summary skipped: %s", e)
+    else:
+        logger.info("AI summary disabled; Gemini not configured")
     
     # NEW: Calculate safety score based on vehicle type
     safety_score = calculate_safety_score(list(waypoints_weather), vehicle_type)
