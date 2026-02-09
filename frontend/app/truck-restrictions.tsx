@@ -6,6 +6,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import { API_BASE, buildUrl } from '../lib/apiConfig';
+import InfoBanner from '../lib/components/InfoBanner';
 
 interface TruckRestriction {
   name: string;
@@ -222,6 +223,11 @@ export default function TruckRestrictionsScreen() {
                 </>
               )}
             </TouchableOpacity>
+
+            <InfoBanner
+              message="ℹ️ To keep subscription costs low, we use free mapping data. Some locations may show as \"Store\" or generic names. When you tap \"Directions\" and open in Google Maps, the full business name will appear at your destination."
+              style={{ marginTop: 12, marginBottom: 8 }}
+            />
           </View>
 
           {error && !loading && (

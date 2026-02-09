@@ -118,6 +118,7 @@ export default function HomeScreen() {
   // Vehicle & Trucker mode
   const [vehicleType, setVehicleType] = useState('car');
   const [truckerMode, setTruckerMode] = useState(false);
+  const [vehicleHeightFt, setVehicleHeightFt] = useState('13.5');
   const [showVehicleSelector, setShowVehicleSelector] = useState(false);
   
   // Departure time
@@ -138,6 +139,7 @@ export default function HomeScreen() {
   const segments = useSegments();
 
   const showApiBaseError = __DEV__ && !!API_BASE_ERROR;
+  const showTruckSpecs = truckerMode || vehicleType === 'semi' || vehicleType === 'truck';
 
   useEffect(() => {
     fetchRecentRoutes();
@@ -525,10 +527,12 @@ export default function HomeScreen() {
     let requestData: any;
 
     try {
+      const parsedHeight = parseFloat(vehicleHeightFt);
+      const vehicleHeight = Number.isFinite(parsedHeight) && parsedHeight > 0 ? parsedHeight : 13.5;
       const resolvedMode = truckerMode || vehicleType === 'semi' || vehicleType === 'truck' ? 'truck' : vehicleType === 'rv' ? 'boondocker' : 'standard';
       const truckProfile = resolvedMode === 'truck'
         ? {
-            vehicle_height_ft: 13.5,
+            vehicle_height_ft: vehicleHeight,
             vehicle_weight_lbs: 80000,
             vehicle_length_ft: 53,
             axle_count: 5,
@@ -1349,19 +1353,35 @@ export default function HomeScreen() {
                 />
               </View>
 
-              {/* Health Check */}
-              <View style={styles.healthCard}>
-                <Text style={styles.healthTitle}>Health Check</Text>
-                <Text style={styles.healthLine}>API Base: {API_BASE}</Text>
-                <Text style={styles.healthLine}>Source: {API_BASE_SOURCE}</Text>
-                {API_BASE_ERROR ? <Text style={styles.healthLine}>Base Warning: {API_BASE_ERROR}</Text> : null}
-                <Text style={styles.healthLine}>Status: {healthStatus} ({healthStatusCode ?? 'n/a'})</Text>
-                <Text style={styles.healthLine}>Body: {healthSnippet || 'pending...'}</Text>
-                <TouchableOpacity style={styles.healthButton} onPress={runHealthCheck}>
-                  <Ionicons name="refresh" size={16} color="#0f172a" />
-                  <Text style={styles.healthButtonText}>Refresh Health</Text>
-                </TouchableOpacity>
-              </View>
+              {showTruckSpecs && (
+                <View style={styles.truckerSpecs}>
+                  <Text style={styles.truckerLabel}>Vehicle Height (ft)</Text>
+                  <TextInput
+                    value={vehicleHeightFt}
+                    onChangeText={setVehicleHeightFt}
+                    keyboardType="decimal-pad"
+                    placeholder="e.g., 13.5"
+                    placeholderTextColor="#6b7280"
+                    style={styles.truckerInput}
+                  />
+                  <Text style={styles.truckerHelper}>Used for low-clearance routing and warnings.</Text>
+                </View>
+              )}
+
+              {__DEV__ && (
+                <View style={styles.healthCard}>
+                  <Text style={styles.healthTitle}>Health Check</Text>
+                  <Text style={styles.healthLine}>API Base: {API_BASE}</Text>
+                  <Text style={styles.healthLine}>Source: {API_BASE_SOURCE}</Text>
+                  {API_BASE_ERROR ? <Text style={styles.healthLine}>Base Warning: {API_BASE_ERROR}</Text> : null}
+                  <Text style={styles.healthLine}>Status: {healthStatus} ({healthStatusCode ?? 'n/a'})</Text>
+                  <Text style={styles.healthLine}>Body: {healthSnippet || 'pending...'}</Text>
+                  <TouchableOpacity style={styles.healthButton} onPress={runHealthCheck}>
+                    <Ionicons name="refresh" size={16} color="#0f172a" />
+                    <Text style={styles.healthButtonText}>Refresh Health</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
 
               {/* Weather Alerts Toggle */}
               <View style={styles.alertsToggle}>
@@ -1397,22 +1417,24 @@ export default function HomeScreen() {
                 </TouchableOpacity>
               </View>
 
-              <View style={styles.pushDebugSection}>
-                <Text style={styles.debugTitle}>Push Debug</Text>
-                <Text style={styles.debugLine}>Last toggle: {lastToggleAt || 'n/a'}</Text>
-                <Text style={styles.debugLine}>Permission: {pushPermissionStatus || 'unknown'}</Text>
-                <Text style={styles.debugLine}>Token present: {pushToken ? 'yes' : 'no'}</Text>
-                <Text style={styles.debugLine}>Last register: {lastRegisterResult || 'n/a'}</Text>
-                <Text style={styles.debugLine}>Last test: {lastTestResult || 'n/a'}</Text>
-                <Text style={styles.debugLine}>Recent logs:</Text>
-                {pushDebugLines.slice(-6).map((line, idx) => (
-                  <Text key={idx} style={styles.debugLine}>• {line}</Text>
-                ))}
-                <TouchableOpacity style={styles.copyLogsButton} onPress={copyPushDebugLogs}>
-                  <Ionicons name="copy-outline" size={16} color="#0f172a" />
-                  <Text style={styles.copyLogsButtonText}>Copy Debug Logs</Text>
-                </TouchableOpacity>
-              </View>
+              {__DEV__ && (
+                <View style={styles.pushDebugSection}>
+                  <Text style={styles.debugTitle}>Push Debug</Text>
+                  <Text style={styles.debugLine}>Last toggle: {lastToggleAt || 'n/a'}</Text>
+                  <Text style={styles.debugLine}>Permission: {pushPermissionStatus || 'unknown'}</Text>
+                  <Text style={styles.debugLine}>Token present: {pushToken ? 'yes' : 'no'}</Text>
+                  <Text style={styles.debugLine}>Last register: {lastRegisterResult || 'n/a'}</Text>
+                  <Text style={styles.debugLine}>Last test: {lastTestResult || 'n/a'}</Text>
+                  <Text style={styles.debugLine}>Recent logs:</Text>
+                  {pushDebugLines.slice(-6).map((line, idx) => (
+                    <Text key={idx} style={styles.debugLine}>• {line}</Text>
+                  ))}
+                  <TouchableOpacity style={styles.copyLogsButton} onPress={copyPushDebugLogs}>
+                    <Ionicons name="copy-outline" size={16} color="#0f172a" />
+                    <Text style={styles.copyLogsButtonText}>Copy Debug Logs</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
 
               {/* Error Message */}
               {error ? (
@@ -2299,6 +2321,31 @@ const styles = StyleSheet.create({
   truckerSubtext: {
     color: '#6b7280',
     fontSize: 11,
+  },
+  truckerSpecs: {
+    backgroundColor: '#111827',
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#f59e0b20',
+    marginBottom: 12,
+    gap: 8,
+  },
+  truckerLabel: {
+    color: '#e5e7eb',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  truckerInput: {
+    backgroundColor: '#1f2937',
+    color: '#fff',
+    padding: 12,
+    borderRadius: 8,
+    fontSize: 15,
+  },
+  truckerHelper: {
+    color: '#9ca3af',
+    fontSize: 12,
   },
   vehicleModalSubtext: {
     color: '#a1a1aa',
