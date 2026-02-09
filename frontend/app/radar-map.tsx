@@ -314,7 +314,7 @@ export default function RadarMapScreen() {
         btn.textContent = 'Loading...';
         try {
           // Try backend first if available
-          const apiBase = `${API_BASE}`;
+          const apiBase = API_BASE;
           let tileUrl = null;
           
           if (apiBase) {
