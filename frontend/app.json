@@ -31,7 +31,7 @@
     "android": {
       "package": "com.routecast.app",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 131,
+      "versionCode": 132,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#0a0a0a"

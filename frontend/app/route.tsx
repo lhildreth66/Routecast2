@@ -18,8 +18,6 @@ import { useLocalSearchParams, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Speech from 'expo-speech';
 import { format, parseISO } from 'date-fns';
-import axios from 'axios';
-import { buildUrl } from './apiConfig';
 import { WebView } from 'react-native-webview';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -67,6 +65,83 @@ interface WaypointWeather {
     name: string;
     distance_from_start: number | null;
     eta_minutes: number | null;
+    arrival_time: string | null;
+  };
+  weather: WeatherData | null;
+  alerts: WeatherAlert[];
+}
+
+interface SafetyScore {
+  overall_score: number;
+  risk_level: string;
+  vehicle_type: string;
+  factors: string[];
+  recommendations: string[];
+}
+
+interface HazardAlert {
+  type: string;
+  severity: string;
+  distance_miles: number;
+  eta_minutes: number;
+  message: string;
+  recommendation: string;
+  countdown_text: string;
+}
+
+interface RouteData {
+  id: string;
+  origin: string;
+  destination: string;
+  total_duration_minutes: number | null;
+  total_distance_miles: number | null;
+  waypoints: WaypointWeather[];
+  safety_score: SafetyScore | null;
+  hazard_alerts: HazardAlert[];
+  turn_by_turn: TurnByTurnStep[];
+  road_condition_summary: string | null;
+  worst_road_condition: string | null;
+  reroute_recommended: boolean;
+  reroute_reason: string | null;
+  trucker_warnings: string[];
+  ai_summary: string | null;
+}
+
+const formatDuration = (minutes: number): string => {
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  if (hours === 0) return `${mins} min`;
+  return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+};
+
+const getManeuverIcon = (maneuver: string): string => {
+  const icons: { [key: string]: string } = {
+    'turn-right': 'arrow-forward',
+    'turn-left': 'arrow-back',
+    'merge': 'git-merge-outline',
+    'straight': 'arrow-up',
+    'depart': 'navigate',
+    'arrive': 'flag',
+    'roundabout': 'reload',
+    'exit': 'exit-outline',
+    'fork': 'git-branch-outline',
+  };
+  return icons[maneuver] || 'arrow-forward';
+};
+
+// Generate radar map HTML using IEM WMS layer for NWS Watch/Warning/Advisory colored zones
+const generateRadarMapHtml = (centerLat: number, centerLon: number): string => {
+  const usLat = Math.max(25, Math.min(48, centerLat));
+  const usLon = Math.max(-124, Math.min(-68, centerLon));
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+      <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+      <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+      <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body { width: 100%; height: 100%; background: #f0f0f0; }
         #map { width: 100%; height: calc(100% - 120px); }
         .legend-box {
@@ -308,6 +383,15 @@ export default function RouteScreen() {
     setLoading(false);
   }, [params.routeData]);
 
+  const speakSummary = () => {
+    if (!routeData) return;
+    setIsSpeaking(true);
+    const parts: string[] = [];
+
+    parts.push(`Route from ${routeData.origin} to ${routeData.destination}.`);
+
+    if (routeData.total_distance_miles) {
+      parts.push(`Distance: ${Math.round(routeData.total_distance_miles)} miles.`);
     }
     if (routeData.total_duration_minutes) {
       parts.push(`Estimated time: ${formatDuration(routeData.total_duration_minutes)}.`);
