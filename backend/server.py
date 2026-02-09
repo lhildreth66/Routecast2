@@ -2378,61 +2378,15 @@ async def get_feature_gating_info():
         ]
     }
 
-# ==================== Premium Features Endpoints ====================
+# ==================== Feature Endpoints ====================
 
-@api_router.post("/pro/road-passability", response_model=RoadPassabilityResponse)
+@api_router.post("/road-passability", response_model=RoadPassabilityResponse)
 async def assess_road_passability(request: RoadPassabilityRequest):
     """
     Assess road passability and conditions along a route segment.
-    
-    PREMIUM FEATURE - Requires active subscription.
-    
-    Args:
-        precip_72h: Precipitation in last 72 hours (mm)
-        slope_pct: Road grade/slope percentage
-        min_temp_f: Minimum temperature (°F)
-        soil_type: Soil type classification
-        subscription_id: Optional subscription ID for premium access validation
-    
-    Returns:
-        - If premium locked: 403 with paywall message
-        - If authorized: Complete passability assessment with score, risks, recommendations
-    
-    Logging: All premium feature access logged with [PREMIUM] prefix
     """
-    logger.info(f"[PREMIUM] Road passability assessment requested")
-    
-    # Check premium entitlement
-    is_premium = False
-    if request.subscription_id:
-        # Verify subscription is active
-        try:
-            sub = await db.subscriptions.find_one(
-                {'subscription_id': request.subscription_id, 'status': 'active'}
-            )
-            is_premium = sub is not None
-            
-            if is_premium:
-                logger.info(f"[PREMIUM] Road passability accessed by: {request.subscription_id}")
-        except Exception as e:
-            logger.error(f"[PREMIUM] Error checking subscription: {e}")
-            is_premium = False
-    
-    # Return premium-locked response if not authorized
-    if not is_premium:
-        logger.info(f"[PREMIUM] Road passability access denied - premium required")
-        return RoadPassabilityResponse(
-            passability_score=0,
-            condition_assessment="Unavailable",
-            advisory="Upgrade to Routecast Pro to assess road conditions by soil type and weather",
-            min_clearance_cm=0,
-            recommended_vehicle_type="unknown",
-            needs_four_x_four=False,
-            risks={},
-            is_premium_locked=True,
-            premium_message="This feature requires Routecast Pro. Upgrade to unlock mud/ice/grade analysis."
-        )
-    
+    logger.info("[road-passability] assessment requested")
+
     # Call pure domain service
     try:
         result = RoadPassabilityService.assess_road_passability(
@@ -2460,19 +2414,19 @@ async def assess_road_passability(request: RoadPassabilityRequest):
             is_premium_locked=False,
         )
     except ValueError as e:
-        logger.error(f"[PREMIUM] Invalid parameters for road passability: {e}")
+        logger.error(f"[road-passability] Invalid parameters: {e}")
         raise HTTPException(
             status_code=400,
             detail=f"Invalid parameters: {str(e)}"
         )
     except Exception as e:
-        logger.error(f"[PREMIUM] Error assessing road passability: {e}")
+        logger.error(f"[road-passability] Error assessing road passability: {e}")
         raise HTTPException(
             status_code=500,
             detail="Unable to assess road passability at this time"
         )
 
-@api_router.post("/pro/solar-forecast", response_model=SolarForecastResponse)
+@api_router.post("/solar-forecast", response_model=SolarForecastResponse)
 async def forecast_solar_energy(request: SolarForecastRequest):
     """
     Forecast daily solar energy generation for a boondocking location.
@@ -2488,17 +2442,10 @@ async def forecast_solar_energy(request: SolarForecastRequest):
         cloud_cover: List of cloud cover percentages (0-100) per date
         subscription_id: Optional subscription ID for premium access validation
     
-    Returns:
-        - If premium locked: paywall message
-        - If authorized: daily Wh/day list with advisory
-    
-    Logging: All premium feature access logged with [PREMIUM] prefix
+    Returns a daily Wh/day list with advisory.
     """
-    logger.info(f"[PREMIUM] Solar forecast requested")
-    
-    # Check premium entitlement
-    # TESTING: Paywalls disabled - require_premium(request.subscription_id, SOLAR_FORECAST)
-    
+    logger.info("[solar-forecast] forecast requested")
+
     # Call pure domain service
     try:
         result = SolarForecastService.forecast_daily_wh(
@@ -2509,9 +2456,9 @@ async def forecast_solar_energy(request: SolarForecastRequest):
             shade_pct=request.shade_pct,
             cloud_cover=request.cloud_cover,
         )
-        
-        logger.info(f"[PREMIUM] Solar forecast completed successfully")
-        
+
+        logger.info("[solar-forecast] forecast completed")
+
         # Convert domain result to API response
         return SolarForecastResponse(
             daily_wh=result.daily_wh,
@@ -2522,43 +2469,26 @@ async def forecast_solar_energy(request: SolarForecastRequest):
             is_premium_locked=False,
         )
     except ValueError as e:
-        logger.error(f"[PREMIUM] Invalid parameters for solar forecast: {e}")
+        logger.error(f"[solar-forecast] Invalid parameters: {e}")
         raise HTTPException(
             status_code=400,
             detail=f"Invalid parameters: {str(e)}"
         )
     except Exception as e:
-        logger.error(f"[PREMIUM] Error forecasting solar energy: {e}")
+        logger.error(f"[solar-forecast] Error forecasting solar energy: {e}")
         raise HTTPException(
             status_code=500,
             detail="Unable to forecast solar energy at this time"
         )
 
-@api_router.post("/pro/propane-usage", response_model=PropaneUsageResponse)
+@api_router.post("/propane-usage", response_model=PropaneUsageResponse)
 async def estimate_propane_usage(request: PropaneUsageRequest):
     """
     Estimate daily propane consumption for RV boondocking.
     
-    PREMIUM FEATURE - Requires active subscription.
-    
-    Args:
-        furnace_btu: Furnace heating capacity in BTU (e.g., 20000, 30000)
-        duty_cycle_pct: Percentage of time furnace runs (0-100, will be clamped)
-        nights_temp_f: List of nightly low temperatures in Fahrenheit
-        people: Number of people in RV (default: 2)
-        subscription_id: Optional subscription ID for premium access validation
-    
-    Returns:
-        - If premium locked: paywall message
-        - If authorized: daily lbs/day list with advisory
-    
-    Logging: All premium feature access logged with [PREMIUM] prefix
     """
-    logger.info(f"[PREMIUM] Propane usage estimate requested")
-    
-    # Check premium entitlement
-    # TESTING: Paywalls disabled - require_premium(request.subscription_id, PROPANE_USAGE)
-    
+    logger.info("[propane-usage] estimate requested")
+
     # Call pure domain service
     try:
         daily_lbs = PropaneUsageService.estimate_lbs_per_day(
@@ -2576,9 +2506,9 @@ async def estimate_propane_usage(request: PropaneUsageRequest):
             people=request.people,
             daily_lbs=daily_lbs,
         )
-        
-        logger.info(f"[PREMIUM] Propane usage estimate completed successfully")
-        
+
+        logger.info("[propane-usage] estimate completed")
+
         # Convert domain result to API response
         return PropaneUsageResponse(
             daily_lbs=daily_lbs,
@@ -2590,19 +2520,19 @@ async def estimate_propane_usage(request: PropaneUsageRequest):
             is_premium_locked=False,
         )
     except ValueError as e:
-        logger.error(f"[PREMIUM] Invalid parameters for propane usage: {e}")
+        logger.error(f"[propane-usage] Invalid parameters: {e}")
         raise HTTPException(
             status_code=400,
             detail=f"Invalid parameters: {str(e)}"
         )
     except Exception as e:
-        logger.error(f"[PREMIUM] Error estimating propane usage: {e}")
+        logger.error(f"[propane-usage] Error estimating propane usage: {e}")
         raise HTTPException(
             status_code=500,
             detail="Unable to estimate propane usage at this time"
         )
 
-@api_router.post("/pro/water-budget", response_model=WaterBudgetResponse)
+@api_router.post("/water-budget", response_model=WaterBudgetResponse)
 async def estimate_water_budget(request: WaterBudgetRequest):
     """
     Estimate days remaining before water tanks run out during boondocking.
@@ -2674,40 +2604,17 @@ async def estimate_water_budget(request: WaterBudgetRequest):
 
 # ==================== Terrain Shade Endpoints ====================
 
-@api_router.post("/pro/terrain/sun-path", response_model=TerrainShadeResponse)
+@api_router.post("/terrain/sun-path", response_model=TerrainShadeResponse)
 async def estimate_solar_path(request: TerrainShadeRequest):
     """Calculate hourly solar elevation path for boondocking location."""
-    # Check premium subscription
-    if not request.subscription_id:
-        logger.warning("[PREMIUM] Attempted solar path without subscription")
-        return TerrainShadeResponse(
-            is_premium_locked=True,
-            premium_message="Upgrade to Routecast Pro to plan around sunlight availability for solar and shade needs."
-        )
-    
-    sub = await db.subscriptions.find_one({"_id": request.subscription_id, "status": "active"})
-    if not sub:
-        logger.warning(f"[PREMIUM] Invalid subscription {request.subscription_id}")
-        return TerrainShadeResponse(
-            is_premium_locked=True,
-            premium_message="Upgrade to Routecast Pro to plan around sunlight availability for solar and shade needs."
-        )
-    
-    # Call pure domain service
     try:
-        # Parse date from ISO format
         from datetime import datetime as dt
         date_obj = dt.fromisoformat(request.date).date()
-        
         slots = TerrainShadeService.sun_path(request.latitude, request.longitude, date_obj)
-        
-        # Calculate shade blocking
         shade_factor = TerrainShadeService.shade_blocks(
             request.tree_canopy_pct,
             request.horizon_obstruction_deg
         )
-        
-        # Calculate effective sunlight hours after shade
         exposure_hours = TerrainShadeService.sun_exposure_hours(
             request.latitude,
             request.longitude,
@@ -2715,10 +2622,6 @@ async def estimate_solar_path(request: TerrainShadeRequest):
             request.tree_canopy_pct,
             request.horizon_obstruction_deg
         )
-        
-        logger.info(f"[PREMIUM] Solar path calculation completed for lat={request.latitude}, lon={request.longitude}")
-        
-        # Convert domain slots to response format
         response_slots = [
             SunPathSlotResponse(
                 hour=slot.hour,
@@ -2728,7 +2631,6 @@ async def estimate_solar_path(request: TerrainShadeRequest):
             )
             for slot in slots
         ]
-        
         return TerrainShadeResponse(
             sun_path_slots=response_slots,
             shade_factor=round(shade_factor, 3),
@@ -2736,69 +2638,35 @@ async def estimate_solar_path(request: TerrainShadeRequest):
             is_premium_locked=False,
         )
     except ValueError as e:
-        logger.error(f"[PREMIUM] Invalid parameters for solar path: {e}")
         raise HTTPException(
             status_code=400,
             detail=f"Invalid parameters: {str(e)}"
         )
     except Exception as e:
-        logger.error(f"[PREMIUM] Unexpected error calculating solar path: {e}")
         raise HTTPException(
             status_code=500,
             detail="Unable to calculate solar path at this time"
         )
 
-@api_router.post("/pro/terrain/shade-blocks", response_model=TerrainShadeResponse)
+@api_router.post("/terrain/shade-blocks", response_model=TerrainShadeResponse)
 async def estimate_shade_blocking(request: TerrainShadeRequest):
     """Calculate shade blocking factor from trees and horizon obstruction."""
-    # Check premium subscription
-    if not request.subscription_id:
-        logger.warning("[PREMIUM] Attempted shade blocking without subscription")
-        return TerrainShadeResponse(
-            is_premium_locked=True,
-            premium_message="Upgrade to Routecast Pro to plan around sunlight availability for solar and shade needs."
-        )
-    
-    sub = await db.subscriptions.find_one({"_id": request.subscription_id, "status": "active"})
-    if not sub:
-        logger.warning(f"[PREMIUM] Invalid subscription {request.subscription_id}")
-        return TerrainShadeResponse(
-            is_premium_locked=True,
-            premium_message="Upgrade to Routecast Pro to plan around sunlight availability for solar and shade needs."
-        )
-    
-    # Call pure domain service
     try:
         shade_factor = TerrainShadeService.shade_blocks(
             request.tree_canopy_pct,
             request.horizon_obstruction_deg
         )
-        
-        # Generate advisory
-        if shade_factor < 0.2:
-            advisory = "Excellent solar exposure! Good for solar generators."
-        elif shade_factor < 0.5:
-            advisory = "Good solar exposure with moderate shade. Solar viable."
-        elif shade_factor < 0.8:
-            advisory = "Significant shade. Solar generation will be limited."
-        else:
-            advisory = "Heavy shade blocks most sunlight. Solar not recommended."
-        
-        logger.info(f"[PREMIUM] Shade blocking calculation completed: shade_factor={shade_factor}")
-        
         return TerrainShadeResponse(
             shade_factor=round(shade_factor, 3),
             exposure_hours=None,
             is_premium_locked=False,
         )
     except ValueError as e:
-        logger.error(f"[PREMIUM] Invalid parameters for shade blocking: {e}")
         raise HTTPException(
             status_code=400,
             detail=f"Invalid parameters: {str(e)}"
         )
     except Exception as e:
-        logger.error(f"[PREMIUM] Unexpected error calculating shade blocking: {e}")
         raise HTTPException(
             status_code=500,
             detail="Unable to calculate shade blocking at this time"
@@ -2806,15 +2674,10 @@ async def estimate_shade_blocking(request: TerrainShadeRequest):
 
 # ==================== Wind Shelter Endpoints ====================
 
-@api_router.post("/pro/wind-shelter/orientation", response_model=WindShelterResponse)
+@api_router.post("/wind-shelter/orientation", response_model=WindShelterResponse)
 async def recommend_orientation(request: WindShelterRequest):
     """Recommend RV orientation for wind shelter based on local ridges and topography."""
-    # Check premium subscription
-    # TESTING: Paywalls disabled - require_premium(request.subscription_id, WIND_SHELTER)
-    
-    # Call pure domain service
     try:
-        # Convert request ridges to domain objects
         ridges = []
         if request.local_ridges:
             for ridge_req in request.local_ridges:
@@ -2824,15 +2687,11 @@ async def recommend_orientation(request: WindShelterRequest):
                     name=ridge_req.name or f"Ridge at {ridge_req.bearing_deg}°"
                 )
                 ridges.append(ridge)
-        
         advice = WindShelterService.recommend_orientation(
             request.predominant_dir_deg,
             request.gust_mph,
             ridges
         )
-        
-        logger.info(f"[PREMIUM] Wind shelter recommendation completed: bearing={advice.recommended_bearing_deg}, risk={advice.risk_level}")
-        
         return WindShelterResponse(
             recommended_bearing_deg=advice.recommended_bearing_deg,
             rationale_text=advice.rationale_text,
@@ -2842,13 +2701,11 @@ async def recommend_orientation(request: WindShelterRequest):
             is_premium_locked=False,
         )
     except ValueError as e:
-        logger.error(f"[PREMIUM] Invalid parameters for wind orientation: {e}")
         raise HTTPException(
             status_code=400,
             detail=f"Invalid parameters: {str(e)}"
         )
     except Exception as e:
-        logger.error(f"[PREMIUM] Unexpected error recommending orientation: {e}")
         raise HTTPException(
             status_code=500,
             detail="Unable to recommend orientation at this time"
@@ -2857,30 +2714,9 @@ async def recommend_orientation(request: WindShelterRequest):
 # ==================== Road Passability Endpoint (A6) ====================
 from road_passability_a6 import score as passability_score
 
-@api_router.post("/pro/road-passability", response_model=RoadPassabilityResponse)
+@api_router.post("/road-passability", response_model=RoadPassabilityResponse)
 async def get_road_passability(request: RoadPassabilityRequest):
-    """Premium-gated road passability scoring (Task A6)."""
-    # Premium gating
-    if not request.subscription_id:
-        logger.warning("[PREMIUM] Attempted road passability without subscription")
-        raise HTTPException(
-            status_code=402,
-            detail={
-                "code": "PREMIUM_LOCKED",
-                "message": "Upgrade to Routecast Pro to assess backroad passability (mud/ice/clearance)."
-            }
-        )
-    sub = await db.subscriptions.find_one({"_id": request.subscription_id, "status": "active"})
-    if not sub:
-        logger.warning(f"[PREMIUM] Invalid subscription {request.subscription_id}")
-        raise HTTPException(
-            status_code=402,
-            detail={
-                "code": "PREMIUM_LOCKED",
-                "message": "Upgrade to Routecast Pro to assess backroad passability (mud/ice/clearance)."
-            }
-        )
-
+    """Road passability scoring (Task A6)."""
     try:
         res = passability_score(
             precip72h_in=request.precip72hIn,
@@ -2888,7 +2724,6 @@ async def get_road_passability(request: RoadPassabilityRequest):
             min_temp_f=request.minTempF,
             soil=request.soilType,
         )
-        logger.info(f"[PREMIUM] Road passability computed: score={res.score} mud={res.mud_risk} ice={res.ice_risk}")
         return RoadPassabilityResponse(
             score=res.score,
             mud_risk=res.mud_risk,
@@ -2899,42 +2734,30 @@ async def get_road_passability(request: RoadPassabilityRequest):
             is_premium_locked=False,
         )
     except ValueError as e:
-        logger.error(f"[PREMIUM] Invalid parameters for road passability: {e}")
         raise HTTPException(status_code=400, detail=f"Invalid parameters: {str(e)}")
     except Exception as e:
-        logger.error(f"[PREMIUM] Unexpected error computing road passability: {e}")
         raise HTTPException(status_code=500, detail="Unable to compute road passability at this time")
 
 # ==================== Connectivity Endpoints (A7) ====================
 
-@api_router.post("/pro/connectivity/cell-probability", response_model=ConnectivityCellResponse)
+@api_router.post("/connectivity/cell-probability", response_model=ConnectivityCellResponse)
 async def predict_cell_probability(request: ConnectivityCellRequest):
-    """Premium-gated cellular signal probability prediction (Task A7)."""
-    # Premium gating
-    # TESTING: Paywalls disabled - require_premium(request.subscription_id, CELL_STARLINK)
-
+    """Cellular signal probability prediction (Task A7)."""
     try:
-        # Check if GPS coordinates provided (new approach)
         if request.lat is not None and request.lon is not None:
-            # Use GPS-based tower lookup
             res = predict_cell_signal_at_location(
                 lat=request.lat,
                 lon=request.lon,
                 carrier=request.carrier,
             )
-            logger.info(f"[PREMIUM] Cell probability computed via GPS: lat={request.lat} lon={request.lon} carrier={res.carrier} probability={res.probability}")
         else:
-            # Fallback to manual tower distance input (legacy)
             if request.towerDistanceKm is None or request.terrainObstructionPct is None:
                 raise ValueError("Either (lat, lon) or (towerDistanceKm, terrainObstructionPct) must be provided")
-            
             res = cell_bars_probability(
                 carrier=request.carrier,
                 tower_distance_km=request.towerDistanceKm,
                 terrain_obstruction=request.terrainObstructionPct,
             )
-            logger.info(f"[PREMIUM] Cell probability computed via manual input: carrier={res.carrier} probability={res.probability}")
-        
         return ConnectivityCellResponse(
             carrier=res.carrier,
             probability=res.probability,
@@ -2943,10 +2766,8 @@ async def predict_cell_probability(request: ConnectivityCellRequest):
             is_premium_locked=False,
         )
     except ValueError as e:
-        logger.error(f"[PREMIUM] Invalid parameters for cell probability: {e}")
         raise HTTPException(status_code=400, detail=f"Invalid parameters: {str(e)}")
     except Exception as e:
-        logger.error(f"[PREMIUM] Unexpected error computing cell probability: {e}")
         raise HTTPException(status_code=500, detail="Unable to compute cell probability at this time")
 
 @api_router.post("/pro/connectivity/starlink-risk", response_model=ConnectivityStarlinkResponse)
