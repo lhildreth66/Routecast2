@@ -76,17 +76,17 @@ export const useWaterBudget = (): UseWaterBudgetReturn => {
 
     try {
       // Retrieve subscription ID from AsyncStorage if not provided
-      let subscriptionId = request.subscription_id;
+      let subscriptionId: string | undefined = request.subscription_id;
       if (!subscriptionId) {
         try {
-          subscriptionId = await AsyncStorage.getItem('subscription_id');
+          subscriptionId = (await AsyncStorage.getItem('subscription_id')) || undefined;
         } catch (e) {
           console.log('Could not retrieve subscription ID from storage');
         }
       }
 
       // Call API endpoint
-      const response = await fetch(buildUrl('pro/water-budget'), {
+      const response = await fetch(buildUrl('water-budget'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

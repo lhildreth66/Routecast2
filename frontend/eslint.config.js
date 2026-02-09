@@ -1,10 +1,14 @@
 // https://docs.expo.dev/guides/using-eslint/
-const { defineConfig } = require('eslint/config');
-const expoConfig = require('eslint-config-expo/flat');
+const { FlatCompat } = require('@eslint/eslintrc');
 
-module.exports = defineConfig([
-  expoConfig,
+// Convert the Expo legacy config into flat config for ESLint v8.
+const compat = new FlatCompat({
+  baseDirectory: __dirname,
+});
+
+module.exports = [
+  ...compat.extends('eslint-config-expo'),
   {
     ignores: ['dist/*'],
   },
-]);
+];

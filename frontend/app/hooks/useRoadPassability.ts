@@ -69,12 +69,12 @@ export const useRoadPassability = (): UseRoadPassabilityReturn => {
 
     try {
       // Get subscription ID from storage if not provided
-      let subscriptionId = request.subscription_id;
+      let subscriptionId: string | undefined = request.subscription_id;
       if (!subscriptionId) {
-        subscriptionId = await AsyncStorage.getItem('routecast_subscription_id');
+        subscriptionId = (await AsyncStorage.getItem('routecast_subscription_id')) || undefined;
       }
 
-      const response = await fetch(buildUrl('pro/road-passability'), {
+      const response = await fetch(buildUrl('road-passability'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

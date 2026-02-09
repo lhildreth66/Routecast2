@@ -363,6 +363,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#ec489920',
   },
+  inputWrapper: {
+    marginBottom: 12,
+  },
   locationBoxHeader: {
     flexDirection: 'row',
     alignItems: 'center',

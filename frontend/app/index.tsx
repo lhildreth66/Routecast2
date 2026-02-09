@@ -326,7 +326,7 @@ export default function HomeScreen() {
           await AsyncStorage.setItem('pushAlertsEnabled', 'true');
           showPushMessage('Push weather alerts enabled');
         } catch (backendErr) {
-          const errMsg = backendErr?.message || String(backendErr);
+          const errMsg = (backendErr as any)?.message || String(backendErr);
           setLastRegisterResult(errMsg);
           AsyncStorage.setItem('pushLastRegisterResult', errMsg).catch(() => {});
           pushDebugLog(`[push] backend save failed ${errMsg}`);
@@ -350,7 +350,7 @@ export default function HomeScreen() {
             AsyncStorage.setItem('pushLastRegisterResult', msg).catch(() => {});
             pushDebugLog(`[push] backend disable response ${msg}`);
           } catch (disableErr) {
-            const errMsg = disableErr?.message || String(disableErr);
+            const errMsg = (disableErr as any)?.message || String(disableErr);
             setLastRegisterResult(errMsg);
             AsyncStorage.setItem('pushLastRegisterResult', errMsg).catch(() => {});
             pushDebugLog(`[push] backend disable failed ${errMsg}`);
@@ -381,7 +381,7 @@ export default function HomeScreen() {
       pushDebugLog(`[push] test notification response ${msg}`);
       showPushMessage(response?.data?.success ? 'Test notification sent (check device)' : 'Test notification failed');
     } catch (err) {
-      const errMsg = err?.message || String(err);
+      const errMsg = (err as any)?.message || String(err);
       setLastTestResult(errMsg);
       AsyncStorage.setItem('pushLastTestResult', errMsg).catch(() => {});
       pushDebugLog(`[push] test notification error ${errMsg}`);
@@ -522,6 +522,8 @@ export default function HomeScreen() {
     setLoading(true);
     setError('');
 
+    let requestData: any;
+
     try {
       const resolvedMode = truckerMode || vehicleType === 'semi' || vehicleType === 'truck' ? 'truck' : vehicleType === 'rv' ? 'boondocker' : 'standard';
       const truckProfile = resolvedMode === 'truck'
@@ -541,7 +543,7 @@ export default function HomeScreen() {
           }
         : undefined;
 
-      const requestData: any = {
+      requestData = {
         origin: origin.trim(),
         destination: destination.trim(),
         stops: stops,

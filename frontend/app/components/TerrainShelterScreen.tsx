@@ -166,6 +166,8 @@ const TerrainShelterScreen: React.FC = () => {
 
   const loading = shadeLoading || windLoading;
   const shade = shadeResult;
+  const shadeFactor = shade?.shade_factor ?? 0;
+  const exposureHours = shade?.exposure_hours ?? null;
   const wind = windResult;
 
   return (
@@ -327,27 +329,27 @@ const TerrainShelterScreen: React.FC = () => {
                   <Text style={styles.cardLabel}>Shade Factor</Text>
                   <View style={styles.resultRow}>
                     <Text style={[styles.resultValue, { color: getShadeFactor()?.color }]}>
-                      {(shade.shade_factor * 100).toFixed(1)}%
+                      {(shadeFactor * 100).toFixed(1)}%
                     </Text>
                     <Text style={styles.resultLabel}>
                       {getShadeFactor()?.text} Solar Exposure
                     </Text>
                   </View>
                   <Text style={styles.hint}>
-                    {shade.shade_factor < 0.3
+                    {shadeFactor < 0.3
                       ? '✓ Excellent for solar panels'
-                      : shade.shade_factor < 0.6
+                      : shadeFactor < 0.6
                       ? '○ Moderate for solar panels'
                       : '✗ Limited solar viability'}
                   </Text>
                 </View>
 
                 {/* Exposure Hours */}
-                {shade.exposure_hours !== undefined && (
+                {exposureHours != null && (
                   <View style={[styles.card, { borderLeftColor: COLORS.secondary, borderLeftWidth: 4 }]}>
                     <Text style={styles.cardLabel}>Effective Sunlight</Text>
                     <Text style={styles.resultValue}>
-                      {shade.exposure_hours.toFixed(1)} hours
+                      {exposureHours.toFixed(1)} hours
                     </Text>
                     <Text style={styles.hint}>
                       Daily exposure after shade obstruction

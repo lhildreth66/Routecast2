@@ -87,6 +87,10 @@ interface HazardAlert {
   message: string;
   recommendation: string;
   countdown_text: string;
+  full_description?: string;
+  description?: string;
+  instruction?: string;
+  location_name?: string;
 }
 
 interface RouteData {

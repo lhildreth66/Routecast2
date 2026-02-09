@@ -24,7 +24,7 @@ const resolveApiBase = (): ApiBaseResolution => {
   const envBase = normalize(process.env.EXPO_PUBLIC_BACKEND_URL);
   const configBase = normalize(
     // Supports both expoConfig (dev/build) and manifest (runtime) shapes
-    (Constants?.expoConfig?.extra as any)?.API_BASE || (Constants?.manifest?.extra as any)?.API_BASE
+    (Constants?.expoConfig?.extra as any)?.API_BASE || ((Constants?.manifest as any)?.extra?.API_BASE)
   );
 
   const candidates = [

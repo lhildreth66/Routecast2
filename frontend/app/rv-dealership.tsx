@@ -204,7 +204,7 @@ export default function RVDealershipScreen() {
               
               return (
                 <TouchableOpacity
-                  key={index}
+                  key={`${dealership.name}-${dealership.latitude}-${dealership.longitude}-${index}`}
                   style={[styles.dealershipCard, isExpanded && styles.dealershipCardExpanded]}
                   onPress={() => toggleDealershipExpand(index)}
                   activeOpacity={0.8}
@@ -385,6 +385,11 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     borderWidth: 1,
     borderColor: '#ec489920',
+  },
+  infoNoteText: {
+    fontSize: 12,
+    color: '#9ca3af',
+    lineHeight: 18,
   },
   locationHeader: {
     flexDirection: 'row',
@@ -614,21 +619,8 @@ const styles = StyleSheet.create({
   serviceText: {
     fontSize: 13,
     color: '#e5e7eb',
-  },  infoNote: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: '#3f3f46',
-    borderRadius: 6,
-    padding: 8,
-    marginTop: 8,
-    gap: 6,
   },
-  infoNoteText: {
-    flex: 1,
-    fontSize: 11,
-    color: '#9ca3af',
-    lineHeight: 16,
-  },  navigateButton: {
+  navigateButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',

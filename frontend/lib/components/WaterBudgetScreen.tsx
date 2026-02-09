@@ -22,10 +22,9 @@ import {
   Text,
   StyleSheet,
   Alert,
-  ActivityIndicator,
   ScrollView,
   TouchableOpacity,
-  Dimensions,
+  ActivityIndicator,
 } from 'react-native';
 import { useWaterBudget } from '../hooks/useWaterBudget';
 
@@ -108,6 +107,12 @@ const WaterBudgetScreen: React.FC = () => {
         return '💧';
     }
   };
+
+  const daysRemaining = result?.days_remaining ?? null;
+  const daysColor = getDaysColor(daysRemaining ?? undefined);
+  const dailyFresh = result?.daily_fresh_gal ?? null;
+  const dailyGray = result?.daily_gray_gal ?? null;
+  const dailyBlack = result?.daily_black_gal ?? null;
 
   return (
     <ScrollView
@@ -304,7 +309,7 @@ const WaterBudgetScreen: React.FC = () => {
             <Text
               style={[
                 styles.daysRemaining,
-                { color: getDaysColor(result.days_remaining) },
+                  { color: daysColor },
               ]}
             >
               {result.days_remaining} days
@@ -330,35 +335,33 @@ const WaterBudgetScreen: React.FC = () => {
           )}
 
           {/* Daily Usage Breakdown */}
-          {(result.daily_fresh_gal !== null ||
-            result.daily_gray_gal !== null ||
-            result.daily_black_gal !== null) && (
+          {(dailyFresh != null || dailyGray != null || dailyBlack != null) && (
             <View style={styles.usageBreakdown}>
               <Text style={styles.usageTitle}>Daily Water Usage</Text>
 
-              {result.daily_fresh_gal !== null && (
+              {dailyFresh != null && (
                 <View style={styles.usageItem}>
                   <Text style={styles.usageLabel}>🚱 Fresh</Text>
                   <Text style={styles.usageValue}>
-                    {result.daily_fresh_gal.toFixed(1)} gal/day
+                    {dailyFresh.toFixed(1)} gal/day
                   </Text>
                 </View>
               )}
 
-              {result.daily_gray_gal !== null && (
+              {dailyGray != null && (
                 <View style={styles.usageItem}>
                   <Text style={styles.usageLabel}>🚿 Gray</Text>
                   <Text style={styles.usageValue}>
-                    {result.daily_gray_gal.toFixed(1)} gal/day
+                    {dailyGray.toFixed(1)} gal/day
                   </Text>
                 </View>
               )}
 
-              {result.daily_black_gal !== null && (
+              {dailyBlack != null && (
                 <View style={styles.usageItem}>
                   <Text style={styles.usageLabel}>🚽 Black</Text>
                   <Text style={styles.usageValue}>
-                    {result.daily_black_gal.toFixed(1)} gal/day
+                    {dailyBlack.toFixed(1)} gal/day
                   </Text>
                 </View>
               )}

@@ -460,13 +460,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontFamily: 'monospace',
   },
-  infoNote: {
-    fontSize: 12,
-    color: '#fbbf24',
-    marginBottom: 16,
-    fontStyle: 'italic',
-    lineHeight: 18,
-  },
   locationInfo: {
     flexDirection: 'row',
     alignItems: 'center',

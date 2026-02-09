@@ -66,7 +66,7 @@ export default function TerrainShadeScreen() {
     setLoading(true);
     setResult(null);
     try {
-      const resp = await axios.post(buildUrl('pro/terrain/sun-path'), {
+      const resp = await axios.post(buildUrl('terrain/sun-path'), {
         latitude: parseFloat(latitude),
         longitude: parseFloat(longitude),
         date: date,

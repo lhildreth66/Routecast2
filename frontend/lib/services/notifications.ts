@@ -130,8 +130,12 @@ export async function scheduleLocalNotification(
       data: data || {},
       sound: 'default',
     },
-    trigger: triggerSeconds 
-      ? { seconds: triggerSeconds }
+    trigger: triggerSeconds
+      ? {
+          seconds: triggerSeconds,
+          repeats: false,
+          type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+        }
       : null, // null = immediate
   });
 

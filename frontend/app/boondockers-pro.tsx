@@ -22,7 +22,7 @@ export default function BoondockersProScreen() {
 
   const handleFeatureTap = (feature: typeof features[0]) => {
     if (feature.route) {
-      router.push(feature.route);
+      router.push(feature.route as never);
     } else {
       // For features without dedicated screens, you could show a modal or toast
       console.log(`Feature ${feature.title} not yet implemented`);
@@ -121,6 +121,12 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   introDesc: {
+    color: '#a1a1aa',
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  introText: {
     color: '#a1a1aa',
     fontSize: 14,
     textAlign: 'center',

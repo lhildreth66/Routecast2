@@ -219,7 +219,7 @@ export default function TruckParkingScreen() {
               
               return (
                 <TouchableOpacity
-                  key={index}
+                  key={`${spot.name}-${spot.latitude}-${spot.longitude}-${index}`}
                   style={[styles.spotCard, isExpanded && styles.spotCardExpanded]}
                   onPress={() => toggleSpotExpand(index)}
                   activeOpacity={0.8}
@@ -230,7 +230,7 @@ export default function TruckParkingScreen() {
                         <Ionicons name={getTypeIcon(spot.type) as any} size={20} color={typeColor} />
                         <Text style={styles.spotName}>{spot.name}</Text>
                       </View>
-                      <View style={styles.typeBadge} style={{ backgroundColor: typeColor + '20' }}>
+                      <View style={[styles.typeBadge, { backgroundColor: typeColor + '20' }]}>
                         <Text style={[styles.typeBadgeText, { color: typeColor }]}>
                           {spot.type.replace('_', ' ').toUpperCase()}
                         </Text>

@@ -254,7 +254,7 @@ export default function LastChanceScreen() {
               
               return (
                 <TouchableOpacity
-                  key={index}
+                  key={`${supply.name}-${supply.latitude}-${supply.longitude}-${index}`}
                   style={[styles.supplyCard, isExpanded && styles.supplyCardExpanded]}
                   onPress={() => toggleSupplyExpand(index)}
                   activeOpacity={0.8}
@@ -456,83 +456,6 @@ const styles = StyleSheet.create({
     color: '#f59e0b',
     fontSize: 15,
     fontWeight: '600',
-    fontFamily: 'monospace',
-  },
-  infoNote: {
-    fontSize: 12,
-    color: '#fbbf24',
-    marginBottom: 16,
-    fontStyle: 'italic',
-    lineHeight: 18,
-  },
-  locationInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#3f3f46',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 12,
-    gap: 8,
-  },
-  locationText: {
-    fontSize: 14,
-    color: '#e5e7eb',
-    flex: 1,
-  },
-  locationButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#3f3f46',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 16,
-    gap: 8,
-  },
-  locationButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#f59e0b',
-  },
-  loadingLocationBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#3f3f46',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 16,
-    gap: 8,
-  },
-  loadingLocationText: {
-    fontSize: 14,
-    color: '#9ca3af',
-    fontStyle: 'italic',
-  },
-  locationBox: {
-    backgroundColor: '#3f3f46',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 16,
-  },
-  locationHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 8,
-    gap: 8,
-  },
-  locationLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#e5e7eb',
-    flex: 1,
-  },
-  refreshLocationBtn: {
-    padding: 4,
-  },
-  locationCoords: {
-    fontSize: 14,
-    color: '#9ca3af',
     fontFamily: 'monospace',
   },
   inputRow: {

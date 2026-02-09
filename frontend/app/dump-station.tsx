@@ -211,7 +211,7 @@ export default function DumpStationScreen() {
               
               return (
                 <TouchableOpacity
-                  key={index}
+                  key={`${station.name}-${station.latitude}-${station.longitude}-${index}`}
                   style={[styles.stationCard, isExpanded && styles.stationCardExpanded]}
                   onPress={() => toggleStationExpand(index)}
                   activeOpacity={0.8}
@@ -420,13 +420,6 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '600',
     fontFamily: 'monospace',
-  },
-  infoNote: {
-    fontSize: 12,
-    color: '#fbbf24',
-    marginBottom: 16,
-    fontStyle: 'italic',
-    lineHeight: 18,
   },
   locationInfo: {
     flexDirection: 'row',

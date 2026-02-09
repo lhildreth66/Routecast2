@@ -22,7 +22,7 @@ export default function BoondockersScreen() {
 
   const handleFeatureTap = (feature: typeof features[0]) => {
     if (feature.route) {
-      router.push(feature.route);
+      router.push(feature.route as never);
     } else {
       // For features without dedicated screens, you could show a modal or toast
       console.log(`Feature ${feature.title} not yet implemented`);

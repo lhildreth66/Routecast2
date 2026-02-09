@@ -34,7 +34,7 @@ export default function RoadPassabilityScreen() {
       };
 
       try {
-        const resp = await axios.post(buildUrl('pro/road-passability'), payload);
+        const resp = await axios.post(buildUrl('road-passability'), payload);
         setResult(resp.data);
       } catch (err: any) {
         console.error('Road passability error:', err);

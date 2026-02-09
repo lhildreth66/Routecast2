@@ -65,12 +65,12 @@ export const useSolarForecast = (): UseSolarForecastReturn => {
 
     try {
       // Get subscription ID from storage if not provided
-      let subscriptionId = request.subscription_id;
+      let subscriptionId: string | undefined = request.subscription_id;
       if (!subscriptionId) {
-        subscriptionId = await AsyncStorage.getItem('routecast_subscription_id');
+        subscriptionId = (await AsyncStorage.getItem('routecast_subscription_id')) || undefined;
       }
 
-      const response = await fetch(buildUrl('pro/solar-forecast'), {
+      const response = await fetch(buildUrl('solar-forecast'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
