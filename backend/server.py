@@ -17,7 +17,6 @@ import polyline
 import asyncio
 from bridge_database import get_bridge_warnings
 from providers import get_providers
-from chat.camp_prep_dispatcher import dispatch as dispatch_camp_prep
 from billing import billing_verifier, VerificationRequest, VerificationResponse
 from common.premium_gate import require_premium
 from common.features import SOLAR_FORECAST, PROPANE_USAGE, WATER_BUDGET, WIND_SHELTER, ROAD_SIM, CAMPSITE_INDEX, CELL_STARLINK, CLAIM_LOG
@@ -261,26 +260,6 @@ class SafetyScore(BaseModel):
     vehicle_type: str
     factors: List[str]  # List of contributing factors
     recommendations: List[str]
-
-class ChatMessage(BaseModel):
-    message: str
-    route_context: Optional[str] = None  # Optional route info for context
-
-class ChatResponse(BaseModel):
-    response: str
-    suggestions: List[str] = []
-
-class CampPrepChatRequest(BaseModel):
-    message: str
-    subscription_id: Optional[str] = None
-
-class CampPrepChatResponse(BaseModel):
-    mode: str
-    command: str
-    human: str
-    payload: Optional[Dict[str, Any]] = None
-    premium: Dict[str, Any]
-    error: Optional[str] = None
 
 class Waypoint(BaseModel):
     lat: float
@@ -1882,61 +1861,25 @@ async def health_check():
 @api_router.post("/route/weather", response_model=RouteWeatherResponse)
 async def get_route_weather(request: RouteRequest):
     """Get weather along a route from origin to destination."""
-    # Build the user message with optional route context and system instructions
-    system_message = """You are Routecast AI, a helpful driving assistant that helps drivers with:
-- Weather and road condition questions
-- Safe driving tips based on weather
-- Route planning advice
-- What to pack for a trip
-- Rest stop recommendations
-- Understanding weather alerts and hazards
+    logger.info("Route weather request received", extra={
+        "origin": request.origin,
+        "destination": request.destination,
+        "stops": len(request.stops or []),
+        "vehicle_type": request.vehicle_type,
+        "mode": request.mode,
+        "trucker_mode": request.trucker_mode,
+    })
 
-Keep responses concise (2-3 sentences max) and actionable. Use emojis sparingly.
-If asked about specific locations, provide general advice since you don't have real-time data in this chat.
-Always prioritize safety in your recommendations."""
-
-    message_text = request.message
-    if request.route_context:
-        message_text = f"[Route context: {request.route_context}]\n\nUser question: {request.message}"
-
-    model = get_gemini_model()
-
-    loop = asyncio.get_event_loop()
-    response_obj = await loop.run_in_executor(
-        None,
-        lambda: model.generate_content(system_message + "\n\n" + message_text)
-    )
-    response = response_obj.text
-
-    # Generate quick suggestions based on the question
-    suggestions = []
-    question_lower = request.message.lower()
-
-    if "ice" in question_lower or "snow" in question_lower:
-        suggestions = ["What speed should I drive in snow?", "Do I need chains?", "Black ice tips"]
-    elif "rain" in question_lower:
-        suggestions = ["Hydroplaning prevention", "Following distance in rain", "When to pull over"]
-    elif "wind" in question_lower:
-        suggestions = ["Safe driving in high winds", "Should I delay my trip?"]
-    elif "fog" in question_lower:
-        suggestions = ["Fog driving tips", "What lights to use in fog"]
-    elif "tired" in question_lower or "fatigue" in question_lower:
-        suggestions = ["Rest stop tips", "Signs of drowsy driving", "Coffee vs. nap"]
-    else:
-        suggestions = ["Check road conditions", "Safest time to drive", "Packing tips"]
-
-    return ChatResponse(
-        response=response,
-        suggestions=suggestions[:3]
-    )
-
-    logger.info(
-        "Routing provider=%s mode=%s vehicle_type=%s options=%s",
-        provider_label,
-        mode,
-        vehicle_type,
-        routing_options or None,
-    )
+    # Normalize vehicle and routing options
+    vehicle_type = request.vehicle_type or "car"
+    routing_options = {
+        "avoid_highways": request.avoid_highways,
+        "avoid_tolls": request.avoid_tolls,
+        "prefer_campgrounds": request.prefer_campgrounds,
+        "mode": request.mode,
+    }
+    # Drop unset options so downstream helpers can use clean dicts
+    routing_options = {k: v for k, v in routing_options.items() if v is not None}
     
     # Parse departure time
     departure_time = None
@@ -2323,94 +2266,6 @@ async def verify_purchase(request: BillingVerifyRequest):
         logger.error(f"[BILLING] Verification error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-
-@api_router.post("/chat/camp-prep", response_model=CampPrepChatResponse)
-async def camp_prep_chat(request: CampPrepChatRequest):
-    """Camp Prep mode chat - routes commands to domain functions with premium gating."""
-    logger.info(f"[CAMP_PREP] Command: {request.message}")
-    
-    try:
-        response = dispatch_camp_prep(request.message, request.subscription_id)
-        result = response.to_dict()
-        
-        if result.get('error') == 'premium_locked':
-            logger.info(f"[CAMP_PREP] Premium locked: {request.message}")
-        else:
-            logger.info(f"[CAMP_PREP] Success: {result.get('command')}")
-        
-        return CampPrepChatResponse(**result)
-    except Exception as e:
-        logger.error(f"[CAMP_PREP] Error: {e}")
-        return CampPrepChatResponse(
-            mode="camp_prep",
-            command=request.message.split()[0] if request.message else "",
-            human=f"Error processing command: {str(e)}",
-            payload=None,
-            premium={"required": False, "locked": False},
-            error="server_error",
-        )
-
-@api_router.post("/chat", response_model=ChatResponse)
-async def driver_chat(request: ChatMessage):
-    """AI-powered chat for drivers to ask questions about weather, routes, and driving."""
-    try:
-        # Build the user message with optional route context and system instructions
-        system_message = """You are Routecast AI, a helpful driving assistant that helps drivers with:
-- Weather and road condition questions
-- Safe driving tips based on weather
-- Route planning advice
-- What to pack for a trip
-- Rest stop recommendations
-- Understanding weather alerts and hazards
-
-Keep responses concise (2-3 sentences max) and actionable. Use emojis sparingly.
-If asked about specific locations, provide general advice since you don't have real-time data in this chat.
-Always prioritize safety in your recommendations."""
-        
-        message_text = request.message
-        if request.route_context:
-            message_text = f"[Route context: {request.route_context}]\n\nUser question: {request.message}"
-        
-        # Use Gemini Flash for fast responses with new API
-        client = get_gemini_client()
-        
-        # Get response
-        loop = asyncio.get_event_loop()
-        response_obj = await loop.run_in_executor(
-            None,
-            lambda: client.models.generate_content(
-                model=GEMINI_MODEL,
-                contents=system_message + "\n\n" + message_text
-            )
-        )
-        response = response_obj.text
-        
-        # Generate quick suggestions based on the question
-        suggestions = []
-        question_lower = request.message.lower()
-        
-        if "ice" in question_lower or "snow" in question_lower:
-            suggestions = ["What speed should I drive in snow?", "Do I need chains?", "Black ice tips"]
-        elif "rain" in question_lower:
-            suggestions = ["Hydroplaning prevention", "Following distance in rain", "When to pull over"]
-        elif "wind" in question_lower:
-            suggestions = ["Safe driving in high winds", "Should I delay my trip?"]
-        elif "fog" in question_lower:
-            suggestions = ["Fog driving tips", "What lights to use in fog"]
-        elif "tired" in question_lower or "fatigue" in question_lower:
-            suggestions = ["Rest stop tips", "Signs of drowsy driving", "Coffee vs. nap"]
-        else:
-            suggestions = ["Check road conditions", "Safest time to drive", "Packing tips"]
-        
-        return ChatResponse(
-            response=response,
-            suggestions=suggestions[:3]
-        )
-        
-    except Exception as e:
-        logger.error(f"Chat error: {type(e).__name__}: {str(e)}", exc_info=True)
-        # More specific error message for debugging
-        raise
 
 # ==================== Subscription/Billing Endpoints ====================
 
