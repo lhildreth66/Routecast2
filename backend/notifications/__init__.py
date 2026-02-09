@@ -26,6 +26,7 @@ from .smart_delay import SmartDelayOptimizer, BestDelayResult
 from .models import PlannedTrip, PushToken, SmartDelayNotification
 from .expo_push import ExpoPushClient
 from .service import NotificationService
+from .route_alerts import RouteAlertService
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,19 @@ else:
 # In-memory token cache as fallback when DB is unavailable
 _in_memory_tokens: Set[str] = set()
 
+# Critical alert service (lazy init)
+_route_alert_service: Optional[RouteAlertService] = None
+
+
+def get_route_alert_service() -> RouteAlertService:
+    """Shared accessor for the critical route alert service."""
+    global _route_alert_service
+    if _db is None:
+        raise HTTPException(status_code=500, detail="MongoDB not configured")
+    if _route_alert_service is None:
+        _route_alert_service = RouteAlertService(_db)
+    return _route_alert_service
+
 
 class ExpoRegisterRequest(BaseModel):
     """Request payload for saving Expo push tokens."""
@@ -63,6 +77,27 @@ class SendNotificationRequest(BaseModel):
     title: Optional[str] = "🚛 Routecast Test Alert"
     body: Optional[str] = "Push notifications are working!"
     data: Optional[Dict[str, Any]] = None
+
+
+class RoutePoint(BaseModel):
+    lat: float
+    lon: float
+    name: Optional[str] = None
+
+
+class StartRouteMonitorRequest(BaseModel):
+    userId: str
+    pushToken: str
+    routeId: str
+    route: List[RoutePoint]
+    sampleMiles: float = 10.0
+    maxPoints: int = 25
+
+
+class StopRouteMonitorRequest(BaseModel):
+    userId: Optional[str] = None
+    monitorId: Optional[str] = None
+    pushToken: Optional[str] = None
 
 
 async def send_expo_notification(push_token: str, title: str, body: str, data: Dict[str, Any] = None) -> bool:
@@ -132,6 +167,52 @@ def _remove_token(token: str) -> None:
             _db.push_tokens.delete_one({"push_token": token})
         except Exception as exc:
             logger.warning("[notifications] Failed to delete token %s: %s", token, exc)
+
+
+@router.post("/route-monitor/start")
+async def start_route_monitor(request: StartRouteMonitorRequest):
+    """Start (or replace) a critical route monitor for a user/token."""
+    service = get_route_alert_service()
+    try:
+        sample_miles = float(os.environ.get("ROUTE_ALERTS_SAMPLING_MILES", request.sampleMiles))
+        max_points = int(os.environ.get("ROUTE_ALERTS_MAX_POINTS", request.maxPoints))
+        payload = service.start_monitor(
+            user_id=request.userId,
+            push_token=request.pushToken,
+            route_id=request.routeId,
+            route_points=[{"lat": p.lat, "lon": p.lon, "name": p.name} for p in request.route],
+            sample_miles=sample_miles,
+            max_points=max_points,
+        )
+        return {
+            "monitorId": payload["monitor_id"],
+            "samplePoints": payload["sample_points"],
+            "count": len(payload["sample_points"]),
+            "routeSignature": payload["route_signature"],
+        }
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to start route monitor: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to start monitor")
+
+
+@router.post("/route-monitor/stop")
+async def stop_route_monitor(request: StopRouteMonitorRequest):
+    """Stop active monitors scoped by monitorId, userId, or pushToken."""
+    service = get_route_alert_service()
+    try:
+        updated = service.stop_monitor(
+            user_id=request.userId,
+            monitor_id=request.monitorId,
+            push_token=request.pushToken,
+        )
+        return {"stopped": updated}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to stop route monitor: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to stop monitor")
 
 
 @router.post("/register")
@@ -221,5 +302,6 @@ __all__ = [
     "SmartDelayNotification",
     "ExpoPushClient",
     "NotificationService",
+    "RouteAlertService",
     "router",
 ]
