@@ -4,7 +4,7 @@ import axios from 'axios';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { API_BASE } from '../lib/apiConfig';
+import { API_BASE, buildUrl } from '../lib/apiConfig';
 
 export default function PropaneUsageScreen() {
   const router = useRouter();
@@ -22,7 +22,7 @@ export default function PropaneUsageScreen() {
     setError('');
     try {
       const temps = nightsTempF.split(',').map(t => parseInt(t.trim(), 10)).filter(t => !isNaN(t));
-      const resp = await axios.post(`${API_BASE}/propane-usage`, {
+      const resp = await axios.post(buildUrl('propane-usage'), {
         furnace_btu: parseInt(furnaceBtu, 10),
         duty_cycle_pct: parseFloat(dutyCyclePct),
         nights_temp_f: temps,

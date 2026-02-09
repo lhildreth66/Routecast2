@@ -8,7 +8,7 @@ import {
   addNotificationResponseReceivedListener,
   removeNotificationSubscription,
 } from '../services/notifications';
-import { API_BASE } from '../apiConfig';
+import { API_BASE, buildUrl } from '../apiConfig';
 
 interface UseNotificationsReturn {
   expoPushToken: string | null;

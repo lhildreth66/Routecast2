@@ -7,7 +7,7 @@
 
 import { useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { API_BASE } from '../apiConfig';
+import { API_BASE, buildUrl } from '../apiConfig';
 
 // Type-safe interfaces matching API models
 
@@ -86,7 +86,7 @@ export const useWaterBudget = (): UseWaterBudgetReturn => {
       }
 
       // Call API endpoint
-      const response = await fetch(`${API_BASE}/pro/water-budget`, {
+      const response = await fetch(buildUrl('pro/water-budget'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

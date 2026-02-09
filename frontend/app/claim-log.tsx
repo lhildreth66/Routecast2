@@ -14,7 +14,7 @@ import axios from 'axios';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { Buffer } from 'buffer';
-import { API_BASE } from './apiConfig';
+import { API_BASE, buildUrl } from './apiConfig';
 
 interface ClaimLogPreview {
   schema_version: string;
@@ -82,7 +82,7 @@ export default function ClaimLogScreen() {
     setPreview(null);
     try {
       const payload = buildPayload();
-      const res = await axios.post(`${API_BASE}/pro/claim-log/build`, payload);
+      const res = await axios.post(buildUrl('pro/claim-log/build'), payload);
       setPreview(res.data);
     } catch (err: any) {
       const msg = err?.response?.data?.detail || err?.message || 'Failed to build claim log';
@@ -96,7 +96,7 @@ export default function ClaimLogScreen() {
     setLoading(true);
     try {
       const payload = buildPayload();
-      const res = await axios.post(`${API_BASE}/pro/claim-log/pdf`, payload, { responseType: 'arraybuffer' });
+      const res = await axios.post(buildUrl('pro/claim-log/pdf'), payload, { responseType: 'arraybuffer' });
       const base64 = Buffer.from(res.data, 'binary').toString('base64');
       const fileUri = `${FileSystem.cacheDirectory}claim_log_${routeId}.pdf`;
       await FileSystem.writeAsStringAsync(fileUri, base64, { encoding: FileSystem.EncodingType.Base64 });

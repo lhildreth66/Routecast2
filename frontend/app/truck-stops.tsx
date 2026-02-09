@@ -6,7 +6,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { API_BASE } from '../lib/apiConfig';
+import { API_BASE, buildUrl } from '../lib/apiConfig';
 
 interface TruckStop {
   name: string;
@@ -83,7 +83,7 @@ export default function TruckStopsScreen() {
     setStops([]);
     setError('');
     try {
-      const resp = await axios.post(`${API_BASE}/truck-stops/search`, {
+      const resp = await axios.post(buildUrl('truck-stops/search'), {
         latitude: parseFloat(latitude),
         longitude: parseFloat(longitude),
         radius_miles: parseInt(searchRadius, 10),

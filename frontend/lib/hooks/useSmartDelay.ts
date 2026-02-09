@@ -12,8 +12,7 @@ import { useState, useCallback, useEffect } from 'react';
 import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
-
-const API_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://localhost:8000/api';
+import { buildUrl } from '../../app/apiConfig';
 
 interface RouteWaypoint {
   latitude: number;
@@ -126,7 +125,7 @@ export const useSmartDelay = (): UseSmartDelayReturn => {
           throw new Error('Failed to get push token');
         }
 
-        const response = await axios.post(`${API_URL}/push/register`, {
+        const response = await axios.post(buildUrl('push/register'), {
           token,
           subscription_id: subscriptionId,
         });
@@ -148,7 +147,7 @@ export const useSmartDelay = (): UseSmartDelayReturn => {
         setRegistrationLoading(true);
         setRegistrationError(null);
 
-        const response = await axios.post(`${API_URL}/trips/planned`, {
+        const response = await axios.post(buildUrl('trips/planned'), {
           ...trip,
           subscription_id: subscriptionId,
         });

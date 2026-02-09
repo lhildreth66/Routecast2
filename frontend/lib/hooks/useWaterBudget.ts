@@ -5,8 +5,7 @@
  */
 
 import { useState } from 'react';
-
-const API_BASE = process.env.EXPO_PUBLIC_API_BASE || 'http://localhost:8000';
+import { buildUrl } from '../../app/apiConfig';
 
 // Type-safe interfaces matching API models
 
@@ -51,7 +50,7 @@ export const useWaterBudget = (): UseWaterBudgetReturn => {
     setError(null);
 
     try {
-      const response = await fetch(`${API_BASE}/water-budget`, {
+      const response = await fetch(buildUrl('water-budget'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

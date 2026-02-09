@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { API_BASE } from '../apiConfig';
+import { API_BASE, buildUrl } from '../apiConfig';
 
 export interface RoadPassabilityRequest {
   precip_72h: number;      // Precipitation in last 72h (mm)
@@ -52,7 +52,7 @@ export const useRoadPassability = (): UseRoadPassabilityReturn => {
     setError(null);
 
     try {
-      const response = await fetch(`${API_BASE}/road-passability`, {
+      const response = await fetch(buildUrl('road-passability'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

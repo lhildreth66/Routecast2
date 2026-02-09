@@ -50,7 +50,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { format } from 'date-fns';
 import { WebView } from 'react-native-webview';
-import { API_BASE, API_BASE_ERROR, API_BASE_SOURCE } from './apiConfig';
+import { API_BASE, API_BASE_ERROR, API_BASE_SOURCE, buildUrl } from './apiConfig';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -125,15 +125,6 @@ export default function HomeScreen() {
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [useCustomTime, setUseCustomTime] = useState(false);
   
-  // AI Chat
-  const [showChat, setShowChat] = useState(false);
-  const [chatMessage, setChatMessage] = useState('');
-  const [chatHistory, setChatHistory] = useState<{role: 'user' | 'ai', text: string}[]>([]);
-  const [chatLoading, setChatLoading] = useState(false);
-  const [chatSuggestions, setChatSuggestions] = useState<string[]>(['How to drive in snow?', 'Is fog dangerous?', 'Rest stop tips']);
-  const [isListening, setIsListening] = useState(false);
-  const [speechSupported, setSpeechSupported] = useState(false);
-  
   // Multi-stop
   const [stops, setStops] = useState<StopPoint[]>([]);
   const [showAddStop, setShowAddStop] = useState(false);
@@ -147,14 +138,6 @@ export default function HomeScreen() {
   const segments = useSegments();
 
   const showApiBaseError = __DEV__ && !!API_BASE_ERROR;
-
-  // Check for speech recognition support on web
-  useEffect(() => {
-    if (Platform.OS === 'web') {
-      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      setSpeechSupported(!!SpeechRecognition);
-    }
-  }, []);
 
   useEffect(() => {
     fetchRecentRoutes();
@@ -220,7 +203,7 @@ export default function HomeScreen() {
   };
 
   const runHealthCheck = async () => {
-    const url = `${API_BASE}/health`;
+    const url = buildUrl('health');
     try {
       const res = await fetch(url, { method: 'GET' });
       const text = await res.text();
@@ -332,7 +315,7 @@ export default function HomeScreen() {
 
         pushDebugLog(`[push] saving token to backend token=${token}`);
         try {
-          const response = await axios.post(`${API_BASE}/notifications/register`, {
+          const response = await axios.post(buildUrl('notifications/register'), {
             expoPushToken: token,
             enabled: true,
           });
@@ -358,7 +341,7 @@ export default function HomeScreen() {
 
         if (pushToken) {
           try {
-            const disableResponse = await axios.post(`${API_BASE}/notifications/register`, {
+            const disableResponse = await axios.post(buildUrl('notifications/register'), {
               expoPushToken: pushToken,
               enabled: false,
             });
@@ -391,7 +374,7 @@ export default function HomeScreen() {
 
     pushDebugLog(`[push] sending test notification for token ${pushToken}`);
     try {
-      const response = await axios.post(`${API_BASE}/notifications/send`, {});
+      const response = await axios.post(buildUrl('notifications/send'), {});
       const msg = JSON.stringify(response?.data || {});
       setLastTestResult(msg);
       AsyncStorage.setItem('pushLastTestResult', msg).catch(() => {});
@@ -449,7 +432,7 @@ export default function HomeScreen() {
 
     setAutocompleteLoading(true);
     try {
-      const response = await axios.get(`${API_BASE}/geocode/autocomplete`, {
+      const response = await axios.get(buildUrl('geocode/autocomplete'), {
         params: { query, limit: 5 }
       });
       
@@ -507,106 +490,9 @@ export default function HomeScreen() {
     setDestSuggestions([]);
   };
 
-  // AI Chat functions
-  const sendChatMessage = async (message?: string) => {
-    const msgToSend = message || chatMessage;
-    if (!msgToSend.trim()) return;
-    
-    setChatLoading(true);
-    setChatHistory(prev => [...prev, { role: 'user', text: msgToSend }]);
-    setChatMessage('');
-    
-    try {
-      const response = await axios.post(`${API_BASE}/chat`, {
-        message: msgToSend,
-        route_context: origin && destination ? `${origin} to ${destination}` : null
-      });
-      
-      setChatHistory(prev => [...prev, { role: 'ai', text: response.data.response }]);
-      if (response.data.suggestions) {
-        setChatSuggestions(response.data.suggestions);
-      }
-    } catch (err) {
-      setChatHistory(prev => [...prev, { role: 'ai', text: "Sorry, I couldn't process that. Please try again." }]);
-    } finally {
-      setChatLoading(false);
-    }
-  };
-
-  // Voice-to-text function
-  const startVoiceRecognition = () => {
-    if (Platform.OS !== 'web') {
-      alert('Voice input works in web browsers. On native devices, use the Expo Go app.');
-      return;
-    }
-
-    // Check if we're in an iframe (which blocks speech recognition)
-    const isInIframe = window !== window.parent;
-    
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    
-    if (!SpeechRecognition) {
-      alert('🎤 Speech recognition not supported.\n\nPlease use Chrome, Edge, or Safari browser.');
-      return;
-    }
-
-    if (isInIframe) {
-      alert('🎤 Voice input is blocked in preview mode.\n\nTo use voice:\n1. Open the app in a new tab (click the external link icon)\n2. Or deploy the app and test there\n\nThe feature will work perfectly in the standalone app!');
-      return;
-    }
-
-    // Already listening, stop it
-    if (isListening) {
-      setIsListening(false);
-      return;
-    }
-
-    try {
-      const recognition = new SpeechRecognition();
-      recognition.continuous = false;
-      recognition.interimResults = true;
-      recognition.lang = 'en-US';
-
-      recognition.onstart = () => {
-        setIsListening(true);
-        setChatMessage('');
-      };
-
-      recognition.onresult = (event: any) => {
-        const transcript = Array.from(event.results)
-          .map((result: any) => result[0].transcript)
-          .join('');
-        setChatMessage(transcript);
-      };
-
-      recognition.onerror = (event: any) => {
-        console.error('Speech recognition error:', event.error);
-        setIsListening(false);
-        
-        if (event.error === 'not-allowed') {
-          alert('🎤 Microphone access denied.\n\nClick the lock icon in your address bar to allow microphone access.');
-        } else if (event.error === 'no-speech') {
-          alert('No speech detected. Please try again.');
-        } else {
-          alert(`Voice error: ${event.error}`);
-        }
-      };
-
-      recognition.onend = () => {
-        setIsListening(false);
-      };
-
-      recognition.start();
-    } catch (err) {
-      console.error('Failed to start recognition:', err);
-      alert('Failed to start voice recognition. Please try a different browser.');
-      setIsListening(false);
-    }
-  };
-
   const fetchRecentRoutes = async () => {
     try {
-      const path = `${API_BASE}/routes/history`;
+      const path = buildUrl('routes/history');
       const response = await axios.get(path);
       setRecentRoutes(response.data.slice(0, 5));
     } catch (err) {
@@ -616,7 +502,7 @@ export default function HomeScreen() {
 
   const fetchFavoriteRoutes = async () => {
     try {
-      const path = `${API_BASE}/routes/favorites`;
+      const path = buildUrl('routes/favorites');
       const response = await axios.get(path);
       setFavoriteRoutes(response.data);
       setFavoriteIds(new Set(response.data.map((r: SavedRoute) => r.id)));
@@ -671,7 +557,7 @@ export default function HomeScreen() {
       }
 
       console.log('[route-request]', {
-        endpoint: `${API_BASE}/route/weather`,
+        endpoint: buildUrl('route/weather'),
         mode: resolvedMode,
         vehicleType,
         trucker_mode: truckerMode,
@@ -679,8 +565,8 @@ export default function HomeScreen() {
         boondockerPrefs,
       });
 
-      const response = await axios.post(`${API_BASE}/route/weather`, requestData);
-      
+      const response = await axios.post(buildUrl('route/weather'), requestData);
+
       // Cache the route for offline
       await AsyncStorage.setItem('lastRoute', JSON.stringify(response.data));
 
@@ -689,9 +575,31 @@ export default function HomeScreen() {
         params: { routeData: JSON.stringify(response.data) },
       });
     } catch (err: any) {
-      console.error('Error:', err);
+      const status = err?.response?.status;
+      const body = err?.response?.data;
+
+      const summarizeBody = () => {
+        if (!body) return '';
+        if (typeof body === 'string') return body.slice(0, 500);
+        try {
+          return JSON.stringify(body).slice(0, 500);
+        } catch {
+          return '[unserializable body]';
+        }
+      };
+
+      const detail = summarizeBody();
+      console.error('[route/weather] request failed', {
+        status,
+        url: buildUrl('route/weather'),
+        detail: detail || err?.message,
+        request: requestData,
+      });
+
       setError(
-        err.response?.data?.detail ||
+        (typeof body === 'object' && body?.detail) ||
+          detail ||
+          err?.message ||
           'Failed to get weather data. Please try again.'
       );
     } finally {
@@ -755,9 +663,9 @@ export default function HomeScreen() {
 
     try {
       if (currentlyFavorite) {
-        await axios.delete(`${API_BASE}/routes/favorites/${route.id}`);
+        await axios.delete(buildUrl(`routes/favorites/${route.id}`));
       } else {
-        await axios.post(`${API_BASE}/routes/favorites`, {
+        await axios.post(buildUrl('routes/favorites'), {
           origin: route.origin,
           destination: route.destination,
           stops: route.stops || [],
@@ -869,9 +777,9 @@ export default function HomeScreen() {
 
     try {
       if (currentlyFavorite && existing) {
-        await axios.delete(`${API_BASE}/routes/favorites/${existing.id}`);
+        await axios.delete(buildUrl(`routes/favorites/${existing.id}`));
       } else {
-        const res = await axios.post(`${API_BASE}/routes/favorites`, {
+        const res = await axios.post(buildUrl('routes/favorites'), {
           origin: trimmedOrigin,
           destination: trimmedDestination,
           stops,
@@ -951,7 +859,7 @@ export default function HomeScreen() {
     }
 
     try {
-      await axios.delete(`${API_BASE}/routes/favorites/${routeId}`);
+      await axios.delete(buildUrl(`routes/favorites/${routeId}`));
       fetchFavoriteRoutes();
       console.log('[fav] save result', { ok: true, status: 'removed', id: routeId });
     } catch (err) {
@@ -1843,84 +1751,6 @@ export default function HomeScreen() {
         </Modal>
       )}
 
-      {/* AI Chat Modal */}
-      {showChat && (
-        <Modal transparent animationType="slide">
-          <View style={styles.chatModalOverlay}>
-            <View style={styles.chatModalContent}>
-              <View style={styles.chatHeader}>
-                <View style={styles.chatHeaderLeft}>
-                  <Ionicons name="chatbubbles" size={24} color="#eab308" />
-                  <Text style={styles.chatTitle}>Ask Routecast AI</Text>
-                </View>
-                <TouchableOpacity onPress={() => setShowChat(false)}>
-                  <Ionicons name="close" size={24} color="#fff" />
-                </TouchableOpacity>
-              </View>
-              
-              <ScrollView style={styles.chatMessages} showsVerticalScrollIndicator={false}>
-                {chatHistory.length === 0 && (
-                  <View style={styles.chatWelcome}>
-                    <Text style={styles.chatWelcomeText}>👋 Hi! I'm your driving assistant.</Text>
-                    <Text style={styles.chatWelcomeSubtext}>Ask me about weather, road conditions, or safe driving tips!</Text>
-                  </View>
-                )}
-                
-                {chatHistory.map((msg, idx) => (
-                  <View key={idx} style={[styles.chatBubble, msg.role === 'user' ? styles.userBubble : styles.aiBubble]}>
-                    <Text style={styles.chatBubbleText}>{msg.text}</Text>
-                  </View>
-                ))}
-                
-                {chatLoading && (
-                  <View style={styles.chatTyping}>
-                    <ActivityIndicator size="small" color="#eab308" />
-                    <Text style={styles.chatTypingText}>Thinking...</Text>
-                  </View>
-                )}
-              </ScrollView>
-              
-              {/* Quick suggestions */}
-              <View style={styles.chatSuggestions}>
-                {chatSuggestions.map((suggestion, idx) => (
-                  <TouchableOpacity 
-                    key={idx} 
-                    style={styles.chatSuggestionBtn}
-                    onPress={() => sendChatMessage(suggestion)}
-                  >
-                    <Text style={styles.chatSuggestionText}>{suggestion}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-              
-              {/* Input */}
-              <View style={styles.chatInputRow}>
-                <NoAutofillInput
-                  style={styles.chatInputFull}
-                  placeholder="Type your question here..."
-                  placeholderTextColor="#6b7280"
-                  value={chatMessage}
-                  onChangeText={setChatMessage}
-                  onSubmitEditing={() => sendChatMessage()}
-                  returnKeyType="send"
-                />
-                <TouchableOpacity 
-                  style={[styles.chatSendBtn, !chatMessage.trim() && styles.chatSendBtnDisabled]}
-                  onPress={() => sendChatMessage()}
-                  disabled={!chatMessage.trim() || chatLoading}
-                >
-                  <Ionicons name="send" size={20} color="#fff" />
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </Modal>
-      )}
-
-      {/* Floating Chat Button */}
-      <TouchableOpacity style={styles.chatFab} onPress={() => setShowChat(true)}>
-        <Ionicons name="chatbubble-ellipses" size={24} color="#fff" />
-      </TouchableOpacity>
     </View>
   );
 }
@@ -2515,163 +2345,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
     marginTop: 8,
-  },
-  // AI Chat styles
-  chatFab: {
-    position: 'absolute',
-    right: 20,
-    bottom: 30,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#eab308',
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 5,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-  },
-  chatModalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    justifyContent: 'flex-end',
-  },
-  chatModalContent: {
-    backgroundColor: '#1f1f23',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    height: '80%',
-    paddingBottom: 20,
-  },
-  chatHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#3f3f46',
-  },
-  chatHeaderLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  chatTitle: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  chatMessages: {
-    flex: 1,
-    padding: 16,
-  },
-  chatWelcome: {
-    alignItems: 'center',
-    paddingVertical: 40,
-  },
-  chatWelcomeText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
-  },
-  chatWelcomeSubtext: {
-    color: '#6b7280',
-    fontSize: 14,
-    marginTop: 8,
-    textAlign: 'center',
-  },
-  chatBubble: {
-    maxWidth: '85%',
-    padding: 12,
-    borderRadius: 16,
-    marginBottom: 10,
-  },
-  userBubble: {
-    backgroundColor: '#2563eb',
-    alignSelf: 'flex-end',
-    borderBottomRightRadius: 4,
-  },
-  aiBubble: {
-    backgroundColor: '#3f3f46',
-    alignSelf: 'flex-start',
-    borderBottomLeftRadius: 4,
-  },
-  chatBubbleText: {
-    color: '#fff',
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  chatTyping: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    padding: 8,
-  },
-  chatTypingText: {
-    color: '#6b7280',
-    fontSize: 12,
-  },
-  chatSuggestions: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    padding: 12,
-    gap: 8,
-    borderTopWidth: 1,
-    borderTopColor: '#3f3f46',
-  },
-  chatSuggestionBtn: {
-    backgroundColor: '#27272a',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#3f3f46',
-  },
-  chatSuggestionText: {
-    color: '#a1a1aa',
-    fontSize: 12,
-  },
-  chatInputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingTop: 8,
-    gap: 10,
-  },
-  chatInput: {
-    flex: 1,
-    backgroundColor: '#27272a',
-    borderRadius: 24,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    color: '#fff',
-    fontSize: 14,
-    borderWidth: 1,
-    borderColor: '#3f3f46',
-  },
-  chatInputFull: {
-    flex: 1,
-    backgroundColor: '#27272a',
-    borderRadius: 24,
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    color: '#fff',
-    fontSize: 15,
-    borderWidth: 1,
-    borderColor: '#3f3f46',
-  },
-  chatSendBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: '#eab308',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  chatSendBtnDisabled: {
-    backgroundColor: '#3f3f46',
   },
   // Radar button and modal styles
   radarHomeBtn: {

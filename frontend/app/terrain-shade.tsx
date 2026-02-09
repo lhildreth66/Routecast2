@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import { API_BASE } from './apiConfig';
+import { API_BASE, buildUrl } from './apiConfig';
 
 export default function TerrainShadeScreen() {
   const router = useRouter();
@@ -66,7 +66,7 @@ export default function TerrainShadeScreen() {
     setLoading(true);
     setResult(null);
     try {
-      const resp = await axios.post(`${API_BASE}/pro/terrain/sun-path`, {
+      const resp = await axios.post(buildUrl('pro/terrain/sun-path'), {
         latitude: parseFloat(latitude),
         longitude: parseFloat(longitude),
         date: date,

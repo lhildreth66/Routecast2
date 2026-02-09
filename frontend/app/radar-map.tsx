@@ -13,7 +13,7 @@ import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
 import * as Location from 'expo-location';
-import { API_BASE } from '../lib/apiConfig';
+import { API_BASE, buildUrl } from '../lib/apiConfig';
 
 interface AlertFeature {
   id: string;
@@ -68,8 +68,8 @@ export default function RadarMapScreen() {
       // Fetch alerts from backend if available
       if (API_BASE) {
         try {
-          console.log('[RadarMap] Fetching alerts from:', `${API_BASE}/radar/alerts/map`);
-          const response = await axios.get(`${API_BASE}/radar/alerts/map`, { timeout: 10000 });
+          console.log('[RadarMap] Fetching alerts from:', buildUrl('radar/alerts/map'));
+          const response = await axios.get(buildUrl('radar/alerts/map'), { timeout: 10000 });
           console.log('[RadarMap] Alerts response:', response.status, response.data?.alerts?.length || 0, 'alerts');
           setAlerts(response.data.alerts || []);
         } catch (alertErr: any) {
@@ -314,12 +314,12 @@ export default function RadarMapScreen() {
         btn.textContent = 'Loading...';
         try {
           // Try backend first if available
-          const apiBase = '${API_BASE}';
+          const apiBase = `${API_BASE}`;
           let tileUrl = null;
           
           if (apiBase) {
             try {
-              const response = await fetch(apiBase + '/api/radar/tiles');
+              const response = await fetch(buildUrl('radar/tiles'));
               const data = await response.json();
               tileUrl = data.tile_url;
             } catch (backendErr) {

@@ -12,7 +12,7 @@ import { useState, useCallback, useEffect } from 'react';
 import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
-import { API_BASE } from '../apiConfig';
+import { API_BASE, buildUrl } from '../apiConfig';
 
 const API_URL = API_BASE;
 

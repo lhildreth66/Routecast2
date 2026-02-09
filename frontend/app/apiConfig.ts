@@ -57,6 +57,11 @@ export const API_BASE = apiBaseResolution.base;
 export const API_BASE_SOURCE = apiBaseResolution.source;
 export const API_BASE_ERROR = apiBaseResolution.error || '';
 
+export const buildUrl = (path: string): string => {
+  const trimmed = path.startsWith('/') ? path.slice(1) : path;
+  return `${API_BASE}/${trimmed}`;
+};
+
 console.log('[apiConfig] API_BASE resolved', {
   base: API_BASE,
   source: API_BASE_SOURCE,
@@ -70,6 +75,7 @@ if (typeof global !== 'undefined' && typeof global.fetch === 'function') {
   global.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = typeof input === 'string' || input instanceof URL ? input.toString() : String(input);
     const method = (init?.method || 'GET').toUpperCase();
+    console.log('[net]', method, url);
     try {
       const response = await originalFetch(input as any, init as any);
       const contentType = response.headers.get('content-type') || '';
@@ -101,6 +107,7 @@ axios.interceptors.request.use((config) => {
   const fullUrl = config.baseURL ? `${config.baseURL}${config.url}` : config.url;
   const method = (config.method || 'get').toUpperCase();
   const hasAuth = !!config.headers?.Authorization;
+  console.log('[net]', method, fullUrl);
   console.log('[api] request', { method, url: fullUrl, auth: hasAuth });
   return config;
 });
@@ -117,18 +124,26 @@ axios.interceptors.response.use(
     const fullUrl = cfg.baseURL ? `${cfg.baseURL}${cfg.url}` : cfg.url;
     const method = (cfg.method || 'get').toUpperCase();
     const status = error.response?.status;
+    const headers = error.response?.headers;
     const body = error.response?.data;
-    let truncatedBody = body;
-    if (typeof body === 'string') {
-      truncatedBody = body.slice(0, 200);
-    } else if (body) {
+
+    const summarizeBody = () => {
+      if (!body) return '[empty body]';
+      if (typeof body === 'string') return body.slice(0, 500);
       try {
-        truncatedBody = JSON.stringify(body).slice(0, 200);
-      } catch (e) {
-        truncatedBody = '[unserializable body]';
+        return JSON.stringify(body).slice(0, 500);
+      } catch {
+        return '[unserializable body]';
       }
-    }
-    console.warn('[api] error', { method, url: fullUrl, status, body: truncatedBody });
+    };
+
+    console.warn('[api] error', {
+      method,
+      url: fullUrl,
+      status,
+      headers: headers ? { 'content-type': headers['content-type'], 'content-length': headers['content-length'] } : undefined,
+      body: summarizeBody(),
+    });
     return Promise.reject(error);
   }
 );

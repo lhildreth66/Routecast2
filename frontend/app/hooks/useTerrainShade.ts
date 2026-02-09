@@ -7,7 +7,7 @@
 
 import { useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { API_BASE } from '../apiConfig';
+import { API_BASE, buildUrl } from '../apiConfig';
 
 // Type-safe interfaces matching API models
 
@@ -88,7 +88,7 @@ export const useTerrainShade = (): UseTerrainShadeReturn => {
       }
 
       // Call API endpoint for solar path
-      const response = await fetch(`${API_BASE}/pro/terrain/sun-path`, {
+      const response = await fetch(buildUrl('pro/terrain/sun-path'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

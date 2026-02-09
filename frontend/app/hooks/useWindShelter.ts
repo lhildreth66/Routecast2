@@ -7,7 +7,7 @@
 
 import { useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { API_BASE } from '../apiConfig';
+import { API_BASE, buildUrl } from '../apiConfig';
 
 // Type-safe interfaces matching API models
 
@@ -87,7 +87,7 @@ export const useWindShelter = (): UseWindShelterReturn => {
       }
 
       // Call API endpoint for wind shelter recommendation
-      const response = await fetch(`${API_BASE}/pro/wind-shelter/orientation`, {
+      const response = await fetch(buildUrl('pro/wind-shelter/orientation'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

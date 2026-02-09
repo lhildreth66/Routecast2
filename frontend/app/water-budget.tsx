@@ -4,7 +4,7 @@ import axios from 'axios';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { API_BASE } from '../lib/apiConfig';
+import { API_BASE, buildUrl } from '../lib/apiConfig';
 
 export default function WaterBudgetScreen() {
   const router = useRouter();
@@ -23,7 +23,7 @@ export default function WaterBudgetScreen() {
     setResult(null);
     setError('');
     try {
-      const resp = await axios.post(`${API_BASE}/water-budget`, {
+      const resp = await axios.post(buildUrl('water-budget'), {
         fresh_gal: parseInt(freshGallons, 10),
         gray_gal: parseInt(grayGallons, 10),
         black_gal: parseInt(blackGallons, 10),

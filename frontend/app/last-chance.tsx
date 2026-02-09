@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import { API_BASE } from '../lib/apiConfig';
+import { API_BASE, buildUrl } from '../lib/apiConfig';
 
 interface SupplyPoint {
   name: string;
@@ -75,7 +75,7 @@ export default function LastChanceScreen() {
     setSupplies([]);
     setError('');
     try {
-      const resp = await axios.post(`${API_BASE}/last-chance/search`, {
+      const resp = await axios.post(buildUrl('last-chance/search'), {
         latitude: parseFloat(latitude),
         longitude: parseFloat(longitude),
         radius_miles: parseInt(searchRadius, 10),

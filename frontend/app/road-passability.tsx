@@ -5,7 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { API_BASE } from './apiConfig';
+import { API_BASE, buildUrl } from './apiConfig';
 
 // Entitlement sourced from AsyncStorage key 'entitlements.boondockingPro'
 
@@ -34,7 +34,7 @@ export default function RoadPassabilityScreen() {
       };
 
       try {
-        const resp = await axios.post(`${API_BASE}/pro/road-passability`, payload);
+        const resp = await axios.post(buildUrl('pro/road-passability'), payload);
         setResult(resp.data);
       } catch (err: any) {
         console.error('Road passability error:', err);

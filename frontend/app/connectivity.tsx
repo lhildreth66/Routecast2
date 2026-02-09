@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import { API_BASE } from '../lib/apiConfig';
+import { API_BASE, buildUrl } from '../lib/apiConfig';
 
 type ConnectivityTab = 'cell' | 'starlink';
 
@@ -90,7 +90,7 @@ export default function ConnectivityScreen() {
       };
 
       try {
-        const resp = await axios.post(`${API_BASE}/connectivity/cell-probability`, payload);
+        const resp = await axios.post(buildUrl('connectivity/cell-probability'), payload);
         const d = resp.data;
         setCellResultData(d);
         setCellResult(`${d.bar_estimate} probability: ${(d.probability * 100).toFixed(0)}%. ${d.explanation}`);
@@ -116,7 +116,7 @@ export default function ConnectivityScreen() {
       };
 
       try {
-        const resp = await axios.post(`${API_BASE}/connectivity/starlink-risk`, payload);
+        const resp = await axios.post(buildUrl('connectivity/starlink-risk'), payload);
         const d = resp.data;
         setStarlinkResultData(d);
         const reasons = Array.isArray(d.reasons) ? d.reasons.join('; ') : '';

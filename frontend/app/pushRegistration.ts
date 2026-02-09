@@ -4,7 +4,7 @@ import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
 import axios from 'axios';
 import { Platform } from 'react-native';
-import { API_BASE } from './apiConfig';
+import { API_BASE, buildUrl } from './apiConfig';
 
 let inFlight: Promise<void> | null = null;
 
@@ -77,7 +77,7 @@ const doRegister = async () => {
     await ensureAndroidChannel();
     await AsyncStorage.setItem('expoPushToken', token);
 
-    const url = `${API_BASE}/notifications/register`;
+    const url = buildUrl('notifications/register');
     log('registering token with backend', { url });
     await axios.post(url, {
       expoPushToken: token,

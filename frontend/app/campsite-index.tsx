@@ -13,7 +13,7 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
 import * as Location from 'expo-location';
-import { API_BASE } from '../lib/apiConfig';
+import { API_BASE, buildUrl } from '../lib/apiConfig';
 
 interface CampsiteIndexResult {
   score: number;
@@ -107,13 +107,13 @@ export default function CampsiteIndexScreen() {
       let response;
       if (useAutoMode) {
         // Auto mode: fetch real data from backend
-        response = await axios.post(`${API_BASE}/campsite-index/auto`, {
+        response = await axios.post(buildUrl('campsite-index/auto'), {
           latitude: parseFloat(latitude),
           longitude: parseFloat(longitude),
         });
       } else {
         // Manual mode: use user inputs
-        response = await axios.post(`${API_BASE}/campsite-index`, {
+        response = await axios.post(buildUrl('campsite-index'), {
           wind_gust_mph: parseFloat(windGustMph),
           shade_score: parseFloat(shadeScore),
           slope_pct: parseFloat(slopePct),

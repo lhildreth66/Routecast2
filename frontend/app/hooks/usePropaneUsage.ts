@@ -7,7 +7,7 @@
 
 import { useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { API_BASE } from '../apiConfig';
+import { API_BASE, buildUrl } from '../apiConfig';
 
 // Type-safe interfaces matching API models
 
@@ -82,7 +82,7 @@ export const usePropaneUsage = (): UsePropaneUsageReturn => {
       }
 
       // Call API endpoint
-      const response = await fetch(`${API_BASE}/pro/propane-usage`, {
+      const response = await fetch(buildUrl('pro/propane-usage'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { API_BASE } from '../apiConfig';
+import { API_BASE, buildUrl } from '../apiConfig';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export interface RoadPassabilityRequest {
@@ -74,7 +74,7 @@ export const useRoadPassability = (): UseRoadPassabilityReturn => {
         subscriptionId = await AsyncStorage.getItem('routecast_subscription_id');
       }
 
-      const response = await fetch(`${API_BASE}/pro/road-passability`, {
+      const response = await fetch(buildUrl('pro/road-passability'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

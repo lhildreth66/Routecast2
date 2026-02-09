@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { API_BASE } from '../apiConfig';
+import { API_BASE, buildUrl } from '../apiConfig';
 
 export interface SolarForecastRequest {
   lat: number;                // Latitude (-90 to 90)
@@ -46,7 +46,7 @@ export const useSolarForecast = (): UseSolarForecastReturn => {
     setError(null);
 
     try {
-      const response = await fetch(`${API_BASE}/solar-forecast`, {
+      const response = await fetch(buildUrl('solar-forecast'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

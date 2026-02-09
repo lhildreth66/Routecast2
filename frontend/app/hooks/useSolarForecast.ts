@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { API_BASE } from '../apiConfig';
+import { API_BASE, buildUrl } from '../apiConfig';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export interface SolarForecastRequest {
@@ -70,7 +70,7 @@ export const useSolarForecast = (): UseSolarForecastReturn => {
         subscriptionId = await AsyncStorage.getItem('routecast_subscription_id');
       }
 
-      const response = await fetch(`${API_BASE}/pro/solar-forecast`, {
+      const response = await fetch(buildUrl('pro/solar-forecast'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -5,7 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import { API_BASE } from '../lib/apiConfig';
+import { API_BASE, buildUrl } from '../lib/apiConfig';
 
 interface RVDealership {
   name: string;
@@ -66,7 +66,7 @@ export default function RVDealershipScreen() {
     setDealerships([]);
     setError('');
     try {
-      const resp = await axios.post(`${API_BASE}/rv-dealerships/search`, {
+      const resp = await axios.post(buildUrl('rv-dealerships/search'), {
         latitude: lat,
         longitude: lon,
         radius_miles: 10,
