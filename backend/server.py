@@ -4360,7 +4360,6 @@ class TruckParkingResponse(BaseModel):
     spots: List[ParkingSpot]
 
 @api_router.post("/truck-parking/search", response_model=TruckParkingResponse)
-@api_router.post("/pro/truck-parking/search", response_model=TruckParkingResponse)
 async def search_truck_parking(request: TruckParkingRequest):
     """Find truck parking including rest areas and safe parking zones."""
     # TESTING: Paywalls disabled - require_premium(request.subscription_id, TRUCK_PARKING)
@@ -4494,7 +4493,6 @@ class TruckServiceResponse(BaseModel):
     services: List[TruckService]
 
 @api_router.post("/truck-services/search", response_model=TruckServiceResponse)
-@api_router.post("/pro/truck-services/search", response_model=TruckServiceResponse)
 async def search_truck_services(request: TruckServiceRequest):
     """Find truck repair shops, tire services, washes, and scales."""
     try:
@@ -4605,7 +4603,6 @@ class WeighStation(BaseModel):
 class WeighStationResponse(BaseModel):
     stations: List[WeighStation]
 
-@api_router.post("/pro/weigh-stations/search", response_model=WeighStationResponse)
 @api_router.post("/weigh-stations/search", response_model=WeighStationResponse)
 async def search_weigh_stations(request: WeighStationRequest):
     """Find weigh stations along highways."""
@@ -4693,7 +4690,6 @@ class TruckRestriction(BaseModel):
 class TruckRestrictionResponse(BaseModel):
     restrictions: List[TruckRestriction]
 
-@api_router.post("/pro/truck-restrictions/search", response_model=TruckRestrictionResponse)
 @api_router.post("/truck-restrictions/search", response_model=TruckRestrictionResponse)
 async def search_truck_restrictions(request: TruckRestrictionRequest):
     """Find roads with truck restrictions using OpenStreetMap."""
