@@ -87,9 +87,14 @@ interface HazardAlert {
   message: string;
   recommendation: string;
   countdown_text: string;
-  full_description?: string;
+  event?: string;
+  headline?: string;
   description?: string;
+  full_description?: string;
   instruction?: string;
+  areaDesc?: string;
+  onset?: string;
+  expires?: string;
   location_name?: string;
 }
 
@@ -420,7 +425,8 @@ export default function RouteScreen() {
     if (routeData.hazard_alerts?.length > 0) {
       parts.push(`${routeData.hazard_alerts.length} weather hazards along your route.`);
       routeData.hazard_alerts.slice(0, 3).forEach(alert => {
-        parts.push(`${alert.countdown_text}. ${alert.recommendation}`);
+        const title = alert.event || alert.headline || alert.message;
+        parts.push(`${title}. ${alert.countdown_text}. ${alert.recommendation}`);
       });
     }
     
@@ -827,7 +833,7 @@ export default function RouteScreen() {
         {activeTab === 'alerts' && (
           <View style={styles.alertsTab}>
             <Text style={styles.sectionTitle}>⚠️ Weather Alerts Along Route</Text>
-            <Text style={styles.sectionSubtitle}>Tap any alert to see full details</Text>
+            <Text style={styles.sectionSubtitle}>Tap any alert to see full National Weather Service details</Text>
             
             {routeData.hazard_alerts && routeData.hazard_alerts.length > 0 ? (
               routeData.hazard_alerts.map((alert, index) => {
@@ -857,8 +863,11 @@ export default function RouteScreen() {
                         color="#fff" 
                       />
                       <View style={styles.alertInfo}>
+                        <Text style={styles.alertMessage}>{alert.event || alert.headline || 'Weather Alert'}</Text>
+                        {alert.headline ? (
+                          <Text style={styles.alertSubhead}>{alert.headline}</Text>
+                        ) : null}
                         <Text style={styles.alertCountdown}>{alert.countdown_text}</Text>
-                        <Text style={styles.alertMessage}>{alert.message}</Text>
                       </View>
                       <Ionicons 
                         name={isExpanded ? "chevron-up" : "chevron-down"} 
@@ -871,18 +880,32 @@ export default function RouteScreen() {
                     {isExpanded && (
                       <View style={styles.alertExpandedContent}>
                         <View style={styles.alertFullDescription}>
-                          <Text style={styles.alertFullTitle}>Full Alert Details:</Text>
+                          <Text style={styles.alertFullTitle}>What is happening</Text>
                           <Text style={styles.alertFullText}>
-                            {alert.full_description || alert.description || 
-                             `This ${alert.message || 'weather alert'} is active for your route area. ` +
-                             `Exercise caution and monitor local weather updates. ` +
-                             `Conditions may include reduced visibility, slippery roads, or other hazards.`}
+                            {alert.description || alert.full_description || 'No description provided.'}
                           </Text>
                         </View>
+
+                        {alert.areaDesc ? (
+                          <View style={styles.alertMetaRow}>
+                            <Ionicons name="map" size={16} color="#a1a1aa" />
+                            <Text style={styles.alertMetaText}>Affected areas: {alert.areaDesc}</Text>
+                          </View>
+                        ) : null}
+
+                        {(alert.onset || alert.expires) && (
+                          <View style={styles.alertMetaRow}>
+                            <Ionicons name="time" size={16} color="#a1a1aa" />
+                            <Text style={styles.alertMetaText}>
+                              Valid {alert.onset ? format(parseISO(alert.onset), 'MMM d, h:mma') : 'now'}
+                              {alert.expires ? ` → ${format(parseISO(alert.expires), 'MMM d, h:mma')}` : ''}
+                            </Text>
+                          </View>
+                        )}
                         
                         {alert.instruction && (
                           <View style={styles.alertInstructionBox}>
-                            <Text style={styles.alertInstructionTitle}>📋 What To Do:</Text>
+                            <Text style={styles.alertInstructionTitle}>📋 What To Do</Text>
                             <Text style={styles.alertInstructionText}>{alert.instruction}</Text>
                           </View>
                         )}
@@ -896,6 +919,22 @@ export default function RouteScreen() {
                     
                     {!isExpanded && (
                       <>
+                        <View style={styles.alertBriefRow}>
+                          {alert.areaDesc ? (
+                            <Text style={styles.alertBriefText}>Areas: {alert.areaDesc}</Text>
+                          ) : null}
+                          {(alert.onset || alert.expires) ? (
+                            <Text style={styles.alertBriefText}>
+                              {alert.onset ? format(parseISO(alert.onset), 'MMM d, h:mma') : 'Now'}
+                              {alert.expires ? ` → ${format(parseISO(alert.expires), 'MMM d, h:mma')}` : ''}
+                            </Text>
+                          ) : null}
+                        </View>
+                        {alert.description || alert.full_description ? (
+                          <Text style={styles.alertSnippet} numberOfLines={2}>
+                            {alert.description || alert.full_description}
+                          </Text>
+                        ) : null}
                         <View style={styles.alertAction}>
                           <Ionicons name="checkmark-circle" size={16} color="#22c55e" />
                           <Text style={styles.alertRec}>{alert.recommendation}</Text>
@@ -1467,6 +1506,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 2,
   },
+  alertSubhead: {
+    color: '#ffe4e6',
+    fontSize: 11,
+    marginTop: 2,
+  },
   alertExpandedContent: {
     marginTop: 12,
     paddingTop: 12,
@@ -1504,6 +1548,18 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
   },
+  alertMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginBottom: 8,
+  },
+  alertMetaText: {
+    color: '#d4d4d8',
+    fontSize: 12,
+    flex: 1,
+    lineHeight: 18,
+  },
   alertAction: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -1522,6 +1578,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginTop: 10,
+  },
+  alertBriefRow: {
+    flexDirection: 'column',
+    gap: 4,
+    marginTop: 8,
+  },
+  alertBriefText: {
+    color: '#e5e7eb',
+    fontSize: 11,
+  },
+  alertSnippet: {
+    color: '#fff',
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 6,
   },
   alertDistance: {
     color: 'rgba(255,255,255,0.7)',

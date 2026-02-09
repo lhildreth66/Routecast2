@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { format, parseISO } from 'date-fns';
 
 interface HazardAlert {
   type: string;
@@ -18,9 +19,14 @@ interface HazardAlert {
   message: string;
   recommendation: string;
   countdown_text: string;
+  event?: string;
+  headline?: string;
   full_description?: string;
   description?: string;
   instruction?: string;
+  areaDesc?: string;
+  onset?: string;
+  expires?: string;
   location_name?: string;
 }
 
@@ -34,6 +40,13 @@ export default function WeatherAlertsScreen() {
   const bridgeAlertsEnabled = params.bridgeAlertsEnabled === 'true';
   
   const [expandedCards, setExpandedCards] = useState(new Set<number>());
+
+  const formatTimeRange = (start?: string, end?: string) => {
+    if (!start && !end) return null;
+    const startText = start ? format(parseISO(start), 'MMM d, h:mma') : 'Now';
+    const endText = end ? format(parseISO(end), 'MMM d, h:mma') : 'Until further notice';
+    return `${startText} → ${endText}`;
+  };
 
   const toggleCardExpand = (index: number) => {
     const newExpanded = new Set(expandedCards);
@@ -85,7 +98,7 @@ export default function WeatherAlertsScreen() {
         {/* Weather Alerts Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>⚠️ Weather Hazards on This Route</Text>
-          <Text style={styles.sectionSubtitle}>Each alert shows the specific location along your route</Text>
+          <Text style={styles.sectionSubtitle}>Each alert shows the specific NWS details for your route</Text>
         
           {routeData.hazard_alerts && routeData.hazard_alerts.length > 0 ? (
             routeData.hazard_alerts.map((alert: HazardAlert, index: number) => {
@@ -118,7 +131,10 @@ export default function WeatherAlertsScreen() {
                       {alert.location_name && (
                         <Text style={styles.alertLocation}>📍 {alert.location_name}</Text>
                       )}
-                      <Text style={styles.alertMessage}>{alert.message}</Text>
+                      <Text style={styles.alertMessage}>{alert.event || 'Weather Alert'}</Text>
+                      {alert.headline ? (
+                        <Text style={styles.alertSubhead}>{alert.headline}</Text>
+                      ) : null}
                       <Text style={styles.alertCountdown}>{alert.countdown_text}</Text>
                     </View>
                     <Ionicons 
@@ -132,18 +148,31 @@ export default function WeatherAlertsScreen() {
                   {isExpanded && (
                     <View style={styles.alertExpandedContent}>
                       <View style={styles.alertFullDescription}>
-                        <Text style={styles.alertFullTitle}>Full Alert Details:</Text>
+                        <Text style={styles.alertFullTitle}>What is happening</Text>
                         <Text style={styles.alertFullText}>
-                          {alert.full_description || alert.description || 
-                           `This ${alert.message || 'weather alert'} is active for your route area. ` +
-                           `Exercise caution and monitor local weather updates. ` +
-                           `Conditions may include reduced visibility, slippery roads, or other hazards.`}
+                          {alert.description || alert.full_description || 'No description provided.'}
                         </Text>
                       </View>
+
+                      {alert.areaDesc ? (
+                        <View style={styles.alertMetaRow}>
+                          <Ionicons name="map" size={16} color="#a1a1aa" />
+                          <Text style={styles.alertMetaText}>Affected areas: {alert.areaDesc}</Text>
+                        </View>
+                      ) : null}
+
+                      {formatTimeRange(alert.onset as string | undefined, alert.expires as string | undefined) && (
+                        <View style={styles.alertMetaRow}>
+                          <Ionicons name="time" size={16} color="#a1a1aa" />
+                          <Text style={styles.alertMetaText}>
+                            Valid {formatTimeRange(alert.onset as string | undefined, alert.expires as string | undefined)}
+                          </Text>
+                        </View>
+                      )}
                       
                       {alert.instruction && (
                         <View style={styles.alertInstructionBox}>
-                          <Text style={styles.alertInstructionTitle}>📋 What To Do:</Text>
+                          <Text style={styles.alertInstructionTitle}>📋 What To Do</Text>
                           <Text style={styles.alertInstructionText}>{alert.instruction}</Text>
                         </View>
                       )}
@@ -155,18 +184,33 @@ export default function WeatherAlertsScreen() {
                     </View>
                   )}
                   
-                  {!isExpanded && (
-                    <>
-                      <View style={styles.alertAction}>
-                        <Ionicons name="checkmark-circle" size={16} color="#22c55e" />
-                        <Text style={styles.alertRec}>{alert.recommendation}</Text>
-                      </View>
-                      <View style={styles.alertMeta}>
-                        <Text style={styles.alertDistance}>{Math.round(alert.distance_miles)} mi from start</Text>
-                        <Text style={styles.alertEta}>ETA: {alert.eta_minutes} min</Text>
-                      </View>
-                    </>
-                  )}
+                    {!isExpanded && (
+                      <>
+                        <View style={styles.alertBriefRow}>
+                          {alert.areaDesc ? (
+                            <Text style={styles.alertBriefText}>Areas: {alert.areaDesc}</Text>
+                          ) : null}
+                          {formatTimeRange(alert.onset as string | undefined, alert.expires as string | undefined) && (
+                            <Text style={styles.alertBriefText}>
+                              Valid {formatTimeRange(alert.onset as string | undefined, alert.expires as string | undefined)}
+                            </Text>
+                          )}
+                        </View>
+                        {alert.description || alert.full_description ? (
+                          <Text style={styles.alertSnippet} numberOfLines={2}>
+                            {alert.description || alert.full_description}
+                          </Text>
+                        ) : null}
+                        <View style={styles.alertAction}>
+                          <Ionicons name="checkmark-circle" size={16} color="#22c55e" />
+                          <Text style={styles.alertRec}>{alert.recommendation}</Text>
+                        </View>
+                        <View style={styles.alertMeta}>
+                          <Text style={styles.alertDistance}>{Math.round(alert.distance_miles)} mi from start</Text>
+                          <Text style={styles.alertEta}>ETA: {alert.eta_minutes} min</Text>
+                        </View>
+                      </>
+                    )}
                   
                   {isExpanded && (
                     <View style={styles.alertMeta}>
@@ -364,6 +408,11 @@ const styles = StyleSheet.create({
     color: '#fff',
     marginBottom: 4,
   },
+  alertSubhead: {
+    fontSize: 13,
+    color: '#e5e7eb',
+    marginBottom: 4,
+  },
   alertLocation: {
     fontSize: 14,
     fontWeight: '600',
@@ -396,6 +445,18 @@ const styles = StyleSheet.create({
     padding: 12,
     marginBottom: 12,
   },
+  alertMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginBottom: 8,
+  },
+  alertMetaText: {
+    color: '#d4d4d8',
+    fontSize: 12,
+    flex: 1,
+    lineHeight: 18,
+  },
   alertInstructionTitle: {
     fontSize: 14,
     fontWeight: '600',
@@ -421,6 +482,21 @@ const styles = StyleSheet.create({
   alertMeta: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+  },
+  alertBriefRow: {
+    flexDirection: 'column',
+    gap: 4,
+    marginBottom: 8,
+  },
+  alertBriefText: {
+    color: '#e5e7eb',
+    fontSize: 12,
+  },
+  alertSnippet: {
+    color: '#fff',
+    fontSize: 13,
+    lineHeight: 20,
+    marginBottom: 8,
   },
   alertDistance: {
     fontSize: 13,
