@@ -1868,7 +1868,16 @@ async def root():
 
 @api_router.get("/health")
 async def health_check():
-    return {"ok": True, "time": datetime.utcnow().isoformat()}
+    sha = os.getenv("RENDER_GIT_COMMIT", "unknown")
+    branch = os.getenv("RENDER_GIT_BRANCH", "unknown")
+    service = os.getenv("RENDER_SERVICE_NAME", "unknown")
+    return {
+        "ok": True,
+        "time": datetime.utcnow().isoformat(),
+        "sha": sha,
+        "branch": branch,
+        "service": service,
+    }
 
 @api_router.post("/route/weather", response_model=RouteWeatherResponse)
 async def get_route_weather(request: RouteRequest):
