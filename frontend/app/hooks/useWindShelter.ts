@@ -87,7 +87,7 @@ export const useWindShelter = (): UseWindShelterReturn => {
       }
 
       // Call API endpoint for wind shelter recommendation
-      const response = await fetch(`${API_BASE}/api/pro/wind-shelter/orientation`, {
+      const response = await fetch(`${API_BASE}/pro/wind-shelter/orientation`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

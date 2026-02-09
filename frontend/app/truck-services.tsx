@@ -80,7 +80,7 @@ export default function TruckServicesScreen() {
     setServices([]);
     setError('');
     try {
-      const resp = await axios.post(`${API_BASE}/api/truck-services/search`, {
+      const resp = await axios.post(`${API_BASE}/truck-services/search`, {
         latitude: parseFloat(latitude),
         longitude: parseFloat(longitude),
         radius_miles: parseInt(searchRadius, 10),

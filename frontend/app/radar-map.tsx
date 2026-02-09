@@ -68,8 +68,8 @@ export default function RadarMapScreen() {
       // Fetch alerts from backend if available
       if (API_BASE) {
         try {
-          console.log('[RadarMap] Fetching alerts from:', `${API_BASE}/api/radar/alerts/map`);
-          const response = await axios.get(`${API_BASE}/api/radar/alerts/map`, { timeout: 10000 });
+          console.log('[RadarMap] Fetching alerts from:', `${API_BASE}/radar/alerts/map`);
+          const response = await axios.get(`${API_BASE}/radar/alerts/map`, { timeout: 10000 });
           console.log('[RadarMap] Alerts response:', response.status, response.data?.alerts?.length || 0, 'alerts');
           setAlerts(response.data.alerts || []);
         } catch (alertErr: any) {

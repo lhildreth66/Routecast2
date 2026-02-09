@@ -79,7 +79,7 @@ export default function TruckRestrictionsScreen() {
     setRestrictions([]);
     setError('');
     try {
-      const resp = await axios.post(`${API_BASE}/api/truck-restrictions/search`, {
+      const resp = await axios.post(`${API_BASE}/truck-restrictions/search`, {
         latitude: parseFloat(latitude),
         longitude: parseFloat(longitude),
         radius_miles: parseInt(searchRadius, 10),

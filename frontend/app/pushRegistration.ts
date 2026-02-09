@@ -77,7 +77,7 @@ const doRegister = async () => {
     await ensureAndroidChannel();
     await AsyncStorage.setItem('expoPushToken', token);
 
-    const url = `${API_BASE}/api/notifications/register`;
+    const url = `${API_BASE}/notifications/register`;
     log('registering token with backend', { url });
     await axios.post(url, {
       expoPushToken: token,

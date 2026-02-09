@@ -46,7 +46,7 @@ export const useSolarForecast = (): UseSolarForecastReturn => {
     setError(null);
 
     try {
-      const response = await fetch(`${API_BASE}/api/solar-forecast`, {
+      const response = await fetch(`${API_BASE}/solar-forecast`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

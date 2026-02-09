@@ -404,7 +404,7 @@ export default function RouteScreen() {
     
     try {
       const routeContext = routeData ? `${routeData.origin} to ${routeData.destination}, ${routeData.road_condition_summary}` : null;
-      const response = await axios.post(`${API_BASE}/api/chat`, {
+      const response = await axios.post(`${API_BASE}/chat`, {
         message: msgToSend,
         route_context: routeContext
       });

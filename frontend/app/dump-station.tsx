@@ -94,7 +94,7 @@ export default function DumpStationScreen() {
     setStations([]);
     setError('');
     try {
-      const resp = await axios.post(`${API_BASE}/api/dump-stations/search`, {
+      const resp = await axios.post(`${API_BASE}/dump-stations/search`, {
         latitude: parseFloat(latitude),
         longitude: parseFloat(longitude),
         radius_miles: parseInt(searchRadius, 10),

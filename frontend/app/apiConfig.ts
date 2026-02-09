@@ -1,26 +1,68 @@
 import axios from 'axios';
+import Constants from 'expo-constants';
 
-// Determine API base URL with strict validation
-// Priority: 1) EAS build env
-const getApiBase = (): string => {
-  // Only use the EAS environment variable (set in eas.json / .env)
-  const apiBase = process.env.EXPO_PUBLIC_BACKEND_URL;
-  
-  // REQUIRE a valid backend URL; no fallback to avoid misrouting traffic
-  if (!apiBase) {
-    const errorMsg = '❌ CRITICAL: No backend URL configured! Set EXPO_PUBLIC_BACKEND_URL in your env (.env or eas.json).';
-    console.error('[apiConfig]', errorMsg);
-    throw new Error(errorMsg);
-  }
-  
-  return apiBase;
+const DEFAULT_API_BASE = 'https://routecast-backend.onrender.com';
+
+type ApiBaseResolution = {
+  base: string;
+  source: string;
+  error?: string;
 };
 
-export const API_BASE = getApiBase();
-export const API_BASE_SOURCE = process.env.EXPO_PUBLIC_BACKEND_URL ? 'env:EXPO_PUBLIC_BACKEND_URL' : 'missing';
-export const API_BASE_ERROR = !API_BASE ? 'No backend URL configured' : '';
+const normalize = (value?: string | null): string => (typeof value === 'string' ? value.trim() : '');
 
-console.log('[apiConfig] API_BASE resolved', { base: API_BASE, source: API_BASE_SOURCE });
+const ensureApiSuffix = (base: string): string => {
+  // Remove trailing slashes to normalize, then ensure single /api suffix
+  const stripped = base.replace(/\/+$/, '');
+  if (stripped.toLowerCase().endsWith('/api')) {
+    return stripped;
+  }
+  return `${stripped}/api`;
+};
+
+const resolveApiBase = (): ApiBaseResolution => {
+  const envBase = normalize(process.env.EXPO_PUBLIC_BACKEND_URL);
+  const configBase = normalize(
+    // Supports both expoConfig (dev/build) and manifest (runtime) shapes
+    (Constants?.expoConfig?.extra as any)?.API_BASE || (Constants?.manifest?.extra as any)?.API_BASE
+  );
+
+  const candidates = [
+    { base: envBase, source: 'env:EXPO_PUBLIC_BACKEND_URL' },
+    { base: configBase, source: 'config:extra.API_BASE' },
+    { base: DEFAULT_API_BASE, source: 'fallback:render-default' },
+  ];
+
+  for (const candidate of candidates) {
+    if (candidate.base && /^https?:\/\//.test(candidate.base)) {
+      const resolved = ensureApiSuffix(candidate.base);
+      const error = candidate.source.startsWith('fallback')
+        ? 'Using default backend URL; env/config not set.'
+        : '';
+      return { base: resolved, source: candidate.source, error };
+    }
+  }
+
+  const resolved = ensureApiSuffix(DEFAULT_API_BASE);
+  return {
+    base: resolved,
+    source: 'fallback:render-default',
+    error: 'Using default backend URL; no valid candidate found.',
+  };
+};
+
+const apiBaseResolution = resolveApiBase();
+
+export const API_BASE = apiBaseResolution.base;
+export const API_BASE_SOURCE = apiBaseResolution.source;
+export const API_BASE_ERROR = apiBaseResolution.error || '';
+
+console.log('[apiConfig] API_BASE resolved', {
+  base: API_BASE,
+  source: API_BASE_SOURCE,
+  error: API_BASE_ERROR || 'none',
+});
+console.log(`[api] API_BASE=${API_BASE}`);
 
 // Global fetch logging wrapper for network triage
 if (typeof global !== 'undefined' && typeof global.fetch === 'function') {

@@ -107,13 +107,13 @@ export default function CampsiteIndexScreen() {
       let response;
       if (useAutoMode) {
         // Auto mode: fetch real data from backend
-        response = await axios.post(`${API_BASE}/api/campsite-index/auto`, {
+        response = await axios.post(`${API_BASE}/campsite-index/auto`, {
           latitude: parseFloat(latitude),
           longitude: parseFloat(longitude),
         });
       } else {
         // Manual mode: use user inputs
-        response = await axios.post(`${API_BASE}/api/campsite-index`, {
+        response = await axios.post(`${API_BASE}/campsite-index`, {
           wind_gust_mph: parseFloat(windGustMph),
           shade_score: parseFloat(shadeScore),
           slope_pct: parseFloat(slopePct),

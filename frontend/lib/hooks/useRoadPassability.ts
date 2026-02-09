@@ -52,7 +52,7 @@ export const useRoadPassability = (): UseRoadPassabilityReturn => {
     setError(null);
 
     try {
-      const response = await fetch(`${API_BASE}/api/road-passability`, {
+      const response = await fetch(`${API_BASE}/road-passability`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -78,7 +78,7 @@ export default function SolarForecastScreen() {
 
       const totalWatts = parseInt(panelWatts, 10) * parseInt(numPanels, 10);
 
-      const resp = await axios.post(`${API_BASE}/api/solar-forecast`, {
+      const resp = await axios.post(`${API_BASE}/solar-forecast`, {
         lat: parseFloat(latitude),
         lon: parseFloat(longitude),
         date_range: dates,

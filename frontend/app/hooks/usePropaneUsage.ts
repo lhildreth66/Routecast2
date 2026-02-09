@@ -82,7 +82,7 @@ export const usePropaneUsage = (): UsePropaneUsageReturn => {
       }
 
       // Call API endpoint
-      const response = await fetch(`${API_BASE}/api/pro/propane-usage`, {
+      const response = await fetch(`${API_BASE}/pro/propane-usage`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -54,7 +54,7 @@ export const useWindShelter = (): UseWindShelterReturn => {
     setError(null);
 
     try {
-      const response = await fetch(`${API_BASE}/api/wind-shelter/orientation`, {
+      const response = await fetch(`${API_BASE}/wind-shelter/orientation`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

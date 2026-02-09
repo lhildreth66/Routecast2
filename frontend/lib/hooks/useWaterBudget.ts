@@ -51,7 +51,7 @@ export const useWaterBudget = (): UseWaterBudgetReturn => {
     setError(null);
 
     try {
-      const response = await fetch(`${API_BASE}/api/water-budget`, {
+      const response = await fetch(`${API_BASE}/water-budget`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

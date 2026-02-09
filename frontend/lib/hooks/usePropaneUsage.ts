@@ -49,7 +49,7 @@ export const usePropaneUsage = (): UsePropaneUsageReturn => {
     setError(null);
 
     try {
-      const response = await fetch(`${API_BASE}/api/propane-usage`, {
+      const response = await fetch(`${API_BASE}/propane-usage`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -74,7 +74,7 @@ export const useRoadPassability = (): UseRoadPassabilityReturn => {
         subscriptionId = await AsyncStorage.getItem('routecast_subscription_id');
       }
 
-      const response = await fetch(`${API_BASE}/api/pro/road-passability`, {
+      const response = await fetch(`${API_BASE}/pro/road-passability`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

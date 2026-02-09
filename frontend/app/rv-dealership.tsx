@@ -66,7 +66,7 @@ export default function RVDealershipScreen() {
     setDealerships([]);
     setError('');
     try {
-      const resp = await axios.post(`${API_BASE}/api/rv-dealerships/search`, {
+      const resp = await axios.post(`${API_BASE}/rv-dealerships/search`, {
         latitude: lat,
         longitude: lon,
         radius_miles: 10,

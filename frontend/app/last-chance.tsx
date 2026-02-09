@@ -75,7 +75,7 @@ export default function LastChanceScreen() {
     setSupplies([]);
     setError('');
     try {
-      const resp = await axios.post(`${API_BASE}/api/last-chance/search`, {
+      const resp = await axios.post(`${API_BASE}/last-chance/search`, {
         latitude: parseFloat(latitude),
         longitude: parseFloat(longitude),
         radius_miles: parseInt(searchRadius, 10),

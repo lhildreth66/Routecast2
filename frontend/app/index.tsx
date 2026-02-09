@@ -94,6 +94,7 @@ export default function HomeScreen() {
   const [recentRoutes, setRecentRoutes] = useState<SavedRoute[]>([]);
   const [favoriteRoutes, setFavoriteRoutes] = useState<SavedRoute[]>([]);
   const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
+  const [favoriteSignatures, setFavoriteSignatures] = useState<Set<string>>(new Set());
   const [showFavorites, setShowFavorites] = useState(false);
   const [saveMessage, setSaveMessage] = useState('');
   const [pushToken, setPushToken] = useState<string | null>(null);
@@ -331,7 +332,7 @@ export default function HomeScreen() {
 
         pushDebugLog(`[push] saving token to backend token=${token}`);
         try {
-          const response = await axios.post(`${API_BASE}/api/notifications/register`, {
+          const response = await axios.post(`${API_BASE}/notifications/register`, {
             expoPushToken: token,
             enabled: true,
           });
@@ -357,7 +358,7 @@ export default function HomeScreen() {
 
         if (pushToken) {
           try {
-            const disableResponse = await axios.post(`${API_BASE}/api/notifications/register`, {
+            const disableResponse = await axios.post(`${API_BASE}/notifications/register`, {
               expoPushToken: pushToken,
               enabled: false,
             });
@@ -390,7 +391,7 @@ export default function HomeScreen() {
 
     pushDebugLog(`[push] sending test notification for token ${pushToken}`);
     try {
-      const response = await axios.post(`${API_BASE}/api/notifications/send`, {});
+      const response = await axios.post(`${API_BASE}/notifications/send`, {});
       const msg = JSON.stringify(response?.data || {});
       setLastTestResult(msg);
       AsyncStorage.setItem('pushLastTestResult', msg).catch(() => {});
@@ -422,6 +423,9 @@ export default function HomeScreen() {
 
   const stopsKey = (list?: StopPoint[]) => JSON.stringify(list || []);
 
+  const routeSignature = (route: { origin: string; destination: string; stops?: StopPoint[] }) =>
+    `${route.origin.trim()}__${route.destination.trim()}__${stopsKey(route.stops || [])}`;
+
   const routesMatch = (route: SavedRoute, originText: string, destinationText: string, compareStops: StopPoint[]) => {
     return (
       route.origin === originText &&
@@ -445,7 +449,7 @@ export default function HomeScreen() {
 
     setAutocompleteLoading(true);
     try {
-      const response = await axios.get(`${API_BASE}/api/geocode/autocomplete`, {
+      const response = await axios.get(`${API_BASE}/geocode/autocomplete`, {
         params: { query, limit: 5 }
       });
       
@@ -513,7 +517,7 @@ export default function HomeScreen() {
     setChatMessage('');
     
     try {
-      const response = await axios.post(`${API_BASE}/api/chat`, {
+      const response = await axios.post(`${API_BASE}/chat`, {
         message: msgToSend,
         route_context: origin && destination ? `${origin} to ${destination}` : null
       });
@@ -602,7 +606,7 @@ export default function HomeScreen() {
 
   const fetchRecentRoutes = async () => {
     try {
-      const path = `${API_BASE}/api/routes/history`;
+      const path = `${API_BASE}/routes/history`;
       const response = await axios.get(path);
       setRecentRoutes(response.data.slice(0, 5));
     } catch (err) {
@@ -612,10 +616,11 @@ export default function HomeScreen() {
 
   const fetchFavoriteRoutes = async () => {
     try {
-      const path = `${API_BASE}/api/routes/favorites`;
+      const path = `${API_BASE}/routes/favorites`;
       const response = await axios.get(path);
       setFavoriteRoutes(response.data);
       setFavoriteIds(new Set(response.data.map((r: SavedRoute) => r.id)));
+      setFavoriteSignatures(new Set(response.data.map((r: SavedRoute) => routeSignature(r))));
     } catch (err) {
       console.warn('Error fetching favorites');
     }
@@ -666,7 +671,7 @@ export default function HomeScreen() {
       }
 
       console.log('[route-request]', {
-        endpoint: `${API_BASE}/api/route/weather`,
+        endpoint: `${API_BASE}/route/weather`,
         mode: resolvedMode,
         vehicleType,
         trucker_mode: truckerMode,
@@ -674,7 +679,7 @@ export default function HomeScreen() {
         boondockerPrefs,
       });
 
-      const response = await axios.post(`${API_BASE}/api/route/weather`, requestData);
+      const response = await axios.post(`${API_BASE}/route/weather`, requestData);
       
       // Cache the route for offline
       await AsyncStorage.setItem('lastRoute', JSON.stringify(response.data));
@@ -708,6 +713,16 @@ export default function HomeScreen() {
     }
 
     const currentlyFavorite = favoriteIds.has(route.id);
+    const signature = routeSignature(route);
+
+    console.log('[fav] pressed', {
+      id: route.id,
+      origin: route.origin,
+      destination: route.destination,
+      wasFavorited: currentlyFavorite,
+      newFavorited: !currentlyFavorite,
+      signature,
+    });
 
     // Optimistic UI update
     setFavoriteIds((prev) => {
@@ -716,6 +731,16 @@ export default function HomeScreen() {
         next.delete(route.id);
       } else {
         next.add(route.id);
+      }
+      return next;
+    });
+
+    setFavoriteSignatures((prev) => {
+      const next = new Set(prev);
+      if (currentlyFavorite) {
+        next.delete(signature);
+      } else {
+        next.add(signature);
       }
       return next;
     });
@@ -730,9 +755,9 @@ export default function HomeScreen() {
 
     try {
       if (currentlyFavorite) {
-        await axios.delete(`${API_BASE}/api/routes/favorites/${route.id}`);
+        await axios.delete(`${API_BASE}/routes/favorites/${route.id}`);
       } else {
-        await axios.post(`${API_BASE}/api/routes/favorites`, {
+        await axios.post(`${API_BASE}/routes/favorites`, {
           origin: route.origin,
           destination: route.destination,
           stops: route.stops || [],
@@ -741,6 +766,7 @@ export default function HomeScreen() {
 
       // Sync store with server response
       fetchFavoriteRoutes();
+      console.log('[fav] save result', { ok: true, status: 'success' });
     } catch (err) {
       // Revert optimistic change on error
       setFavoriteIds((prev) => {
@@ -749,6 +775,16 @@ export default function HomeScreen() {
           next.add(route.id);
         } else {
           next.delete(route.id);
+        }
+        return next;
+      });
+
+      setFavoriteSignatures((prev) => {
+        const next = new Set(prev);
+        if (currentlyFavorite) {
+          next.add(signature);
+        } else {
+          next.delete(signature);
         }
         return next;
       });
@@ -762,6 +798,7 @@ export default function HomeScreen() {
       });
 
       console.error('Error updating favorite:', err);
+      console.log('[fav] save result', { ok: false, status: 'error', body: String(err) });
       showToast('Failed to update favorite. Please try again.');
     }
   };
@@ -790,6 +827,17 @@ export default function HomeScreen() {
     };
 
     const currentlyFavorite = !!existing;
+    const signature = routeSignature({ origin: trimmedOrigin, destination: trimmedDestination, stops });
+
+    console.log('[fav] pressed', {
+      id: existing?.id || null,
+      origin: trimmedOrigin,
+      destination: trimmedDestination,
+      stopsCount: stops.length,
+      wasFavorited: currentlyFavorite,
+      newFavorited: !currentlyFavorite,
+      signature,
+    });
 
     // Optimistic state change
     setFavoriteIds((prev) => {
@@ -798,6 +846,16 @@ export default function HomeScreen() {
         next.delete(existing.id);
       } else {
         next.add(optimisticRoute.id);
+      }
+      return next;
+    });
+
+    setFavoriteSignatures((prev) => {
+      const next = new Set(prev);
+      if (currentlyFavorite) {
+        next.delete(signature);
+      } else {
+        next.add(signature);
       }
       return next;
     });
@@ -811,9 +869,9 @@ export default function HomeScreen() {
 
     try {
       if (currentlyFavorite && existing) {
-        await axios.delete(`${API_BASE}/api/routes/favorites/${existing.id}`);
+        await axios.delete(`${API_BASE}/routes/favorites/${existing.id}`);
       } else {
-        const res = await axios.post(`${API_BASE}/api/routes/favorites`, {
+        const res = await axios.post(`${API_BASE}/routes/favorites`, {
           origin: trimmedOrigin,
           destination: trimmedDestination,
           stops,
@@ -835,7 +893,9 @@ export default function HomeScreen() {
       }
 
       fetchFavoriteRoutes();
+      console.log('[fav] save result', { ok: true, status: 'success' });
     } catch (err) {
+      console.log('[fav] save result', { ok: false, status: 'error', body: String(err) });
       // Revert on failure
       setFavoriteIds((prev) => {
         const next = new Set(prev);
@@ -843,6 +903,16 @@ export default function HomeScreen() {
           next.add(existing.id);
         } else {
           next.delete(optimisticRoute.id);
+        }
+        return next;
+      });
+
+      setFavoriteSignatures((prev) => {
+        const next = new Set(prev);
+        if (currentlyFavorite) {
+          next.add(signature);
+        } else {
+          next.delete(signature);
         }
         return next;
       });
@@ -857,6 +927,51 @@ export default function HomeScreen() {
 
       console.error('Error saving favorite:', err);
       showToast('Failed to update favorite. Please try again.');
+    }
+  };
+
+  const removeFavorite = async (routeId: string) => {
+    const route = favoriteRoutes.find((r) => r.id === routeId);
+    const signature = route ? routeSignature(route) : null;
+
+    console.log('[fav] pressed remove', { id: routeId, signature });
+
+    setFavoriteRoutes((prev) => prev.filter((r) => r.id !== routeId));
+    setFavoriteIds((prev) => {
+      const next = new Set(prev);
+      next.delete(routeId);
+      return next;
+    });
+    if (signature) {
+      setFavoriteSignatures((prev) => {
+        const next = new Set(prev);
+        next.delete(signature);
+        return next;
+      });
+    }
+
+    try {
+      await axios.delete(`${API_BASE}/routes/favorites/${routeId}`);
+      fetchFavoriteRoutes();
+      console.log('[fav] save result', { ok: true, status: 'removed', id: routeId });
+    } catch (err) {
+      console.log('[fav] save result', { ok: false, status: 'remove-error', body: String(err) });
+      if (route) {
+        setFavoriteRoutes((prev) => [...prev, route]);
+        setFavoriteIds((prev) => {
+          const next = new Set(prev);
+          next.add(routeId);
+          return next;
+        });
+        if (signature) {
+          setFavoriteSignatures((prev) => {
+            const next = new Set(prev);
+            next.add(signature);
+            return next;
+          });
+        }
+      }
+      showToast('Failed to remove favorite. Please try again.');
     }
   };
 
@@ -1092,7 +1207,8 @@ export default function HomeScreen() {
   const currentFavoriteForInput = favoriteRoutes.find((r) =>
     routesMatch(r, trimmedOrigin, trimmedDestination, stops)
   );
-  const isCurrentRouteFavorite = !!currentFavoriteForInput;
+  const currentRouteSignature = routeSignature({ origin: trimmedOrigin, destination: trimmedDestination, stops });
+  const isCurrentRouteFavorite = favoriteSignatures.has(currentRouteSignature) || !!currentFavoriteForInput;
 
   return (
     <View style={styles.container}>
@@ -1327,6 +1443,8 @@ export default function HomeScreen() {
               <View style={styles.healthCard}>
                 <Text style={styles.healthTitle}>Health Check</Text>
                 <Text style={styles.healthLine}>API Base: {API_BASE}</Text>
+                <Text style={styles.healthLine}>Source: {API_BASE_SOURCE}</Text>
+                {API_BASE_ERROR ? <Text style={styles.healthLine}>Base Warning: {API_BASE_ERROR}</Text> : null}
                 <Text style={styles.healthLine}>Status: {healthStatus} ({healthStatusCode ?? 'n/a'})</Text>
                 <Text style={styles.healthLine}>Body: {healthSnippet || 'pending...'}</Text>
                 <TouchableOpacity style={styles.healthButton} onPress={runHealthCheck}>

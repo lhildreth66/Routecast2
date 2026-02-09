@@ -70,7 +70,7 @@ export const useSolarForecast = (): UseSolarForecastReturn => {
         subscriptionId = await AsyncStorage.getItem('routecast_subscription_id');
       }
 
-      const response = await fetch(`${API_BASE}/api/pro/solar-forecast`, {
+      const response = await fetch(`${API_BASE}/pro/solar-forecast`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

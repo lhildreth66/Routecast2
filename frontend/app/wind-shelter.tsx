@@ -68,7 +68,7 @@ export default function WindShelterScreen() {
     setResult(null);
     setError('');
     try {
-      const resp = await axios.post(`${API_BASE}/api/wind-shelter/orientation`, {
+      const resp = await axios.post(`${API_BASE}/wind-shelter/orientation`, {
         predominant_dir_deg: parseInt(windDirection, 10),
         gust_mph: parseInt(gustSpeed, 10),
       });

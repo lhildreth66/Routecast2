@@ -70,7 +70,7 @@ export default function CampPrepChat({ onClose }: CampPrepChatProps) {
 
       const subscriptionId = await AsyncStorage.getItem('routecast_subscription_id');
 
-      const response = await fetch(`${API_BASE}/api/chat/camp-prep`, {
+      const response = await fetch(`${API_BASE}/chat/camp-prep`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

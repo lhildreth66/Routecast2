@@ -55,7 +55,7 @@ export const useTerrainShade = (): UseTerrainShadeReturn => {
     setError(null);
 
     try {
-      const response = await fetch(`${API_BASE}/api/terrain/sun-path`, {
+      const response = await fetch(`${API_BASE}/terrain/sun-path`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

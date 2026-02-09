@@ -88,7 +88,7 @@ export const useTerrainShade = (): UseTerrainShadeReturn => {
       }
 
       // Call API endpoint for solar path
-      const response = await fetch(`${API_BASE}/api/pro/terrain/sun-path`, {
+      const response = await fetch(`${API_BASE}/pro/terrain/sun-path`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -78,7 +78,7 @@ export default function WeighStationsScreen() {
     setStations([]);
     setError('');
     try {
-      const resp = await axios.post(`${API_BASE}/api/weigh-stations/search`, {
+      const resp = await axios.post(`${API_BASE}/weigh-stations/search`, {
         latitude: parseFloat(latitude),
         longitude: parseFloat(longitude),
         radius_miles: parseInt(searchRadius, 10),

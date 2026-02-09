@@ -23,7 +23,7 @@ export default function WaterBudgetScreen() {
     setResult(null);
     setError('');
     try {
-      const resp = await axios.post(`${API_BASE}/api/water-budget`, {
+      const resp = await axios.post(`${API_BASE}/water-budget`, {
         fresh_gal: parseInt(freshGallons, 10),
         gray_gal: parseInt(grayGallons, 10),
         black_gal: parseInt(blackGallons, 10),

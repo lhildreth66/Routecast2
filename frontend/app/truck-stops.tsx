@@ -83,7 +83,7 @@ export default function TruckStopsScreen() {
     setStops([]);
     setError('');
     try {
-      const resp = await axios.post(`${API_BASE}/api/truck-stops/search`, {
+      const resp = await axios.post(`${API_BASE}/truck-stops/search`, {
         latitude: parseFloat(latitude),
         longitude: parseFloat(longitude),
         radius_miles: parseInt(searchRadius, 10),

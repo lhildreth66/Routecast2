@@ -81,7 +81,7 @@ export default function TruckParkingScreen() {
     setSpots([]);
     setError('');
     try {
-      const resp = await axios.post(`${API_BASE}/api/truck-parking/search`, {
+      const resp = await axios.post(`${API_BASE}/truck-parking/search`, {
         latitude: parseFloat(latitude),
         longitude: parseFloat(longitude),
         radius_miles: parseInt(searchRadius, 10),

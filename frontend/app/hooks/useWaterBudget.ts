@@ -86,7 +86,7 @@ export const useWaterBudget = (): UseWaterBudgetReturn => {
       }
 
       // Call API endpoint
-      const response = await fetch(`${API_BASE}/api/pro/water-budget`, {
+      const response = await fetch(`${API_BASE}/pro/water-budget`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
