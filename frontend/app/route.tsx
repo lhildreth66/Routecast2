@@ -235,6 +235,28 @@ const sampleRoutePoints = (waypoints: WaypointWeather[], intervalMiles = 8) => {
   return points;
 };
 
+const computeBBox = (points: { lat: number; lon: number }[]) => {
+  if (!points || points.length === 0) return undefined;
+  let minLat = Number.POSITIVE_INFINITY;
+  let maxLat = Number.NEGATIVE_INFINITY;
+  let minLon = Number.POSITIVE_INFINITY;
+  let maxLon = Number.NEGATIVE_INFINITY;
+
+  points.forEach((p) => {
+    if (typeof p.lat !== 'number' || typeof p.lon !== 'number') return;
+    minLat = Math.min(minLat, p.lat);
+    maxLat = Math.max(maxLat, p.lat);
+    minLon = Math.min(minLon, p.lon);
+    maxLon = Math.max(maxLon, p.lon);
+  });
+
+  if (!Number.isFinite(minLat) || !Number.isFinite(minLon) || !Number.isFinite(maxLat) || !Number.isFinite(maxLon)) {
+    return undefined;
+  }
+
+  return { min_lat: minLat, max_lat: maxLat, min_lon: minLon, max_lon: maxLon };
+};
+
 const formatDuration = (minutes: number): string => {
   const hours = Math.floor(minutes / 60);
   const mins = minutes % 60;
@@ -556,27 +578,43 @@ export default function RouteScreen() {
     const startMonitor = async () => {
       if (!routeData || !pushToken || monitorStartedRef.current) return;
       const samplePoints = sampleRoutePoints(routeData.waypoints || [], 8);
+      const routePoints = (routeData.waypoints || [])
+        .map((wp) => ({ lat: wp?.waypoint?.lat, lon: wp?.waypoint?.lon }))
+        .filter((p) => typeof p.lat === 'number' && typeof p.lon === 'number');
       const hasPolyline = typeof routeData.route_geometry === 'string' && routeData.route_geometry.length > 0;
       const hasSamples = samplePoints.length > 0;
-      if (!hasPolyline && !hasSamples) return;
+      const hasRoutePoints = routePoints.length > 0;
+      if (!hasPolyline && !hasSamples && !hasRoutePoints) return;
 
       monitorStartedRef.current = true;
       try {
+        const bbox = computeBBox(hasSamples ? samplePoints : routePoints);
         const payload: any = {
           route_id: routeData.id || 'route-monitor',
           push_token: pushToken,
+          origin: routeData.origin,
+          destination: routeData.destination,
+          waypoints: routeData.waypoints?.map((wp) => ({
+            lat: wp?.waypoint?.lat,
+            lon: wp?.waypoint?.lon,
+            name: wp?.waypoint?.name,
+          })),
+          bbox,
         };
 
         if (hasPolyline) {
           payload.route_polyline = routeData.route_geometry;
-        } else if (hasSamples) {
+        }
+        if (hasSamples) {
           payload.sample_points = samplePoints;
         }
+        if (hasRoutePoints) {
+          payload.route_points = routePoints;
+        }
 
-        console.warn('[route-monitor] start payload', payload);
-        await axios.post(buildUrl('notifications/route-monitor/start'), {
-          ...payload,
-        });
+        const url = buildUrl('notifications/route-monitor/start');
+        console.warn('[route-monitor] start payload', { url, payload });
+        await axios.post(url, payload);
       } catch (err) {
         const status = (err as any)?.response?.status;
         const detail = (err as any)?.response?.data;
@@ -589,7 +627,8 @@ export default function RouteScreen() {
         })();
         console.warn('[route-monitor] start failed', { status, detail: snippet, error: err });
         monitorStartedRef.current = false; // allow retry on next render
-        Alert.alert('Route Alerts', `Failed to start (${status || 'error'}): ${snippet || 'Please try again.'}`);
+        const message = `Failed to start (${status || 'error'}): ${snippet || 'Please try again.'}`;
+        Alert.alert('Route Alerts', message);
       }
     };
 
