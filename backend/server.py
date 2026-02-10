@@ -4034,7 +4034,7 @@ def _dedupe_and_limit(stops: List[OvernightStop], limit: int = 25) -> List[Overn
         return score
 
     for stop in stops:
-        key = (round(stop.latitude, 4), round(stop.longitude, 4))
+        key = (round(stop.latitude, 3), round(stop.longitude, 3))
         existing = seen.get(key)
         if existing:
             if _score(stop) > _score(existing):
