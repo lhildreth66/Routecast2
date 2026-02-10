@@ -252,6 +252,15 @@ class HazardAlert(BaseModel):
     recommendation: str
     countdown_text: str  # "Heavy rain in 27 minutes"
     location_name: Optional[str] = None  # Name/description of the location where alert occurs
+    event: Optional[str] = None
+    headline: Optional[str] = None
+    description: Optional[str] = None
+    full_description: Optional[str] = None
+    instruction: Optional[str] = None
+    areaDesc: Optional[str] = None
+    onset: Optional[str] = None
+    expires: Optional[str] = None
+    properties: Optional[Dict[str, Any]] = None
 
 class RestStop(BaseModel):
     name: str
@@ -1264,6 +1273,53 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
         distance = wp.waypoint.distance_from_start or 0
         eta_mins = wp.waypoint.eta_minutes or int(distance / 55 * 60)
         location_name = wp.waypoint.name or f"Mile {int(distance)}"
+
+        # Include any active NWS alerts with full detail fields
+        for nws in wp.alerts:
+            severity_raw = (nws.severity or "medium").lower()
+            severity = {
+                "extreme": "extreme",
+                "severe": "high",
+                "moderate": "medium",
+                "minor": "low",
+            }.get(severity_raw, severity_raw or "medium")
+
+            props = {
+                "event": nws.event,
+                "headline": nws.headline,
+                "description": nws.description,
+                "instruction": nws.instruction,
+                "areaDesc": nws.areas,
+                "onset": nws.onset,
+                "expires": nws.expires,
+                "effective": nws.effective,
+                "ends": nws.ends,
+                "urgency": nws.urgency,
+                "sent": nws.sent,
+                "issued": nws.issued,
+            }
+
+            alerts.append(
+                HazardAlert(
+                    type="nws",
+                    severity=severity,
+                    distance_miles=distance,
+                    eta_minutes=eta_mins,
+                    message=nws.headline or nws.event or "Weather Alert",
+                    recommendation="Follow NWS guidance and monitor local conditions",
+                    countdown_text=f"{nws.event or 'Alert'} near mile {int(distance)}",
+                    location_name=location_name,
+                    event=nws.event,
+                    headline=nws.headline,
+                    description=nws.description,
+                    full_description=nws.description,
+                    instruction=nws.instruction,
+                    areaDesc=nws.areas,
+                    onset=nws.onset,
+                    expires=nws.expires,
+                    properties=props,
+                )
+            )
         
         # Wind hazards
         wind_str = wp.weather.wind_speed or "0 mph"
