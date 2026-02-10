@@ -18,7 +18,7 @@ from typing import Dict, Any, Optional, List, Set
 
 import httpx
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ConfigDict
 from pymongo import MongoClient
 from exponent_server_sdk import PushClient, PushMessage
 
@@ -87,12 +87,21 @@ class RoutePoint(BaseModel):
 
 
 class StartRouteMonitorRequest(BaseModel):
-    userId: str
-    pushToken: str
-    routeId: str
-    route: List[RoutePoint]
-    sampleMiles: float = 10.0
-    maxPoints: int = 25
+    """Accept both camelCase and snake_case route monitor payloads."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    user_id: Optional[str] = Field(None, alias="userId")
+    push_token: Optional[str] = Field(None, alias="pushToken")
+    expo_push_token: Optional[str] = Field(None, alias="expoPushToken")
+    route_id: str = Field(..., alias="routeId")
+    route: Optional[List[RoutePoint]] = None
+    route_points: Optional[List[RoutePoint]] = Field(None, alias="routePoints")
+    sample_points: Optional[List[RoutePoint]] = Field(None, alias="samplePoints")
+    waypoints: Optional[List[Dict[str, Any]]] = None
+    route_polyline: Optional[str] = Field(None, alias="routePolyline")
+    sample_miles: float = Field(10.0, alias="sampleMiles")
+    max_points: int = Field(25, alias="maxPoints")
 
 
 class StopRouteMonitorRequest(BaseModel):
@@ -174,23 +183,78 @@ def _remove_token(token: str) -> None:
 @router.post("/route-monitor/start")
 async def start_route_monitor(request: StartRouteMonitorRequest):
     """Start (or replace) a critical route monitor for a user/token."""
+    from .route_alerts import sample_route_points, _compute_bbox, _decode_polyline_safe  # local import to avoid cycles
+
     service = get_route_alert_service()
+
+    # Normalize tokens and user
+    push_token = request.push_token or request.expo_push_token
+    user_id = request.user_id or push_token
+
+    if not push_token:
+        raise HTTPException(status_code=400, detail="push_token required")
+
+    # Collect candidate points
+    route_points: List[Dict[str, float]] = []
+    if request.route:
+        route_points.extend([{"lat": p.lat, "lon": p.lon, "name": p.name} for p in request.route])
+    if request.route_points:
+        route_points.extend([{"lat": p.lat, "lon": p.lon, "name": p.name} for p in request.route_points])
+    if request.waypoints:
+        for wp in request.waypoints:
+            lat = wp.get("lat")
+            lon = wp.get("lon")
+            if isinstance(lat, (int, float)) and isinstance(lon, (int, float)):
+                route_points.append({"lat": float(lat), "lon": float(lon)})
+
+    polyline_points = _decode_polyline_safe(request.route_polyline)
+    sample_points_payload = []
+    if request.sample_points:
+        sample_points_payload = [
+            {"lat": p.lat, "lon": p.lon}
+            for p in request.sample_points
+            if p.lat is not None and p.lon is not None
+        ]
+
+    # Prefer provided polyline, then provided samples, then provided route points
+    if not route_points and polyline_points:
+        route_points = polyline_points
+    if not sample_points_payload and route_points:
+        sample_points_payload = []  # will be generated below
+
+    # Finalize geometry
+    sample_miles = float(os.environ.get("ROUTE_ALERTS_SAMPLING_MILES", request.sample_miles))
+    max_points = int(os.environ.get("ROUTE_ALERTS_MAX_POINTS", request.max_points))
+
+    # Use provided samples when present, otherwise sample from route geometry
+    sample_points: List[Dict[str, float]] = sample_points_payload
+    if not sample_points:
+        if len(route_points) >= 2:
+            sample_points = sample_route_points(route_points, sample_miles=sample_miles, max_points=max_points)
+        else:
+            raise HTTPException(status_code=400, detail="route geometry required")
+
+    bbox = _compute_bbox(sample_points) or _compute_bbox(route_points)
+    if not bbox or not sample_points:
+        raise HTTPException(status_code=400, detail="route geometry required")
+
     try:
-        sample_miles = float(os.environ.get("ROUTE_ALERTS_SAMPLING_MILES", request.sampleMiles))
-        max_points = int(os.environ.get("ROUTE_ALERTS_MAX_POINTS", request.maxPoints))
         payload = service.start_monitor(
-            user_id=request.userId,
-            push_token=request.pushToken,
-            route_id=request.routeId,
-            route_points=[{"lat": p.lat, "lon": p.lon, "name": p.name} for p in request.route],
+            user_id=user_id,
+            push_token=push_token,
+            route_id=request.route_id,
+            route_points=route_points,
+            sample_points=sample_points,
+            route_polyline=request.route_polyline,
+            bbox=bbox,
             sample_miles=sample_miles,
             max_points=max_points,
         )
         return {
-            "monitorId": payload["monitor_id"],
-            "samplePoints": payload["sample_points"],
-            "count": len(payload["sample_points"]),
-            "routeSignature": payload["route_signature"],
+            "ok": True,
+            "monitor_id": payload["monitor_id"],
+            "points": len(payload["sample_points"]),
+            "route_signature": payload["route_signature"],
         }
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))

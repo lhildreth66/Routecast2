@@ -265,10 +265,20 @@ class RouteAlertService:
         push_token: str,
         route_points: List[Dict[str, float]],
         route_id: str,
+        sample_points: Optional[List[Dict[str, float]]] = None,
+        route_polyline: Optional[str] = None,
+        bbox: Optional[Dict[str, float]] = None,
         sample_miles: float = 10.0,
         max_points: int = 25,
     ) -> Dict[str, Any]:
-        samples = sample_route_points(route_points, sample_miles=sample_miles, max_points=max_points)
+        if sample_points:
+            samples = sample_points
+        else:
+            samples = sample_route_points(route_points, sample_miles=sample_miles, max_points=max_points)
+
+        if not samples:
+            raise ValueError("route geometry required")
+
         route_signature = self._route_signature(route_id, samples)
 
         now = self.now()
@@ -285,6 +295,9 @@ class RouteAlertService:
             "push_token": push_token,
             "route_points": route_points,
             "sample_points": samples,
+            "route_polyline": route_polyline,
+            "bbox": bbox or _compute_bbox(samples) or _compute_bbox(route_points),
+            "expo_push_token": push_token,
             "route_id": route_id,
             "route_signature": route_signature,
             "active": True,

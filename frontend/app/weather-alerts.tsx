@@ -11,6 +11,18 @@ import { useLocalSearchParams, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { format, parseISO } from 'date-fns';
 
+function pickAlertDetails(a: any): string {
+  const p = a?.properties ?? a ?? {};
+  const clean = (s?: string) => (typeof s === 'string' ? s.trim() : '');
+  return (
+    clean(p.description) ||
+    clean(p.instruction) ||
+    clean(p.summary) ||
+    clean(p.headline) ||
+    'Details not available for this alert.'
+  );
+}
+
 interface HazardAlert {
   type: string;
   severity: string;
@@ -113,21 +125,29 @@ export default function WeatherAlertsScreen() {
             routeData.hazard_alerts.map((alert: HazardAlert, index: number) => {
               const isExpanded = expandedCards.has(index);
               const props = alert.properties || {};
-              const eventTitle = alert.event || alert.headline || props.event || 'Weather Alert';
+              const eventName = alert.event || props.event || alert.headline || 'Weather Alert';
+              const isInfo = eventName === 'Special Weather Statement';
+              const eventTitle = isInfo ? 'Info' : eventName;
               const headline = alert.headline || props.headline;
               const description = alert.description || alert.full_description || props.description;
               const instruction = alert.instruction || props.instruction;
               const areaDesc = alert.areaDesc || props.areaDesc;
               const onset = alert.onset || props.onset;
               const expires = alert.expires || props.expires;
+              const detailText = pickAlertDetails(alert);
               
               return (
                 <TouchableOpacity 
                   key={index} 
                   style={[
                     styles.alertCard,
-                    alert.severity === 'extreme' ? styles.alertExtreme :
-                    alert.severity === 'high' ? styles.alertHigh : styles.alertMedium,
+                    isInfo
+                      ? styles.alertInfoCard
+                      : alert.severity === 'extreme'
+                      ? styles.alertExtreme
+                      : alert.severity === 'high'
+                      ? styles.alertHigh
+                      : styles.alertMedium,
                     isExpanded && styles.alertCardExpanded
                   ]}
                   onPress={() => toggleCardExpand(index)}
@@ -136,13 +156,18 @@ export default function WeatherAlertsScreen() {
                   <View style={styles.alertHeader}>
                     <Ionicons 
                       name={
-                        alert.type === 'ice' ? 'snow' :
-                        alert.type === 'rain' ? 'rainy' :
-                        alert.type === 'wind' ? 'cloudy' :
-                        'warning'
-                      } 
-                      size={28} 
-                      color="#fff" 
+                        isInfo
+                          ? 'information-circle'
+                          : alert.type === 'ice'
+                          ? 'snow'
+                          : alert.type === 'rain'
+                          ? 'rainy'
+                          : alert.type === 'wind'
+                          ? 'cloudy'
+                          : 'warning'
+                      }
+                      size={28}
+                      color={isInfo ? '#bfdbfe' : '#fff'}
                     />
                     <View style={styles.alertInfo}>
                       {alert.location_name && (
@@ -167,7 +192,7 @@ export default function WeatherAlertsScreen() {
                       <View style={styles.alertFullDescription}>
                         <Text style={styles.alertFullTitle}>What is happening</Text>
                           <Text style={styles.alertFullText}>
-                            {description || 'No description provided.'}
+                            {detailText}
                           </Text>
                       </View>
 
@@ -213,9 +238,9 @@ export default function WeatherAlertsScreen() {
                             </Text>
                           )}
                         </View>
-                        {description ? (
+                        {detailText ? (
                           <Text style={styles.alertSnippet} numberOfLines={2}>
-                            {description}
+                            {detailText}
                           </Text>
                         ) : null}
                         <View style={styles.alertAction}>
@@ -392,6 +417,10 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 12,
     borderLeftWidth: 4,
+  },
+  alertInfoCard: {
+    borderLeftColor: '#38bdf8',
+    backgroundColor: '#0f172a',
   },
   alertExtreme: {
     borderLeftColor: '#dc2626',

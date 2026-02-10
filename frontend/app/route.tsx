@@ -484,9 +484,18 @@ export default function RouteScreen() {
           ...payload,
         });
       } catch (err) {
-        console.log('[route-monitor] start failed', err);
+        const status = (err as any)?.response?.status;
+        const detail = (err as any)?.response?.data;
+        const snippet = typeof detail === 'string' ? detail.slice(0, 200) : (() => {
+          try {
+            return JSON.stringify(detail).slice(0, 200);
+          } catch {
+            return String(detail).slice(0, 200);
+          }
+        })();
+        console.warn('[route-monitor] start failed', { status, detail: snippet, error: err });
         monitorStartedRef.current = false; // allow retry on next render
-        Alert.alert('Route Alerts', 'Could not start route alerts. Please try again.');
+        Alert.alert('Route Alerts', `Failed to start (${status || 'error'}): ${snippet || 'Please try again.'}`);
       }
     };
 
