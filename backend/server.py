@@ -214,6 +214,7 @@ class RouteRequest(BaseModel):
     destination: str
     departure_time: Optional[str] = None  # ISO format datetime
     stops: Optional[List[StopPoint]] = []
+    push_token: Optional[str] = None
     vehicle_type: Optional[str] = None  # car, suv, truck, semi, rv, motorcycle, trailer
     mode: Optional[str] = None  # standard, boondocker, truck
     trucker_mode: Optional[bool] = False  # Enable trucker-specific warnings
@@ -1983,6 +1984,32 @@ async def get_route_weather(request: RouteRequest):
     total_waypoints = len(waypoints)
     tasks = [fetch_waypoint_weather(wp, i, total_waypoints, request.origin, request.destination) for i, wp in enumerate(waypoints)]
     waypoints_weather = await asyncio.gather(*tasks)
+
+    # Persist active route monitor for alerts if push token provided and DB available
+    if db is not None and request.push_token:
+        try:
+            monitor_doc = {
+                "push_token": request.push_token,
+                "waypoints": [
+                    {
+                        "lat": wp.lat,
+                        "lon": wp.lon,
+                        "name": wp.name,
+                        "distance_from_start": wp.distance_from_start,
+                        "eta_minutes": wp.eta_minutes,
+                        "arrival_time": wp.arrival_time,
+                    }
+                    for wp in waypoints
+                ],
+                "origin": request.origin,
+                "destination": request.destination,
+                "created_at": datetime.utcnow(),
+                "expires_at": datetime.utcnow() + timedelta(hours=24),
+                "active": True,
+            }
+            await db.route_monitors.insert_one(monitor_doc)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[route-weather] failed to persist route monitor: %s", exc)
     
     # Generate packing suggestions
     packing_suggestions = generate_packing_suggestions(list(waypoints_weather))

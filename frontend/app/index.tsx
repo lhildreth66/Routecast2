@@ -563,6 +563,7 @@ export default function HomeScreen() {
         origin: origin.trim(),
         destination: destination.trim(),
         stops: stops,
+        push_token: pushToken || undefined,
         vehicle_type: vehicleType,
         trucker_mode: truckerMode,
         mode: resolvedMode,
