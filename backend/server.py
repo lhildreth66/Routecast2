@@ -3956,7 +3956,9 @@ GENERIC_PLACEHOLDERS = {"store", "shop", "supermarket", "restaurant", "casino", 
 def _normalize_for_dedupe(name: Optional[str]) -> Optional[str]:
     if not name:
         return None
-    normalized = re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
+    lowered = name.lower()
+    lowered = re.sub(r"\bnear\s*\([^\)]*\)", "", lowered)
+    normalized = re.sub(r"[^a-z0-9]+", " ", lowered).strip()
     return normalized or None
 
 
