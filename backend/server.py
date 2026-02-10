@@ -3953,6 +3953,23 @@ async def _fetch_overpass_data(overpass_query: str, label: str) -> Dict[str, Any
 GENERIC_PLACEHOLDERS = {"store", "shop", "supermarket", "restaurant", "casino", "location"}
 
 
+def _normalize_for_dedupe(name: Optional[str]) -> Optional[str]:
+    if not name:
+        return None
+    normalized = re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
+    return normalized or None
+
+
+def _haversine_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    # Basic haversine for short distances; adequate for ~200 m merge window
+    radius_m = 6371000.0
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return radius_m * c
+
+
 def _normalize_name(tags: Dict[str, str], category: str, lat: float, lon: float) -> str:
     candidates = [
         tags.get("name"),
@@ -4033,6 +4050,7 @@ def _dedupe_and_limit(stops: List[OvernightStop], limit: int = 25) -> List[Overn
             score += 1
         return score
 
+    # First pass: grid bucket to collapse extremely close points (~100 m)
     for stop in stops:
         key = (round(stop.latitude, 3), round(stop.longitude, 3))
         existing = seen.get(key)
@@ -4042,8 +4060,45 @@ def _dedupe_and_limit(stops: List[OvernightStop], limit: int = 25) -> List[Overn
             continue
         seen[key] = stop
 
-    unique = sorted(seen.values(), key=lambda x: x.distance_miles)[:limit]
-    return unique
+    unique = sorted(seen.values(), key=lambda x: x.distance_miles)
+
+    # Second pass: merge by normalized name within ~200 m
+    merged: List[OvernightStop] = []
+
+    def _is_better(candidate: OvernightStop, current: OvernightStop) -> bool:
+        candidate_score = _score(candidate)
+        current_score = _score(current)
+        if candidate_score != current_score:
+            return candidate_score > current_score
+        # Tie-breaker: prefer more descriptive/longer names
+        cand_len = len(candidate.name or "")
+        curr_len = len(current.name or "")
+        if cand_len != curr_len:
+            return cand_len > curr_len
+        return False
+
+    for stop in unique:
+        norm_name = _normalize_for_dedupe(stop.name)
+        if not norm_name:
+            merged.append(stop)
+            continue
+
+        replaced = False
+        for idx, existing in enumerate(merged):
+            existing_norm = _normalize_for_dedupe(existing.name)
+            if existing_norm != norm_name:
+                continue
+
+            if _haversine_meters(stop.latitude, stop.longitude, existing.latitude, existing.longitude) <= 200.0:
+                if _is_better(stop, existing):
+                    merged[idx] = stop
+                replaced = True
+                break
+
+        if not replaced:
+            merged.append(stop)
+
+    return merged[:limit]
 
 
 def _empty_overpass_response(source: str = "overpass_unavailable") -> OvernightSearchResponse:
