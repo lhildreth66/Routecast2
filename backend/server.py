@@ -15,6 +15,7 @@ from io import BytesIO
 from datetime import datetime, timedelta
 import httpx
 import polyline
+from notifications.route_alerts import sample_route_points
 import asyncio
 from bridge_database import get_bridge_warnings
 from providers import get_providers
@@ -70,6 +71,21 @@ async def connect_to_mongo():
             client = None
             db = None
             return False
+
+
+        def _compute_bbox(points: List[Dict[str, float]]) -> Optional[Dict[str, float]]:
+            if not points:
+                return None
+            lats = [p.get("lat") for p in points if p.get("lat") is not None]
+            lons = [p.get("lon") for p in points if p.get("lon") is not None]
+            if not lats or not lons:
+                return None
+            return {
+                "min_lat": min(lats),
+                "max_lat": max(lats),
+                "min_lon": min(lons),
+                "max_lon": max(lons),
+            }
 
         logger.info("Initializing MongoDB client db=%s via %s", db_name, url_source)
         temp_client = AsyncIOMotorClient(mongo_url, serverSelectionTimeoutMS=5000)
@@ -302,6 +318,11 @@ class WeatherAlert(BaseModel):
     expires: Optional[str] = None
     effective: Optional[str] = None
     ends: Optional[str] = None
+    instruction: Optional[str] = None
+    summary: Optional[str] = None
+    urgency: Optional[str] = None
+    sent: Optional[str] = None
+    issued: Optional[str] = None
 
 class PackingSuggestion(BaseModel):
     item: str
@@ -957,6 +978,10 @@ async def get_noaa_alerts(lat: float, lon: float) -> List[WeatherAlert]:
             expires_str = alert.get('expires')
             effective_str = alert.get('effective')
             ends_str = alert.get('ends')
+            sent_str = alert.get('sent')
+            instruction = alert.get('instruction')
+            summary = alert.get('summary')
+            urgency = alert.get('urgency')
             
             # Determine if alert is currently active
             is_active = True
@@ -992,7 +1017,12 @@ async def get_noaa_alerts(lat: float, lon: float) -> List[WeatherAlert]:
                         headline=alert.get('headline', 'Weather Alert'),
                         severity=alert.get('severity', 'Unknown'),
                         event=alert.get('event', 'Weather Event'),
-                        description=alert.get('description', '')[:500],
+                            description=alert.get('description', '')[:500],
+                            instruction=instruction,
+                            summary=summary,
+                            urgency=urgency,
+                            sent=sent_str,
+                            issued=effective_str or sent_str,
                         areas=alert.get('areas'),
                         onset=onset_str,
                         expires=expires_str,
@@ -1988,26 +2018,41 @@ async def get_route_weather(request: RouteRequest):
     # Persist active route monitor for alerts if push token provided and DB available
     if db is not None and request.push_token:
         try:
-            monitor_doc = {
-                "push_token": request.push_token,
-                "waypoints": [
-                    {
-                        "lat": wp.lat,
-                        "lon": wp.lon,
-                        "name": wp.name,
-                        "distance_from_start": wp.distance_from_start,
-                        "eta_minutes": wp.eta_minutes,
-                        "arrival_time": wp.arrival_time,
-                    }
-                    for wp in waypoints
-                ],
-                "origin": request.origin,
-                "destination": request.destination,
-                "created_at": datetime.utcnow(),
-                "expires_at": datetime.utcnow() + timedelta(hours=24),
-                "active": True,
-            }
-            await db.route_monitors.insert_one(monitor_doc)
+            route_points = [
+                {
+                    "lat": wp.lat,
+                    "lon": wp.lon,
+                    "name": wp.name,
+                    "distance_from_start": wp.distance_from_start,
+                    "eta_minutes": wp.eta_minutes,
+                    "arrival_time": wp.arrival_time,
+                }
+                for wp in waypoints
+                if wp.lat is not None and wp.lon is not None
+            ]
+
+            if not route_points:
+                logger.warning("[route-weather] route monitor skipped: missing route points for token=%s", request.push_token[:16])
+            else:
+                sample_miles = float(os.environ.get("ROUTE_ALERTS_SAMPLING_MILES", 10.0))
+                max_points = int(os.environ.get("ROUTE_ALERTS_MAX_POINTS", 25))
+                sample_points = sample_route_points(route_points, sample_miles=sample_miles, max_points=max_points)
+                bbox = _compute_bbox(route_points)
+
+                monitor_doc = {
+                    "push_token": request.push_token,
+                    "expo_push_token": request.push_token,
+                    "route_points": route_points,
+                    "sample_points": sample_points,
+                    "route_polyline": route_geometry,
+                    "bbox": bbox,
+                    "origin": request.origin,
+                    "destination": request.destination,
+                    "created_at": datetime.utcnow(),
+                    "expires_at": datetime.utcnow() + timedelta(hours=24),
+                    "active": True,
+                }
+                await db.route_monitors.insert_one(monitor_doc)
         except Exception as exc:  # noqa: BLE001
             logger.warning("[route-weather] failed to persist route monitor: %s", exc)
     
