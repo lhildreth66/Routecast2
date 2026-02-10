@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -37,6 +37,58 @@ function pickAlertDetails(a: any): string {
     'Details not available for this alert.'
   );
 }
+
+const parseAlertTimestamp = (alert: HazardAlert): number | null => {
+  const props = alert.properties || {};
+  const candidates = [
+    props.sent,
+    props.issued,
+    props.effective,
+    alert.sent,
+    alert.issued,
+    alert.effective,
+    alert.onset,
+    props.onset,
+    alert.expires,
+    props.expires,
+    alert.ends,
+    props.ends,
+  ];
+
+  for (const ts of candidates) {
+    if (!ts) continue;
+    const ms = Date.parse(ts);
+    if (!Number.isNaN(ms)) {
+      return ms;
+    }
+  }
+  return null;
+};
+
+const filterRecentAlerts = (
+  alerts: HazardAlert[],
+  windowMs = 2 * 60 * 60 * 1000,
+  limit = 5
+): HazardAlert[] => {
+  const cutoff = Date.now() - windowMs;
+
+  return alerts
+    .map((alert) => ({ alert, timestamp: parseAlertTimestamp(alert) }))
+    .filter(({ timestamp }) => timestamp === null || timestamp >= cutoff)
+    .sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
+    .slice(0, limit)
+    .map(({ alert }) => alert);
+};
+
+const alertMatchesId = (alert: HazardAlert, target?: string | string[]): boolean => {
+  if (!target) return false;
+  const matchValue = Array.isArray(target) ? target[0] : target;
+  if (!matchValue) return false;
+  const normalized = String(matchValue).toLowerCase();
+  const props = alert.properties || {};
+  const candidates = [alert.id, alert.alert_id, props.id, alert.event, alert.headline];
+  return candidates.some((candidate) => candidate && String(candidate).toLowerCase() === normalized);
+};
 
 // Types
 interface RoadCondition {
@@ -96,6 +148,8 @@ interface SafetyScore {
 }
 
 interface HazardAlert {
+  id?: string;
+  alert_id?: string;
   type: string;
   severity: string;
   distance_miles: number;
@@ -111,8 +165,13 @@ interface HazardAlert {
   areaDesc?: string;
   onset?: string;
   expires?: string;
+  effective?: string;
+  ends?: string;
+  sent?: string;
+  issued?: string;
   location_name?: string;
   properties?: {
+    id?: string;
     event?: string;
     headline?: string;
     description?: string;
@@ -120,6 +179,10 @@ interface HazardAlert {
     areaDesc?: string;
     onset?: string;
     expires?: string;
+    effective?: string;
+    ends?: string;
+    sent?: string;
+    issued?: string;
   };
 }
 
@@ -413,6 +476,12 @@ export default function RouteScreen() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [pushToken, setPushToken] = useState<string | null>(null);
   const monitorStartedRef = useRef(false);
+  const alertIdParam = Array.isArray(params.alertId) ? params.alertId[0] : (params.alertId as string | undefined);
+  const requestedTab = Array.isArray(params.tab) ? params.tab[0] : (params.tab as string | undefined);
+  const filteredAlerts = useMemo(
+    () => filterRecentAlerts(routeData?.hazard_alerts || []),
+    [routeData?.hazard_alerts]
+  );
   
   // Radar map state
   const [showRadarMap, setShowRadarMap] = useState(false);
@@ -443,6 +512,25 @@ export default function RouteScreen() {
     }
     setLoading(false);
   }, [params.routeData]);
+
+  useEffect(() => {
+    if (requestedTab === 'alerts') {
+      setActiveTab('alerts');
+    }
+  }, [requestedTab]);
+
+  useEffect(() => {
+    if (!alertIdParam) return;
+    setActiveTab('alerts');
+    if (filteredAlerts.length === 0) return;
+    const targetIndex = filteredAlerts.findIndex((alert) => alertMatchesId(alert, alertIdParam));
+    if (targetIndex === -1) return;
+    setExpandedCards((prev) => {
+      const next = new Set(prev);
+      next.add(targetIndex + 1000);
+      return next;
+    });
+  }, [alertIdParam, filteredAlerts]);
 
   useEffect(() => {
     const loadPushToken = async () => {
@@ -532,9 +620,9 @@ export default function RouteScreen() {
     }
     
     // Hazards
-    if (routeData.hazard_alerts?.length > 0) {
-      parts.push(`${routeData.hazard_alerts.length} weather hazards along your route.`);
-      routeData.hazard_alerts.slice(0, 3).forEach(alert => {
+    if (filteredAlerts.length > 0) {
+      parts.push(`${filteredAlerts.length} weather hazards along your route.`);
+      filteredAlerts.slice(0, 3).forEach(alert => {
         const title = alert.event || alert.headline || alert.message;
         parts.push(`${title}. ${alert.countdown_text}. ${alert.recommendation}`);
       });
@@ -776,9 +864,9 @@ export default function RouteScreen() {
         >
           <Ionicons name="warning" size={18} color={activeTab === 'alerts' ? '#ef4444' : '#6b7280'} />
           <Text style={[styles.tabText, activeTab === 'alerts' && styles.tabTextActive]}>Alerts</Text>
-          {routeData.hazard_alerts?.length > 0 && (
+          {filteredAlerts.length > 0 && (
             <View style={styles.tabBadge}>
-              <Text style={styles.tabBadgeText}>{routeData.hazard_alerts.length}</Text>
+              <Text style={styles.tabBadgeText}>{filteredAlerts.length}</Text>
             </View>
           )}
         </TouchableOpacity>
@@ -945,8 +1033,8 @@ export default function RouteScreen() {
             <Text style={styles.sectionTitle}>⚠️ Weather Alerts Along Route</Text>
             <Text style={styles.sectionSubtitle}>Tap any alert to see full National Weather Service details</Text>
             
-            {routeData.hazard_alerts && routeData.hazard_alerts.length > 0 ? (
-              routeData.hazard_alerts.map((alert, index) => {
+            {filteredAlerts.length > 0 ? (
+              filteredAlerts.map((alert, index) => {
                 const isExpanded = expandedCards.has(index + 1000); // Use offset to differentiate from road cards
                 const props = alert.properties || {};
                 const eventName = alert.event || props.event || alert.headline || 'Weather Alert';

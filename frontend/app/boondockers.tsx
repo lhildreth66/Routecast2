@@ -9,6 +9,9 @@ export default function BoondockersScreen() {
   const features = [
     { id: 'checklist', icon: 'list', title: 'Camp Prep Checklist', route: '/camp-prep-checklist' },
     { id: 'camping', icon: 'bonfire', title: 'Free Camping Finder', route: '/free-camping' },
+    { id: 'casinos', icon: 'sparkles-outline', title: 'Casinos Near Me', route: '/casinos' },
+    { id: 'walmart', icon: 'cart-outline', title: 'Walmart Overnight', route: '/walmart-parking' },
+    { id: 'cracker', icon: 'restaurant-outline', title: 'Cracker Barrel', route: '/cracker-barrel' },
     { id: 'dump', icon: 'water-outline', title: 'Dump Station Finder', route: '/dump-station' },
     { id: 'supplies', icon: 'cart', title: 'Last Chance Supplies', route: '/last-chance' },
     { id: 'dealership', icon: 'car-sport', title: 'RV Dealerships', route: '/rv-dealership' },

@@ -1417,17 +1417,19 @@ export default function HomeScreen() {
                     ? `Push alerts on${pushPermissionStatus ? ` (perm: ${pushPermissionStatus})` : ''}`
                     : 'Push alerts off'}
                 </Text>
-                <TouchableOpacity
-                  style={[
-                    styles.pushTestButton,
-                    (!pushToken || !alertsEnabled || pushToggleLoading) && styles.pushTestButtonDisabled,
-                  ]}
-                  onPress={handleSendTestNotification}
-                  disabled={!pushToken || !alertsEnabled || pushToggleLoading}
-                >
-                  <Ionicons name="paper-plane-outline" size={16} color="#eab308" />
-                  <Text style={styles.pushTestButtonText}>Send Test Notification</Text>
-                </TouchableOpacity>
+                {__DEV__ && (
+                  <TouchableOpacity
+                    style={[
+                      styles.pushTestButton,
+                      (!pushToken || !alertsEnabled || pushToggleLoading) && styles.pushTestButtonDisabled,
+                    ]}
+                    onPress={handleSendTestNotification}
+                    disabled={!pushToken || !alertsEnabled || pushToggleLoading}
+                  >
+                    <Ionicons name="paper-plane-outline" size={16} color="#eab308" />
+                    <Text style={styles.pushTestButtonText}>Send Test Notification</Text>
+                  </TouchableOpacity>
+                )}
               </View>
 
               {showDebugPanels && (

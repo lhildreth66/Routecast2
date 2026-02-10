@@ -664,6 +664,30 @@ class DumpStationResponse(BaseModel):
     is_premium_locked: bool = False
     premium_message: Optional[str] = None
 
+# ----- Overnight Parking POI Models -----
+class OvernightStop(BaseModel):
+    name: str
+    category: str
+    distance_miles: float
+    latitude: float
+    longitude: float
+    address: Optional[str] = None
+    phone: Optional[str] = None
+    website: Optional[str] = None
+    hours: Optional[str] = None
+    notes: Optional[str] = None
+
+class OvernightSearchRequest(BaseModel):
+    latitude: float
+    longitude: float
+    radius_miles: int
+    subscription_id: Optional[str] = None
+
+class OvernightSearchResponse(BaseModel):
+    spots: List[OvernightStop]
+    is_premium_locked: bool = False
+    premium_message: Optional[str] = None
+
 # ----- Last Chance Supply Models -----
 class SupplyPoint(BaseModel):
     name: str
@@ -3886,6 +3910,203 @@ async def search_dump_stations(request: DumpStationRequest):
             status_code=503,
             detail="Dump station data service temporarily unavailable. The mapping service may be experiencing high load. Please try again in a few moments."
         )
+
+
+# ==================== Casinos Near Me ====================
+
+def _build_address(tags: Dict[str, Any]) -> Optional[str]:
+    street = tags.get("addr:street")
+    housenumber = tags.get("addr:housenumber")
+    city = tags.get("addr:city")
+    parts = [
+        " ".join([str(housenumber)]).strip() if housenumber else None,
+        street,
+        city,
+    ]
+    formatted = ", ".join([p for p in parts if p])
+    return formatted or None
+
+
+async def _fetch_overpass_data(overpass_query: str, label: str) -> Dict[str, Any]:
+    async with httpx.AsyncClient(timeout=45.0) as client:
+        overpass_urls = [
+            "https://overpass-api.de/api/interpreter",
+            "https://overpass.kumi.systems/api/interpreter",
+        ]
+        last_error = None
+        for url in overpass_urls:
+            try:
+                osm_response = await client.post(url, data=overpass_query)
+                osm_response.raise_for_status()
+                return osm_response.json()
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                logger.warning("%s - Overpass instance %s failed: %s", label, url, exc)
+                continue
+        raise last_error or Exception("All Overpass instances failed")
+
+
+def _build_stop(element: Dict[str, Any], request: OvernightSearchRequest, category: str, default_notes: str) -> Optional[OvernightStop]:
+    if element.get("type") == "node":
+        lat = element.get("lat")
+        lon = element.get("lon")
+    elif element.get("type") == "way" and "center" in element:
+        lat = element["center"].get("lat")
+        lon = element["center"].get("lon")
+    else:
+        return None
+
+    if lat is None or lon is None:
+        return None
+
+    distance_miles = math.sqrt((lat - request.latitude) ** 2 + (lon - request.longitude) ** 2) * 69.0
+    tags = element.get("tags", {})
+    name = tags.get("name") or tags.get("operator") or f"{category} near ({round(lat, 3)}, {round(lon, 3)})"
+    phone = tags.get("phone") or tags.get("contact:phone")
+    website = tags.get("website") or tags.get("contact:website") or tags.get("url")
+    hours = tags.get("opening_hours")
+    address = _build_address(tags)
+    notes = tags.get("description") or default_notes
+
+    return OvernightStop(
+        name=name,
+        category=category,
+        distance_miles=round(distance_miles, 1),
+        latitude=lat,
+        longitude=lon,
+        address=address,
+        phone=phone,
+        website=website,
+        hours=hours,
+        notes=notes,
+    )
+
+
+def _dedupe_and_limit(stops: List[OvernightStop], limit: int = 25) -> List[OvernightStop]:
+    seen = set()
+    unique: List[OvernightStop] = []
+    for stop in stops:
+        key = (round(stop.latitude, 4), round(stop.longitude, 4))
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(stop)
+        if len(unique) >= limit:
+            break
+    return unique
+
+
+@api_router.post("/casinos/search", response_model=OvernightSearchResponse)
+async def search_casinos(request: OvernightSearchRequest):
+    try:
+        radius_meters = int(request.radius_miles * 1609.34)
+        overpass_query = f"""
+        [out:json][timeout:25];
+        (
+          node["amenity"="casino"](around:{radius_meters},{request.latitude},{request.longitude});
+          way["amenity"="casino"](around:{radius_meters},{request.latitude},{request.longitude});
+        );
+        out body;
+        >;
+        out skel qt;
+        """
+
+        osm_data = await _fetch_overpass_data(overpass_query, "Casinos")
+
+        stops: List[OvernightStop] = []
+        for element in osm_data.get("elements", []):
+            stop = _build_stop(element, request, "Casino", "Free overnight RV parking welcome.")
+            if stop:
+                stops.append(stop)
+
+        stops.sort(key=lambda x: x.distance_miles)
+        return OvernightSearchResponse(spots=_dedupe_and_limit(stops), is_premium_locked=False)
+    except httpx.HTTPError as exc:
+        logger.error("Overpass API error (casinos): %s", exc)
+        raise HTTPException(status_code=503, detail="Casino data service temporarily unavailable")
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Error searching casinos: %s", exc)
+        raise HTTPException(status_code=500, detail="Unable to search for casinos at this time")
+
+
+# ==================== Walmart Overnight Parking ====================
+
+@api_router.post("/walmart-parking/search", response_model=OvernightSearchResponse)
+async def search_walmart_parking(request: OvernightSearchRequest):
+    try:
+        radius_meters = int(request.radius_miles * 1609.34)
+        overpass_query = f"""
+        [out:json][timeout:25];
+        (
+          node["shop"="supermarket"]["name"~"Walmart",i](around:{radius_meters},{request.latitude},{request.longitude});
+          way["shop"="supermarket"]["name"~"Walmart",i](around:{radius_meters},{request.latitude},{request.longitude});
+        );
+        out body;
+        >;
+        out skel qt;
+        """
+
+        osm_data = await _fetch_overpass_data(overpass_query, "Walmart")
+
+        stops: List[OvernightStop] = []
+        for element in osm_data.get("elements", []):
+            stop = _build_stop(
+                element,
+                request,
+                "Walmart",
+                "Free overnight RV stays welcome. Call ahead to confirm with store manager.",
+            )
+            if stop:
+                stops.append(stop)
+
+        stops.sort(key=lambda x: x.distance_miles)
+        return OvernightSearchResponse(spots=_dedupe_and_limit(stops), is_premium_locked=False)
+    except httpx.HTTPError as exc:
+        logger.error("Overpass API error (walmart): %s", exc)
+        raise HTTPException(status_code=503, detail="Walmart data service temporarily unavailable")
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Error searching Walmart overnight parking: %s", exc)
+        raise HTTPException(status_code=500, detail="Unable to search for Walmart locations at this time")
+
+
+# ==================== Cracker Barrel Overnight ====================
+
+@api_router.post("/cracker-barrel/search", response_model=OvernightSearchResponse)
+async def search_cracker_barrel(request: OvernightSearchRequest):
+    try:
+        radius_meters = int(request.radius_miles * 1609.34)
+        overpass_query = f"""
+        [out:json][timeout:25];
+        (
+          node["amenity"="restaurant"]["name"~"Cracker Barrel",i](around:{radius_meters},{request.latitude},{request.longitude});
+          way["amenity"="restaurant"]["name"~"Cracker Barrel",i](around:{radius_meters},{request.latitude},{request.longitude});
+        );
+        out body;
+        >;
+        out skel qt;
+        """
+
+        osm_data = await _fetch_overpass_data(overpass_query, "Cracker Barrel")
+
+        stops: List[OvernightStop] = []
+        for element in osm_data.get("elements", []):
+            stop = _build_stop(
+                element,
+                request,
+                "Cracker Barrel",
+                "RV overnight parking welcome. Call ahead to confirm with manager.",
+            )
+            if stop:
+                stops.append(stop)
+
+        stops.sort(key=lambda x: x.distance_miles)
+        return OvernightSearchResponse(spots=_dedupe_and_limit(stops), is_premium_locked=False)
+    except httpx.HTTPError as exc:
+        logger.error("Overpass API error (cracker barrel): %s", exc)
+        raise HTTPException(status_code=503, detail="Cracker Barrel data service temporarily unavailable")
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Error searching Cracker Barrel overnight: %s", exc)
+        raise HTTPException(status_code=500, detail="Unable to search for Cracker Barrel locations at this time")
     except Exception as e:
         logger.error(f"Error searching dump stations: {e}")
         raise HTTPException(

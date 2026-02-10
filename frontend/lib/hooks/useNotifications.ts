@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { router } from 'expo-router';
 import { AppState, AppStateStatus } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import {
@@ -75,10 +76,20 @@ export function useNotifications(): UseNotificationsReturn {
 
     responseListener.current = addNotificationResponseReceivedListener((response) => {
       // Handle notification tap - navigate to relevant screen
-      const data = response.notification.request.content.data;
+      const data = response.notification.request.content.data || {};
+      const alertId = (data as any).alertId || (data as any).alert_id;
+      const routeId = (data as any).routeId || (data as any).route_id;
+
       console.log('Notification tapped:', data);
-      
-      // You can add navigation logic here based on data.screen or data.route
+
+      router.push({
+        pathname: '/route',
+        params: {
+          tab: 'alerts',
+          alertId: alertId ? String(alertId) : undefined,
+          routeId: routeId ? String(routeId) : undefined,
+        },
+      });
     });
 
     // Handle app state changes to refresh token when app comes to foreground
