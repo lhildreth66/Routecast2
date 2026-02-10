@@ -3583,7 +3583,7 @@ async def search_free_camping(request: FreeCampingRequest):
                 continue
             
             # Avoid duplicate locations
-            coord_key = (round(lat, 5), round(lon, 5))
+            coord_key = (round(lat, 4), round(lon, 4))
             if coord_key in seen_coords:
                 continue
             seen_coords.add(coord_key)
@@ -4034,7 +4034,7 @@ def _dedupe_and_limit(stops: List[OvernightStop], limit: int = 25) -> List[Overn
         return score
 
     for stop in stops:
-        key = (round(stop.latitude, 5), round(stop.longitude, 5))
+        key = (round(stop.latitude, 4), round(stop.longitude, 4))
         existing = seen.get(key)
         if existing:
             if _score(stop) > _score(existing):
