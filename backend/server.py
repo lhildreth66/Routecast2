@@ -668,9 +668,11 @@ class DumpStationResponse(BaseModel):
 class OvernightStop(BaseModel):
     name: str
     category: str
+    label: str
     distance_miles: float
     latitude: float
     longitude: float
+    osm_id: Optional[int] = None
     address: Optional[str] = None
     phone: Optional[str] = None
     website: Optional[str] = None
@@ -687,6 +689,8 @@ class OvernightSearchResponse(BaseModel):
     spots: List[OvernightStop]
     is_premium_locked: bool = False
     premium_message: Optional[str] = None
+    ok: bool = True
+    source: Optional[str] = None
 
 # ----- Last Chance Supply Models -----
 class SupplyPoint(BaseModel):
@@ -3579,7 +3583,7 @@ async def search_free_camping(request: FreeCampingRequest):
                 continue
             
             # Avoid duplicate locations
-            coord_key = (round(lat, 4), round(lon, 4))
+            coord_key = (round(lat, 5), round(lon, 5))
             if coord_key in seen_coords:
                 continue
             seen_coords.add(coord_key)
@@ -3946,6 +3950,36 @@ async def _fetch_overpass_data(overpass_query: str, label: str) -> Dict[str, Any
         raise last_error or Exception("All Overpass instances failed")
 
 
+GENERIC_PLACEHOLDERS = {"store", "shop", "supermarket", "restaurant", "casino", "location"}
+
+
+def _normalize_name(tags: Dict[str, str], category: str, lat: float, lon: float) -> str:
+    candidates = [
+        tags.get("name"),
+        tags.get("brand"),
+        tags.get("operator"),
+        tags.get("official_name"),
+        tags.get("alt_name"),
+    ]
+    for candidate in candidates:
+        if not candidate:
+            continue
+        lowered = candidate.strip().lower()
+        if lowered not in GENERIC_PLACEHOLDERS:
+            return candidate.strip()
+    # If everything is generic, fall back to category-based label
+    return f"{category} near ({round(lat, 3)}, {round(lon, 3)})"
+
+
+def _compose_label(name: str, category: str, tags: Dict[str, str]) -> str:
+    brand = tags.get("brand") or tags.get("operator")
+    if brand:
+        if brand.lower() in name.lower():
+            return name
+        return f"{brand} — {name}"
+    return f"{category} — {name}" if category.lower() not in name.lower() else name
+
+
 def _build_stop(element: Dict[str, Any], request: OvernightSearchRequest, category: str, default_notes: str) -> Optional[OvernightStop]:
     if element.get("type") == "node":
         lat = element.get("lat")
@@ -3961,7 +3995,8 @@ def _build_stop(element: Dict[str, Any], request: OvernightSearchRequest, catego
 
     distance_miles = math.sqrt((lat - request.latitude) ** 2 + (lon - request.longitude) ** 2) * 69.0
     tags = element.get("tags", {})
-    name = tags.get("name") or tags.get("operator") or f"{category} near ({round(lat, 3)}, {round(lon, 3)})"
+    name = _normalize_name(tags, category, lat, lon)
+    label = _compose_label(name, category, tags)
     phone = tags.get("phone") or tags.get("contact:phone")
     website = tags.get("website") or tags.get("contact:website") or tags.get("url")
     hours = tags.get("opening_hours")
@@ -3971,9 +4006,11 @@ def _build_stop(element: Dict[str, Any], request: OvernightSearchRequest, catego
     return OvernightStop(
         name=name,
         category=category,
+        label=label,
         distance_miles=round(distance_miles, 1),
         latitude=lat,
         longitude=lon,
+        osm_id=element.get("id"),
         address=address,
         phone=phone,
         website=website,
@@ -3983,17 +4020,34 @@ def _build_stop(element: Dict[str, Any], request: OvernightSearchRequest, catego
 
 
 def _dedupe_and_limit(stops: List[OvernightStop], limit: int = 25) -> List[OvernightStop]:
-    seen = set()
-    unique: List[OvernightStop] = []
+    seen: Dict[Any, OvernightStop] = {}
+
+    def _score(stop: OvernightStop) -> int:
+        # Prefer named items with addresses and contact info when deduping
+        score = 0
+        if stop.name and stop.name.lower() not in GENERIC_PLACEHOLDERS:
+            score += 2
+        if stop.address:
+            score += 1
+        if stop.phone or stop.website:
+            score += 1
+        return score
+
     for stop in stops:
-        key = (round(stop.latitude, 4), round(stop.longitude, 4))
-        if key in seen:
+        key = (round(stop.latitude, 5), round(stop.longitude, 5))
+        existing = seen.get(key)
+        if existing:
+            if _score(stop) > _score(existing):
+                seen[key] = stop
             continue
-        seen.add(key)
-        unique.append(stop)
-        if len(unique) >= limit:
-            break
+        seen[key] = stop
+
+    unique = sorted(seen.values(), key=lambda x: x.distance_miles)[:limit]
     return unique
+
+
+def _empty_overpass_response(source: str = "overpass_unavailable") -> OvernightSearchResponse:
+    return OvernightSearchResponse(spots=[], is_premium_locked=False, ok=True, source=source)
 
 
 @api_router.post("/casinos/search", response_model=OvernightSearchResponse)
@@ -4005,6 +4059,8 @@ async def search_casinos(request: OvernightSearchRequest):
         (
           node["amenity"="casino"](around:{radius_meters},{request.latitude},{request.longitude});
           way["amenity"="casino"](around:{radius_meters},{request.latitude},{request.longitude});
+                    node["leisure"="casino"](around:{radius_meters},{request.latitude},{request.longitude});
+                    way["leisure"="casino"](around:{radius_meters},{request.latitude},{request.longitude});
         );
         out body;
         >;
@@ -4020,13 +4076,15 @@ async def search_casinos(request: OvernightSearchRequest):
                 stops.append(stop)
 
         stops.sort(key=lambda x: x.distance_miles)
-        return OvernightSearchResponse(spots=_dedupe_and_limit(stops), is_premium_locked=False)
-    except httpx.HTTPError as exc:
-        logger.error("Overpass API error (casinos): %s", exc)
-        raise HTTPException(status_code=503, detail="Casino data service temporarily unavailable")
+        return OvernightSearchResponse(
+            spots=_dedupe_and_limit(stops),
+            is_premium_locked=False,
+            ok=True,
+            source="overpass",
+        )
     except Exception as exc:  # noqa: BLE001
-        logger.error("Error searching casinos: %s", exc)
-        raise HTTPException(status_code=500, detail="Unable to search for casinos at this time")
+        logger.warning("Casino search using Overpass failed: %s", exc)
+        return _empty_overpass_response()
 
 
 # ==================== Walmart Overnight Parking ====================
@@ -4038,8 +4096,12 @@ async def search_walmart_parking(request: OvernightSearchRequest):
         overpass_query = f"""
         [out:json][timeout:25];
         (
-          node["shop"="supermarket"]["name"~"Walmart",i](around:{radius_meters},{request.latitude},{request.longitude});
-          way["shop"="supermarket"]["name"~"Walmart",i](around:{radius_meters},{request.latitude},{request.longitude});
+                    node["shop"="supermarket"]["name"~"Walmart|Wal-Mart",i](around:{radius_meters},{request.latitude},{request.longitude});
+                    way["shop"="supermarket"]["name"~"Walmart|Wal-Mart",i](around:{radius_meters},{request.latitude},{request.longitude});
+                    node["shop"="department_store"]["name"~"Walmart|Wal-Mart",i](around:{radius_meters},{request.latitude},{request.longitude});
+                    way["shop"="department_store"]["name"~"Walmart|Wal-Mart",i](around:{radius_meters},{request.latitude},{request.longitude});
+                    node["brand"~"Walmart|Wal-Mart",i](around:{radius_meters},{request.latitude},{request.longitude});
+                    way["brand"~"Walmart|Wal-Mart",i](around:{radius_meters},{request.latitude},{request.longitude});
         );
         out body;
         >;
@@ -4060,13 +4122,21 @@ async def search_walmart_parking(request: OvernightSearchRequest):
                 stops.append(stop)
 
         stops.sort(key=lambda x: x.distance_miles)
-        return OvernightSearchResponse(spots=_dedupe_and_limit(stops), is_premium_locked=False)
-    except httpx.HTTPError as exc:
-        logger.error("Overpass API error (walmart): %s", exc)
-        raise HTTPException(status_code=503, detail="Walmart data service temporarily unavailable")
+        return OvernightSearchResponse(
+            spots=_dedupe_and_limit(stops),
+            is_premium_locked=False,
+            ok=True,
+            source="overpass",
+        )
     except Exception as exc:  # noqa: BLE001
-        logger.error("Error searching Walmart overnight parking: %s", exc)
-        raise HTTPException(status_code=500, detail="Unable to search for Walmart locations at this time")
+        logger.warning("Walmart search using Overpass failed: %s", exc)
+        return _empty_overpass_response()
+
+
+# Alias to support /api/walmart/search
+@api_router.post("/walmart/search", response_model=OvernightSearchResponse)
+async def search_walmart(request: OvernightSearchRequest):
+    return await search_walmart_parking(request)
 
 
 # ==================== Cracker Barrel Overnight ====================
@@ -4078,8 +4148,10 @@ async def search_cracker_barrel(request: OvernightSearchRequest):
         overpass_query = f"""
         [out:json][timeout:25];
         (
-          node["amenity"="restaurant"]["name"~"Cracker Barrel",i](around:{radius_meters},{request.latitude},{request.longitude});
-          way["amenity"="restaurant"]["name"~"Cracker Barrel",i](around:{radius_meters},{request.latitude},{request.longitude});
+                    node["amenity"="restaurant"]["name"~"Cracker Barrel",i](around:{radius_meters},{request.latitude},{request.longitude});
+                    way["amenity"="restaurant"]["name"~"Cracker Barrel",i](around:{radius_meters},{request.latitude},{request.longitude});
+                    node["brand"~"Cracker Barrel",i](around:{radius_meters},{request.latitude},{request.longitude});
+                    way["brand"~"Cracker Barrel",i](around:{radius_meters},{request.latitude},{request.longitude});
         );
         out body;
         >;
@@ -4100,19 +4172,59 @@ async def search_cracker_barrel(request: OvernightSearchRequest):
                 stops.append(stop)
 
         stops.sort(key=lambda x: x.distance_miles)
-        return OvernightSearchResponse(spots=_dedupe_and_limit(stops), is_premium_locked=False)
-    except httpx.HTTPError as exc:
-        logger.error("Overpass API error (cracker barrel): %s", exc)
-        raise HTTPException(status_code=503, detail="Cracker Barrel data service temporarily unavailable")
-    except Exception as exc:  # noqa: BLE001
-        logger.error("Error searching Cracker Barrel overnight: %s", exc)
-        raise HTTPException(status_code=500, detail="Unable to search for Cracker Barrel locations at this time")
-    except Exception as e:
-        logger.error(f"Error searching dump stations: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail="Unable to search for dump stations. Please check your internet connection and try again."
+        return OvernightSearchResponse(
+            spots=_dedupe_and_limit(stops),
+            is_premium_locked=False,
+            ok=True,
+            source="overpass",
         )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Cracker Barrel search using Overpass failed: %s", exc)
+        return _empty_overpass_response()
+
+
+# ==================== Boondockers Overnight (alias to free/low-cost camping) ====================
+
+@api_router.post("/boondockers/search", response_model=OvernightSearchResponse)
+async def search_boondockers(request: OvernightSearchRequest):
+    try:
+        radius_meters = int(request.radius_miles * 1609.34)
+        overpass_query = f"""
+        [out:json][timeout:25];
+        (
+          node["tourism"="camp_site"](around:{radius_meters},{request.latitude},{request.longitude});
+          node["tourism"="caravan_site"](around:{radius_meters},{request.latitude},{request.longitude});
+          way["tourism"="camp_site"](around:{radius_meters},{request.latitude},{request.longitude});
+          way["tourism"="caravan_site"](around:{radius_meters},{request.latitude},{request.longitude});
+        );
+        out body;
+        >;
+        out skel qt;
+        """
+
+        osm_data = await _fetch_overpass_data(overpass_query, "Boondockers")
+
+        stops: List[OvernightStop] = []
+        for element in osm_data.get("elements", []):
+            stop = _build_stop(
+                element,
+                request,
+                "Boondocker Camping",
+                "Dispersed camping or low-cost overnight spot.",
+            )
+            if stop:
+                stops.append(stop)
+
+        stops.sort(key=lambda x: x.distance_miles)
+        return OvernightSearchResponse(
+            spots=_dedupe_and_limit(stops),
+            is_premium_locked=False,
+            ok=True,
+            source="overpass",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Boondockers search using Overpass failed: %s", exc)
+        return _empty_overpass_response()
 
 
 # ==================== Last Chance Supply Finder Endpoint ====================

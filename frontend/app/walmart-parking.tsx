@@ -11,6 +11,7 @@ import InfoBanner from '../lib/components/InfoBanner';
 interface OvernightSpot {
   name: string;
   category: string;
+  label: string;
   distance_miles: number;
   latitude: number;
   longitude: number;
@@ -19,6 +20,17 @@ interface OvernightSpot {
   website?: string;
   hours?: string;
   notes?: string;
+}
+
+function groupSpots(items: OvernightSpot[]) {
+  const buckets: { [label: string]: OvernightSpot[] } = {};
+  items.forEach((spot) => {
+    const bucketStart = Math.max(0, Math.floor(spot.distance_miles / 10) * 10);
+    const label = bucketStart === 0 ? 'Within 10 miles' : `${bucketStart}-${bucketStart + 10} miles`;
+    if (!buckets[label]) buckets[label] = [];
+    buckets[label].push(spot);
+  });
+  return Object.entries(buckets).map(([label, group]) => ({ label, items: group }));
 }
 
 export default function WalmartParkingScreen() {
@@ -31,6 +43,7 @@ export default function WalmartParkingScreen() {
   const [locationLoading, setLocationLoading] = useState(true);
   const [spots, setSpots] = useState<OvernightSpot[]>([]);
   const [error, setError] = useState('');
+  const [overpassUnavailable, setOverpassUnavailable] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -78,14 +91,22 @@ export default function WalmartParkingScreen() {
     setLoading(true);
     setSpots([]);
     setError('');
+    setOverpassUnavailable(false);
     try {
       const resp = await axios.post(buildUrl('walmart-parking/search'), {
         latitude: parseFloat(latitude),
         longitude: parseFloat(longitude),
         radius_miles: parseInt(searchRadius, 10),
       });
-      setSpots(resp.data.spots || []);
-      if (!resp.data.spots || resp.data.spots.length === 0) {
+      const data = resp.data || {};
+      const results = (data.spots || data.results || []) as OvernightSpot[];
+      setSpots(results);
+      setOverpassUnavailable(data.source === 'overpass_unavailable');
+
+      if (results.length === 0 && data.source === 'overpass_unavailable') {
+        // Soft warning banner instead of error when Overpass is down
+        setError('');
+      } else if (results.length === 0) {
         setError('No Walmart stores with overnight parking found nearby. Try increasing the search radius.');
       }
     } catch (err: any) {
@@ -159,6 +180,13 @@ export default function WalmartParkingScreen() {
             message={'ℹ️ To keep subscription costs low, we use free mapping data. Some locations may show as "Store" or generic names. When you tap "Directions" and open in Google Maps, the full business name will appear at your destination.'}
             style={{ marginTop: 12, marginBottom: 8 }}
           />
+          {overpassUnavailable ? (
+            <InfoBanner
+              message={'Overpass data is temporarily unavailable. Results may be limited—please try again in a few minutes.'}
+              style={{ marginBottom: 8 }}
+              testID="overpass-unavailable-banner"
+            />
+          ) : null}
 
           {error ? (
             <TouchableOpacity style={styles.errorBox} onPress={searchWalmart} activeOpacity={0.7}>
@@ -172,64 +200,65 @@ export default function WalmartParkingScreen() {
         {spots.length > 0 && (
           <View style={styles.resultsContainer}>
             <Text style={styles.resultsTitle}>Found {spots.length} Walmart Location{spots.length !== 1 ? 's' : ''}</Text>
-
-            {spots.map((spot, index) => (
-              <View key={`${spot.name}-${spot.latitude}-${spot.longitude}-${index}`} style={styles.spotCard}>
-                <View style={styles.spotHeader}>
-                  <View style={styles.spotHeaderLeft}>
-                    <Text style={styles.spotName}>{spot.name}</Text>
-                    <View style={styles.spotTypeRow}>
-                      <View style={styles.spotTypeBadge}>
-                        <Text style={styles.spotTypeBadgeText}>{spot.category}</Text>
+            {groupSpots(spots).map((group) => (
+              <View key={group.label} style={styles.groupSection}>
+                <Text style={styles.groupLabel}>{group.label}</Text>
+                {group.items.map((spot, index) => (
+                  <View key={`${spot.name}-${spot.latitude}-${spot.longitude}-${index}`} style={styles.spotCard}>
+                    <View style={styles.spotHeader}>
+                      <View style={styles.spotHeaderLeft}>
+                        <Text style={styles.spotName}>{spot.label || spot.name}</Text>
+                        <View style={styles.spotTypeRow}>
+                          <View style={styles.spotTypeBadge}>
+                            <Text style={styles.spotTypeBadgeText}>{spot.category}</Text>
+                          </View>
+                          <Text style={styles.distancePill}>{spot.distance_miles.toFixed(1)} mi</Text>
+                        </View>
                       </View>
+                      <Ionicons name="car" size={22} color="#22c55e" />
                     </View>
-                  </View>
-                  <Ionicons name="car" size={22} color="#22c55e" />
-                </View>
 
-                <View style={styles.spotQuickInfo}>
-                  <View style={styles.quickInfoItem}>
-                    <Ionicons name="map" size={16} color="#22c55e" />
-                    <Text style={styles.quickInfoText}>{spot.distance_miles.toFixed(1)} mi</Text>
-                  </View>
-                  {spot.address ? (
-                    <View style={styles.quickInfoItem}>
-                      <Ionicons name="location" size={16} color="#9ca3af" />
-                      <Text style={styles.quickInfoText} numberOfLines={1}>{spot.address}</Text>
+                    <View style={styles.spotQuickInfo}>
+                      {spot.address ? (
+                        <View style={styles.quickInfoItem}>
+                          <Ionicons name="location" size={16} color="#9ca3af" />
+                          <Text style={styles.quickInfoText} numberOfLines={1}>{spot.address}</Text>
+                        </View>
+                      ) : null}
                     </View>
-                  ) : null}
-                </View>
 
-                <View style={styles.spotDetails}>
-                  <Text style={styles.spotDescription}>{spot.notes || 'Free overnight RV stays welcome. Call ahead to confirm with store manager.'}</Text>
-                  {spot.hours ? (
-                    <View style={styles.detailSection}>
-                      <Text style={styles.detailLabel}>Hours:</Text>
-                      <Text style={styles.detailValue}>{spot.hours}</Text>
-                    </View>
-                  ) : null}
-                  {spot.phone ? (
-                    <View style={styles.detailSection}>
-                      <Text style={styles.detailLabel}>Phone:</Text>
-                      <TouchableOpacity onPress={() => Linking.openURL(`tel:${spot.phone}`)}>
-                        <Text style={[styles.detailValue, styles.link]}>{spot.phone}</Text>
+                    <View style={styles.spotDetails}>
+                      <Text style={styles.spotDescription}>{spot.notes || 'Free overnight RV stays welcome. Call ahead to confirm with store manager.'}</Text>
+                      {spot.hours ? (
+                        <View style={styles.detailSection}>
+                          <Text style={styles.detailLabel}>Hours:</Text>
+                          <Text style={styles.detailValue}>{spot.hours}</Text>
+                        </View>
+                      ) : null}
+                      {spot.phone ? (
+                        <View style={styles.detailSection}>
+                          <Text style={styles.detailLabel}>Phone:</Text>
+                          <TouchableOpacity onPress={() => Linking.openURL(`tel:${spot.phone}`)}>
+                            <Text style={[styles.detailValue, styles.link]}>{spot.phone}</Text>
+                          </TouchableOpacity>
+                        </View>
+                      ) : null}
+                      {spot.website ? (
+                        <View style={styles.detailSection}>
+                          <Text style={styles.detailLabel}>Website:</Text>
+                          <TouchableOpacity onPress={() => Linking.openURL(spot.website!)}>
+                            <Text style={[styles.detailValue, styles.link]}>Open site</Text>
+                          </TouchableOpacity>
+                        </View>
+                      ) : null}
+
+                      <TouchableOpacity style={styles.navigateButton} onPress={() => openInMaps(spot)}>
+                        <Ionicons name="navigate" size={18} color="#fff" />
+                        <Text style={styles.navigateButtonText}>Directions in Google Maps</Text>
                       </TouchableOpacity>
                     </View>
-                  ) : null}
-                  {spot.website ? (
-                    <View style={styles.detailSection}>
-                      <Text style={styles.detailLabel}>Website:</Text>
-                      <TouchableOpacity onPress={() => Linking.openURL(spot.website!)}>
-                        <Text style={[styles.detailValue, styles.link]}>Open site</Text>
-                      </TouchableOpacity>
-                    </View>
-                  ) : null}
-
-                  <TouchableOpacity style={styles.navigateButton} onPress={() => openInMaps(spot)}>
-                    <Ionicons name="navigate" size={18} color="#fff" />
-                    <Text style={styles.navigateButtonText}>Directions in Google Maps</Text>
-                  </TouchableOpacity>
-                </View>
+                  </View>
+                ))}
               </View>
             ))}
           </View>
@@ -365,6 +394,16 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     paddingHorizontal: 4,
   },
+  groupSection: {
+    marginBottom: 12,
+    gap: 8,
+  },
+  groupLabel: {
+    color: '#9ca3af',
+    fontSize: 13,
+    marginBottom: 4,
+    paddingHorizontal: 4,
+  },
   spotCard: {
     backgroundColor: '#1f1f23',
     borderRadius: 14,
@@ -403,6 +442,14 @@ const styles = StyleSheet.create({
   spotTypeBadgeText: {
     color: '#22c55e',
     fontWeight: '700',
+  },
+  distancePill: {
+    backgroundColor: '#0f172a',
+    color: '#e5e7eb',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    fontSize: 12,
   },
   spotQuickInfo: {
     flexDirection: 'row',

@@ -60,8 +60,8 @@ const styles = StyleSheet.create({
   banner: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(59, 130, 246, 0.15)',
-    borderColor: 'rgba(59, 130, 246, 0.35)',
+    backgroundColor: '#dbeafe',
+    borderColor: '#93c5fd',
     borderWidth: 1,
     borderRadius: 12,
     paddingVertical: 10,
@@ -74,7 +74,7 @@ const styles = StyleSheet.create({
   },
   text: {
     flex: 1,
-    color: '#0f172a',
+    color: '#0b1224',
     fontSize: 12,
     lineHeight: 17,
   },

@@ -27,13 +27,19 @@ import { buildUrl } from './apiConfig';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 function pickAlertDetails(a: any): string {
-  const p = a?.properties ?? a ?? {};
   const clean = (s?: string) => (typeof s === 'string' ? s.trim() : '');
+  const p = a?.properties ?? {};
   return (
+    clean(a?.description) ||
     clean(p.description) ||
+    clean(a?.full_description) ||
+    clean(p.full_description) ||
+    clean(a?.instruction) ||
     clean(p.instruction) ||
-    clean(p.summary) ||
+    clean(a?.headline) ||
     clean(p.headline) ||
+    clean(p.message) ||
+    clean(a?.message) ||
     'Details not available for this alert.'
   );
 }
