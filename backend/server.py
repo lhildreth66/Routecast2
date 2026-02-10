@@ -3932,22 +3932,50 @@ def _build_address(tags: Dict[str, Any]) -> Optional[str]:
 
 
 async def _fetch_overpass_data(overpass_query: str, label: str) -> Dict[str, Any]:
-    async with httpx.AsyncClient(timeout=45.0) as client:
-        overpass_urls = [
-            "https://overpass-api.de/api/interpreter",
-            "https://overpass.kumi.systems/api/interpreter",
-        ]
-        last_error = None
-        for url in overpass_urls:
-            try:
+    overpass_urls = [
+        "https://overpass-api.de/api/interpreter",
+        "https://lz4.overpass-api.de/api/interpreter",
+        "https://z.overpass-api.de/api/interpreter",
+        "https://overpass.kumi.systems/api/interpreter",
+    ]
+
+    # Cache the last good endpoint for 10 minutes
+    cache_ttl = timedelta(minutes=10)
+    now = datetime.utcnow()
+    candidates: List[str] = []
+    try:
+        if (
+            globals().get("_last_good_overpass")
+            and globals().get("_last_good_overpass_ts")
+            and now - globals()["_last_good_overpass_ts"] < cache_ttl
+        ):
+            candidates.append(globals()["_last_good_overpass"])
+    except Exception:
+        pass
+
+    for url in overpass_urls:
+        if url not in candidates:
+            candidates.append(url)
+
+    timeout = httpx.Timeout(20.0, connect=5.0)
+    last_error = None
+
+    for url in candidates:
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
                 osm_response = await client.post(url, data=overpass_query)
-                osm_response.raise_for_status()
-                return osm_response.json()
-            except Exception as exc:  # noqa: BLE001
-                last_error = exc
-                logger.warning("%s - Overpass instance %s failed: %s", label, url, exc)
-                continue
-        raise last_error or Exception("All Overpass instances failed")
+            if osm_response.status_code == 429 or osm_response.status_code >= 500:
+                raise httpx.HTTPStatusError("Overpass returned error", request=osm_response.request, response=osm_response)
+            osm_response.raise_for_status()
+            globals()["_last_good_overpass"] = url
+            globals()["_last_good_overpass_ts"] = now
+            return osm_response.json()
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            logger.warning("%s - Overpass instance %s failed: %s", label, url, exc)
+            continue
+
+    raise last_error or Exception("All Overpass instances failed")
 
 
 GENERIC_PLACEHOLDERS = {"store", "shop", "supermarket", "restaurant", "casino", "location"}
