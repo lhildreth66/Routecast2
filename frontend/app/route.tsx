@@ -142,6 +142,30 @@ interface RouteData {
   ai_summary: string | null;
 }
 
+const sampleRoutePoints = (waypoints: WaypointWeather[], intervalMiles = 8) => {
+  const points: { lat: number; lon: number }[] = [];
+  let lastDistance = -Infinity;
+
+  waypoints.forEach((wp, idx) => {
+    const lat = wp?.waypoint?.lat;
+    const lon = wp?.waypoint?.lon;
+    const dist = wp?.waypoint?.distance_from_start;
+    if (typeof lat !== 'number' || typeof lon !== 'number') return;
+
+    if (typeof dist === 'number') {
+      if (!points.length || dist - lastDistance >= intervalMiles || idx === waypoints.length - 1) {
+        points.push({ lat, lon });
+        lastDistance = dist;
+      }
+    } else {
+      // Fallback if distance is missing: keep all valid coords
+      points.push({ lat, lon });
+    }
+  });
+
+  return points;
+};
+
 const formatDuration = (minutes: number): string => {
   const hours = Math.floor(minutes / 60);
   const mins = minutes % 60;
@@ -437,13 +461,7 @@ export default function RouteScreen() {
   useEffect(() => {
     const startMonitor = async () => {
       if (!routeData || !pushToken || monitorStartedRef.current) return;
-      const samplePoints = (routeData.waypoints || [])
-        .map((wp) => ({
-          lat: wp?.waypoint?.lat,
-          lon: wp?.waypoint?.lon,
-        }))
-        .filter((p) => typeof p.lat === 'number' && typeof p.lon === 'number');
-
+      const samplePoints = sampleRoutePoints(routeData.waypoints || [], 8);
       const hasPolyline = typeof routeData.route_geometry === 'string' && routeData.route_geometry.length > 0;
       const hasSamples = samplePoints.length > 0;
       if (!hasPolyline && !hasSamples) return;
@@ -461,6 +479,7 @@ export default function RouteScreen() {
           payload.sample_points = samplePoints;
         }
 
+        console.warn('[route-monitor] start payload', payload);
         await axios.post(buildUrl('notifications/route-monitor/start'), {
           ...payload,
         });
