@@ -225,9 +225,9 @@ export default function TruckRestrictionsScreen() {
             </TouchableOpacity>
 
             <InfoBanner
-              message="ℹ️ To keep subscription costs low, we use free mapping data. Some locations may show as \"Store\" or generic names. When you tap \"Directions\" and open in Google Maps, the full business name will appear at your destination."
-              style={{ marginTop: 12, marginBottom: 8 }}
-            />
+                message={'ℹ️ To keep subscription costs low, we use free mapping data. Some locations may show as "Store" or generic names. When you tap "Directions" and open in Google Maps, the full business name will appear at your destination.'}
+                style={{ marginTop: 12, marginBottom: 8 }}
+              />
           </View>
 
           {error && !loading && (
