@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -13,14 +13,30 @@ import {
   Modal,
   TextInput,
   Dimensions,
+  Alert,
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Speech from 'expo-speech';
 import { format, parseISO } from 'date-fns';
 import { WebView } from 'react-native-webview';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import axios from 'axios';
+import { buildUrl } from './apiConfig';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+function pickAlertDetails(a: any): string {
+  const p = a?.properties ?? a ?? {};
+  const clean = (s?: string) => (typeof s === 'string' ? s.trim() : '');
+  return (
+    clean(p.description) ||
+    clean(p.instruction) ||
+    clean(p.summary) ||
+    clean(p.headline) ||
+    'Details not available for this alert.'
+  );
+}
 
 // Types
 interface RoadCondition {
@@ -113,6 +129,7 @@ interface RouteData {
   destination: string;
   total_duration_minutes: number | null;
   total_distance_miles: number | null;
+  route_geometry?: string;
   waypoints: WaypointWeather[];
   safety_score: SafetyScore | null;
   hazard_alerts: HazardAlert[];
@@ -370,6 +387,8 @@ export default function RouteScreen() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'conditions' | 'directions' | 'alerts'>('conditions');
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [pushToken, setPushToken] = useState<string | null>(null);
+  const monitorStartedRef = useRef(false);
   
   // Radar map state
   const [showRadarMap, setShowRadarMap] = useState(false);
@@ -400,6 +419,60 @@ export default function RouteScreen() {
     }
     setLoading(false);
   }, [params.routeData]);
+
+  useEffect(() => {
+    const loadPushToken = async () => {
+      try {
+        const stored = await AsyncStorage.getItem('expoPushToken');
+        if (stored) {
+          setPushToken(stored);
+        }
+      } catch (err) {
+        console.log('[route-monitor] failed to load push token', err);
+      }
+    };
+    loadPushToken();
+  }, []);
+
+  useEffect(() => {
+    const startMonitor = async () => {
+      if (!routeData || !pushToken || monitorStartedRef.current) return;
+      const samplePoints = (routeData.waypoints || [])
+        .map((wp) => ({
+          lat: wp?.waypoint?.lat,
+          lon: wp?.waypoint?.lon,
+        }))
+        .filter((p) => typeof p.lat === 'number' && typeof p.lon === 'number');
+
+      const hasPolyline = typeof routeData.route_geometry === 'string' && routeData.route_geometry.length > 0;
+      const hasSamples = samplePoints.length > 0;
+      if (!hasPolyline && !hasSamples) return;
+
+      monitorStartedRef.current = true;
+      try {
+        const payload: any = {
+          route_id: routeData.id || 'route-monitor',
+          push_token: pushToken,
+        };
+
+        if (hasPolyline) {
+          payload.route_polyline = routeData.route_geometry;
+        } else if (hasSamples) {
+          payload.sample_points = samplePoints;
+        }
+
+        await axios.post(buildUrl('notifications/route-monitor/start'), {
+          ...payload,
+        });
+      } catch (err) {
+        console.log('[route-monitor] start failed', err);
+        monitorStartedRef.current = false; // allow retry on next render
+        Alert.alert('Route Alerts', 'Could not start route alerts. Please try again.');
+      }
+    };
+
+    startMonitor();
+  }, [routeData, pushToken]);
 
   const speakSummary = () => {
     if (!routeData) return;
@@ -848,22 +921,30 @@ export default function RouteScreen() {
               routeData.hazard_alerts.map((alert, index) => {
                 const isExpanded = expandedCards.has(index + 1000); // Use offset to differentiate from road cards
                 const props = alert.properties || {};
-                const eventTitle = alert.event || alert.headline || props.event || 'Weather Alert';
+                const eventName = alert.event || props.event || alert.headline || 'Weather Alert';
+                const isInfo = eventName === 'Special Weather Statement';
+                const eventTitle = isInfo ? 'Info' : eventName;
                 const headline = alert.headline || props.headline;
                 const description = alert.description || alert.full_description || props.description;
                 const instruction = alert.instruction || props.instruction;
                 const areaDesc = alert.areaDesc || props.areaDesc;
                 const onset = alert.onset || props.onset;
                 const expires = alert.expires || props.expires;
+                const detailText = pickAlertDetails(alert);
                 
                 return (
                   <TouchableOpacity 
                     key={index} 
                     style={[
                       styles.alertCard,
-                      alert.severity === 'extreme' ? styles.alertExtreme :
-                      alert.severity === 'high' ? styles.alertHigh : styles.alertMedium,
-                      isExpanded && styles.alertCardExpanded
+                      isInfo
+                        ? styles.alertInfoCard
+                        : alert.severity === 'extreme'
+                        ? styles.alertExtreme
+                        : alert.severity === 'high'
+                        ? styles.alertHigh
+                        : styles.alertMedium,
+                      isExpanded && styles.alertCardExpanded,
                     ]}
                     onPress={() => toggleCardExpand(index + 1000)}
                     activeOpacity={0.8}
@@ -871,13 +952,18 @@ export default function RouteScreen() {
                     <View style={styles.alertHeader}>
                       <Ionicons 
                         name={
-                          alert.type === 'ice' ? 'snow' :
-                          alert.type === 'rain' ? 'rainy' :
-                          alert.type === 'wind' ? 'cloudy' :
-                          'warning'
-                        } 
-                        size={28} 
-                        color="#fff" 
+                          isInfo
+                            ? 'information-circle'
+                            : alert.type === 'ice'
+                            ? 'snow'
+                            : alert.type === 'rain'
+                            ? 'rainy'
+                            : alert.type === 'wind'
+                            ? 'cloudy'
+                            : 'warning'
+                        }
+                        size={28}
+                        color={isInfo ? '#bfdbfe' : '#fff'}
                       />
                       <View style={styles.alertInfo}>
                         <Text style={styles.alertMessage}>{eventTitle}</Text>
@@ -899,7 +985,7 @@ export default function RouteScreen() {
                         <View style={styles.alertFullDescription}>
                           <Text style={styles.alertFullTitle}>What is happening</Text>
                           <Text style={styles.alertFullText}>
-                            {description || 'No description provided.'}
+                            {detailText}
                           </Text>
                         </View>
 
@@ -947,9 +1033,9 @@ export default function RouteScreen() {
                             </Text>
                           ) : null}
                         </View>
-                        {description ? (
+                        {detailText ? (
                           <Text style={styles.alertSnippet} numberOfLines={2}>
-                            {description}
+                            {detailText}
                           </Text>
                         ) : null}
                         <View style={styles.alertAction}>
@@ -1495,6 +1581,11 @@ const styles = StyleSheet.create({
   alertCardExpanded: {
     borderWidth: 2,
     borderColor: '#fbbf24',
+  },
+  alertInfoCard: {
+    backgroundColor: '#0f172a',
+    borderColor: '#38bdf8',
+    borderWidth: 1,
   },
   alertExtreme: {
     backgroundColor: '#7f1d1d',
