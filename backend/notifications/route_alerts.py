@@ -26,6 +26,34 @@ DEFAULT_NOAA_UA = os.environ.get(
 )
 
 
+def _compute_bbox(points: List[Dict[str, float]]) -> Optional[Dict[str, float]]:
+    if not points:
+        return None
+    lats = [p.get("lat") for p in points if p.get("lat") is not None]
+    lons = [p.get("lon") for p in points if p.get("lon") is not None]
+    if not lats or not lons:
+        return None
+    return {
+        "min_lat": min(lats),
+        "max_lat": max(lats),
+        "min_lon": min(lons),
+        "max_lon": max(lons),
+    }
+
+
+def _decode_polyline_safe(poly: Optional[str]) -> List[Dict[str, float]]:
+    if not poly or not isinstance(poly, str):
+        return []
+    try:
+        import polyline  # type: ignore
+
+        coords = polyline.decode(poly)
+        return [{"lat": lat, "lon": lon} for lat, lon in coords]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[route-alerts] failed to decode polyline: %s", exc)
+        return []
+
+
 def haversine_miles(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Compute great-circle distance between two points in miles."""
     radius_km = 6371.0
@@ -360,6 +388,10 @@ class CriticalRouteAlertWorker:
 
     def run_once(self) -> Dict[str, Any]:
         monitors = self.service.get_active_monitors()
+        logger.info(
+            "[route-alerts] fetched active monitors count=%d filter=active=True",
+            len(monitors),
+        )
         summary = {
             "monitors": len(monitors),
             "sent": 0,
@@ -371,6 +403,10 @@ class CriticalRouteAlertWorker:
             "skipped_dedupe": 0,
             "skipped_cap": 0,
             "skipped_push": 0,
+            "skipped_points": 0,
+            "skipped_geometry": 0,
+            "monitors_with_geometry": 0,
+            "monitors_without_geometry": 0,
         }
 
         for monitor in monitors:
@@ -379,10 +415,13 @@ class CriticalRouteAlertWorker:
                 if key in result:
                     summary[key] += result[key]
 
+        summary["monitors_without_geometry"] = summary["monitors"] - summary["monitors_with_geometry"]
+
         logger.info(
-            "[route-alerts] run complete monitors=%d nws_calls=%d alerts=%d sent=%d"
-            " skipped=%d type=%d distance=%d dedupe=%d cap=%d push=%d",
+            "[route-alerts] run complete monitors=%d with_geometry=%d nws_calls=%d alerts=%d sent=%d"
+            " skipped=%d type=%d distance=%d dedupe=%d cap=%d push=%d points=%d geometry=%d no_geom=%d",
             summary["monitors"],
+            summary["monitors_with_geometry"],
             summary["nws_calls"],
             summary["alerts_seen"],
             summary["sent"],
@@ -392,6 +431,9 @@ class CriticalRouteAlertWorker:
             summary["skipped_dedupe"],
             summary["skipped_cap"],
             summary["skipped_push"],
+            summary["skipped_points"],
+            summary["skipped_geometry"],
+            summary["monitors_without_geometry"],
         )
         return summary
 
@@ -406,6 +448,9 @@ class CriticalRouteAlertWorker:
             "skipped_dedupe": 0,
             "skipped_cap": 0,
             "skipped_push": 0,
+            "skipped_points": 0,
+            "skipped_geometry": 0,
+            "monitors_with_geometry": 0,
         }
 
         monitor_id = monitor.get("monitor_id")
@@ -413,6 +458,96 @@ class CriticalRouteAlertWorker:
         route_id = monitor.get("route_id") or "unknown"
         route_signature = monitor.get("route_signature")
         sample_points = monitor.get("sample_points") or []
+        route_points = monitor.get("route_points") or []
+        polyline_val = monitor.get("route_polyline") or monitor.get("route_geometry")
+        legs_val = monitor.get("legs") or monitor.get("route_legs")
+        explicit_points = monitor.get("points") or monitor.get("coords")
+
+        # Instrumentation for each monitor to understand sampling and token wiring
+        sample_points_count = len(sample_points)
+        first_points = sample_points[:2]
+        expires_at = monitor.get("expires_at") or monitor.get("expires") or monitor.get("expiresAt")
+        has_polyline = bool(route_points or polyline_val)
+        token_prefix = (token or "")[:18]
+        push_token_alt = monitor.get("expo_push_token") or monitor.get("pushToken") or monitor.get("fcm_token")
+        token_alt_prefix = (push_token_alt or "")[:18]
+
+        bbox = _compute_bbox(sample_points) or _compute_bbox(route_points) or _compute_bbox(explicit_points or [])
+
+        logger.info(
+            "[route-alerts] monitor inspect id=%s expires=%s active=%s has_polyline=%s sample_points=%d first_points=%s bbox=%s push_token_prefix=%s alt_token_prefix=%s legs=%s explicit_points=%s",
+            monitor_id,
+            expires_at,
+            monitor.get("active"),
+            has_polyline,
+            sample_points_count,
+            first_points,
+            token_prefix,
+            token_alt_prefix,
+            bool(legs_val),
+            bool(explicit_points),
+            bbox,
+        )
+
+        if sample_points_count == 0 and route_points:
+            sample_miles = float(os.environ.get("ROUTE_ALERTS_SAMPLING_MILES", 10.0))
+            max_points = int(os.environ.get("ROUTE_ALERTS_MAX_POINTS", 25))
+            try:
+                sample_points = sample_route_points(route_points, sample_miles=sample_miles, max_points=max_points)
+                sample_points_count = len(sample_points)
+                logger.info(
+                    "[route-alerts] resampled monitor id=%s route_points=%d sample_points=%d",
+                    monitor_id,
+                    len(route_points),
+                    sample_points_count,
+                )
+                # Persist back so future runs have points
+                try:
+                    self.service.db.route_monitors.update_one(
+                        {"monitor_id": monitor_id},
+                        {"$set": {"sample_points": sample_points}},
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("[route-alerts] failed to persist resampled points for %s: %s", monitor_id, exc)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[route-alerts] failed to resample points for %s: %s", monitor_id, exc)
+
+        if sample_points_count == 0 and not route_points and polyline_val:
+            decoded_points = _decode_polyline_safe(polyline_val)
+            if decoded_points:
+                sample_miles = float(os.environ.get("ROUTE_ALERTS_SAMPLING_MILES", 10.0))
+                max_points = int(os.environ.get("ROUTE_ALERTS_MAX_POINTS", 25))
+                try:
+                    sample_points = sample_route_points(decoded_points, sample_miles=sample_miles, max_points=max_points)
+                    sample_points_count = len(sample_points)
+                    logger.info(
+                        "[route-alerts] resampled from polyline id=%s decoded_points=%d sample_points=%d",
+                        monitor_id,
+                        len(decoded_points),
+                        sample_points_count,
+                    )
+                    try:
+                        self.service.db.route_monitors.update_one(
+                            {"monitor_id": monitor_id},
+                            {"$set": {"sample_points": sample_points, "route_points": decoded_points}},
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning("[route-alerts] failed to persist decoded points for %s: %s", monitor_id, exc)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("[route-alerts] failed to sample decoded polyline for %s: %s", monitor_id, exc)
+
+        if sample_points_count == 0:
+            logger.warning(
+                "WARNING [route-alerts] active monitor missing sample points; cannot query NWS id=%s route=%s",
+                monitor_id,
+                route_id,
+            )
+            stats["skipped"] += 1
+            stats["skipped_points"] += 1
+            stats["skipped_geometry"] += 1
+            return stats
+
+        stats["monitors_with_geometry"] += 1
 
         if route_signature is None:
             # Backfill signature for legacy monitors
