@@ -28,6 +28,15 @@ interface HazardAlert {
   onset?: string;
   expires?: string;
   location_name?: string;
+  properties?: {
+    event?: string;
+    headline?: string;
+    description?: string;
+    instruction?: string;
+    areaDesc?: string;
+    onset?: string;
+    expires?: string;
+  };
 }
 
 interface TruckerWarning {
@@ -103,6 +112,14 @@ export default function WeatherAlertsScreen() {
           {routeData.hazard_alerts && routeData.hazard_alerts.length > 0 ? (
             routeData.hazard_alerts.map((alert: HazardAlert, index: number) => {
               const isExpanded = expandedCards.has(index);
+              const props = alert.properties || {};
+              const eventTitle = alert.event || alert.headline || props.event || 'Weather Alert';
+              const headline = alert.headline || props.headline;
+              const description = alert.description || alert.full_description || props.description;
+              const instruction = alert.instruction || props.instruction;
+              const areaDesc = alert.areaDesc || props.areaDesc;
+              const onset = alert.onset || props.onset;
+              const expires = alert.expires || props.expires;
               
               return (
                 <TouchableOpacity 
@@ -131,9 +148,9 @@ export default function WeatherAlertsScreen() {
                       {alert.location_name && (
                         <Text style={styles.alertLocation}>📍 {alert.location_name}</Text>
                       )}
-                      <Text style={styles.alertMessage}>{alert.event || 'Weather Alert'}</Text>
-                      {alert.headline ? (
-                        <Text style={styles.alertSubhead}>{alert.headline}</Text>
+                      <Text style={styles.alertMessage}>{eventTitle}</Text>
+                      {headline ? (
+                        <Text style={styles.alertSubhead}>{headline}</Text>
                       ) : null}
                       <Text style={styles.alertCountdown}>{alert.countdown_text}</Text>
                     </View>
@@ -149,31 +166,31 @@ export default function WeatherAlertsScreen() {
                     <View style={styles.alertExpandedContent}>
                       <View style={styles.alertFullDescription}>
                         <Text style={styles.alertFullTitle}>What is happening</Text>
-                        <Text style={styles.alertFullText}>
-                          {alert.description || alert.full_description || 'No description provided.'}
-                        </Text>
+                          <Text style={styles.alertFullText}>
+                            {description || 'No description provided.'}
+                          </Text>
                       </View>
 
-                      {alert.areaDesc ? (
+                      {areaDesc ? (
                         <View style={styles.alertMetaRow}>
                           <Ionicons name="map" size={16} color="#a1a1aa" />
-                          <Text style={styles.alertMetaText}>Affected areas: {alert.areaDesc}</Text>
+                          <Text style={styles.alertMetaText}>Affected areas: {areaDesc}</Text>
                         </View>
                       ) : null}
 
-                      {formatTimeRange(alert.onset as string | undefined, alert.expires as string | undefined) && (
+                      {formatTimeRange(onset as string | undefined, expires as string | undefined) && (
                         <View style={styles.alertMetaRow}>
                           <Ionicons name="time" size={16} color="#a1a1aa" />
                           <Text style={styles.alertMetaText}>
-                            Valid {formatTimeRange(alert.onset as string | undefined, alert.expires as string | undefined)}
+                            Valid {formatTimeRange(onset as string | undefined, expires as string | undefined)}
                           </Text>
                         </View>
                       )}
                       
-                      {alert.instruction && (
+                      {instruction && (
                         <View style={styles.alertInstructionBox}>
                           <Text style={styles.alertInstructionTitle}>📋 What To Do</Text>
-                          <Text style={styles.alertInstructionText}>{alert.instruction}</Text>
+                          <Text style={styles.alertInstructionText}>{instruction}</Text>
                         </View>
                       )}
                       
@@ -187,18 +204,18 @@ export default function WeatherAlertsScreen() {
                     {!isExpanded && (
                       <>
                         <View style={styles.alertBriefRow}>
-                          {alert.areaDesc ? (
-                            <Text style={styles.alertBriefText}>Areas: {alert.areaDesc}</Text>
+                          {areaDesc ? (
+                            <Text style={styles.alertBriefText}>Areas: {areaDesc}</Text>
                           ) : null}
-                          {formatTimeRange(alert.onset as string | undefined, alert.expires as string | undefined) && (
+                          {formatTimeRange(onset as string | undefined, expires as string | undefined) && (
                             <Text style={styles.alertBriefText}>
-                              Valid {formatTimeRange(alert.onset as string | undefined, alert.expires as string | undefined)}
+                              Valid {formatTimeRange(onset as string | undefined, expires as string | undefined)}
                             </Text>
                           )}
                         </View>
-                        {alert.description || alert.full_description ? (
+                        {description ? (
                           <Text style={styles.alertSnippet} numberOfLines={2}>
-                            {alert.description || alert.full_description}
+                            {description}
                           </Text>
                         ) : null}
                         <View style={styles.alertAction}>

@@ -138,8 +138,10 @@ export default function HomeScreen() {
   const pathname = usePathname();
   const segments = useSegments();
 
+  const isProductionEnv = process.env.EXPO_PUBLIC_ENVIRONMENT === 'production' || process.env.NODE_ENV === 'production';
+  const showDebugPanels = !isProductionEnv && (__DEV__ || process.env.EXPO_PUBLIC_SHOW_DEBUG_PANELS === 'true');
   const showApiBaseError = __DEV__ && !!API_BASE_ERROR;
-  const showTruckSpecs = truckerMode || vehicleType === 'semi' || vehicleType === 'truck';
+  const showTruckSpecs = truckerMode || ['semi', 'truck', 'trailer'].includes(vehicleType);
 
   useEffect(() => {
     fetchRecentRoutes();
@@ -1368,7 +1370,7 @@ export default function HomeScreen() {
                 </View>
               )}
 
-              {__DEV__ && (
+              {showDebugPanels && (
                 <View style={styles.healthCard}>
                   <Text style={styles.healthTitle}>Health Check</Text>
                   <Text style={styles.healthLine}>API Base: {API_BASE}</Text>
@@ -1417,7 +1419,7 @@ export default function HomeScreen() {
                 </TouchableOpacity>
               </View>
 
-              {__DEV__ && (
+              {showDebugPanels && (
                 <View style={styles.pushDebugSection}>
                   <Text style={styles.debugTitle}>Push Debug</Text>
                   <Text style={styles.debugLine}>Last toggle: {lastToggleAt || 'n/a'}</Text>

@@ -96,6 +96,15 @@ interface HazardAlert {
   onset?: string;
   expires?: string;
   location_name?: string;
+  properties?: {
+    event?: string;
+    headline?: string;
+    description?: string;
+    instruction?: string;
+    areaDesc?: string;
+    onset?: string;
+    expires?: string;
+  };
 }
 
 interface RouteData {
@@ -838,6 +847,14 @@ export default function RouteScreen() {
             {routeData.hazard_alerts && routeData.hazard_alerts.length > 0 ? (
               routeData.hazard_alerts.map((alert, index) => {
                 const isExpanded = expandedCards.has(index + 1000); // Use offset to differentiate from road cards
+                const props = alert.properties || {};
+                const eventTitle = alert.event || alert.headline || props.event || 'Weather Alert';
+                const headline = alert.headline || props.headline;
+                const description = alert.description || alert.full_description || props.description;
+                const instruction = alert.instruction || props.instruction;
+                const areaDesc = alert.areaDesc || props.areaDesc;
+                const onset = alert.onset || props.onset;
+                const expires = alert.expires || props.expires;
                 
                 return (
                   <TouchableOpacity 
@@ -863,9 +880,9 @@ export default function RouteScreen() {
                         color="#fff" 
                       />
                       <View style={styles.alertInfo}>
-                        <Text style={styles.alertMessage}>{alert.event || alert.headline || 'Weather Alert'}</Text>
-                        {alert.headline ? (
-                          <Text style={styles.alertSubhead}>{alert.headline}</Text>
+                        <Text style={styles.alertMessage}>{eventTitle}</Text>
+                        {headline ? (
+                          <Text style={styles.alertSubhead}>{headline}</Text>
                         ) : null}
                         <Text style={styles.alertCountdown}>{alert.countdown_text}</Text>
                       </View>
@@ -882,31 +899,31 @@ export default function RouteScreen() {
                         <View style={styles.alertFullDescription}>
                           <Text style={styles.alertFullTitle}>What is happening</Text>
                           <Text style={styles.alertFullText}>
-                            {alert.description || alert.full_description || 'No description provided.'}
+                            {description || 'No description provided.'}
                           </Text>
                         </View>
 
-                        {alert.areaDesc ? (
+                        {areaDesc ? (
                           <View style={styles.alertMetaRow}>
                             <Ionicons name="map" size={16} color="#a1a1aa" />
-                            <Text style={styles.alertMetaText}>Affected areas: {alert.areaDesc}</Text>
+                            <Text style={styles.alertMetaText}>Affected areas: {areaDesc}</Text>
                           </View>
                         ) : null}
 
-                        {(alert.onset || alert.expires) && (
+                        {(onset || expires) && (
                           <View style={styles.alertMetaRow}>
                             <Ionicons name="time" size={16} color="#a1a1aa" />
                             <Text style={styles.alertMetaText}>
-                              Valid {alert.onset ? format(parseISO(alert.onset), 'MMM d, h:mma') : 'now'}
-                              {alert.expires ? ` → ${format(parseISO(alert.expires), 'MMM d, h:mma')}` : ''}
+                              Valid {onset ? format(parseISO(onset), 'MMM d, h:mma') : 'now'}
+                              {expires ? ` → ${format(parseISO(expires), 'MMM d, h:mma')}` : ''}
                             </Text>
                           </View>
                         )}
                         
-                        {alert.instruction && (
+                        {instruction && (
                           <View style={styles.alertInstructionBox}>
                             <Text style={styles.alertInstructionTitle}>📋 What To Do</Text>
-                            <Text style={styles.alertInstructionText}>{alert.instruction}</Text>
+                            <Text style={styles.alertInstructionText}>{instruction}</Text>
                           </View>
                         )}
                         
@@ -920,19 +937,19 @@ export default function RouteScreen() {
                     {!isExpanded && (
                       <>
                         <View style={styles.alertBriefRow}>
-                          {alert.areaDesc ? (
-                            <Text style={styles.alertBriefText}>Areas: {alert.areaDesc}</Text>
+                          {areaDesc ? (
+                            <Text style={styles.alertBriefText}>Areas: {areaDesc}</Text>
                           ) : null}
-                          {(alert.onset || alert.expires) ? (
+                          {(onset || expires) ? (
                             <Text style={styles.alertBriefText}>
-                              {alert.onset ? format(parseISO(alert.onset), 'MMM d, h:mma') : 'Now'}
-                              {alert.expires ? ` → ${format(parseISO(alert.expires), 'MMM d, h:mma')}` : ''}
+                              {onset ? format(parseISO(onset), 'MMM d, h:mma') : 'Now'}
+                              {expires ? ` → ${format(parseISO(expires), 'MMM d, h:mma')}` : ''}
                             </Text>
                           ) : null}
                         </View>
-                        {alert.description || alert.full_description ? (
+                        {description ? (
                           <Text style={styles.alertSnippet} numberOfLines={2}>
-                            {alert.description || alert.full_description}
+                            {description}
                           </Text>
                         ) : null}
                         <View style={styles.alertAction}>
