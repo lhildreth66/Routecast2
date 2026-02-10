@@ -191,6 +191,16 @@ export default function HomeScreen() {
         name: 'default',
         importance: Notifications.AndroidImportance.MAX,
       }).catch((err) => console.log('[push] channel setup error', err));
+
+      Notifications.setNotificationChannelAsync('weather-alerts', {
+        name: 'Weather Alerts',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 250, 250, 250],
+        sound: 'default',
+        lightColor: '#FF0000',
+        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+        bypassDnd: true,
+      }).catch((err) => console.log('[push] weather channel error', err));
     }
   }, []);
 

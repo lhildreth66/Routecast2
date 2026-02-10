@@ -106,7 +106,7 @@ class PushGateway:
     def __init__(self):
         self._expo_client = None
         self._firebase_app = None
-        self._provider = (os.environ.get("PUSH_PROVIDER", "firebase") or "firebase").lower()
+        self._provider = (os.environ.get("PUSH_PROVIDER", "expo") or "expo").lower()
         self._disabled = False
         self._fallback_expo = (os.environ.get("PUSH_FALLBACK", "expo") or "expo").lower() == "expo"
 

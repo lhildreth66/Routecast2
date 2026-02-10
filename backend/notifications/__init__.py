@@ -79,6 +79,7 @@ class SendNotificationRequest(BaseModel):
     data: Optional[Dict[str, Any]] = None
 
 
+
 class RoutePoint(BaseModel):
     lat: float
     lon: float
@@ -112,8 +113,9 @@ async def send_expo_notification(push_token: str, title: str, body: str, data: D
                     "title": title,
                     "body": body,
                     "data": data or {},
-                    "badge": 1,
                     "priority": "high",
+                    "channelId": "weather-alerts",
+                    "badge": 1,
                 },
                 headers={"Accept": "application/json", "Accept-Encoding": "gzip, deflate"},
             )

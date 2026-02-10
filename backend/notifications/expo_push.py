@@ -73,6 +73,8 @@ class ExpoPushClient:
         body: str,
         data: Optional[Dict[str, str]] = None,
         sound: str = "default",
+        priority: str = "high",
+        channel_id: str = "weather-alerts",
     ) -> bool:
         """
         Send a push notification via Expo.
@@ -101,6 +103,8 @@ class ExpoPushClient:
             "body": body,
             "sound": sound,
             "badge": 1,  # Show badge on app icon
+            "priority": priority,
+            "channelId": channel_id,
         }
         
         if data:
