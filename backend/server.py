@@ -104,6 +104,8 @@ async def connect_to_mongo():
 MAPBOX_ACCESS_TOKEN = os.environ.get('MAPBOX_ACCESS_TOKEN', '')
 ROUTECAST_MODE = os.environ.get('ROUTECAST_MODE', 'prod').lower()
 GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-1.5-flash-latest')
+BUILD_SHA = os.environ.get("RENDER_GIT_COMMIT") or os.environ.get("BUILD_SHA") or "unknown"
+BUILD_TIME = os.environ.get("BUILD_TIME") or datetime.utcnow().isoformat()
 
 # Log Mapbox token presence without exposing the secret
 if MAPBOX_ACCESS_TOKEN:
@@ -1963,13 +1965,14 @@ async def root():
 
 @api_router.get("/health")
 async def health_check():
-    sha = os.getenv("RENDER_GIT_COMMIT", "unknown")
+    sha = BUILD_SHA
     branch = os.getenv("RENDER_GIT_BRANCH", "unknown")
     service = os.getenv("RENDER_SERVICE_NAME", "unknown")
     return {
         "ok": True,
         "time": datetime.utcnow().isoformat(),
         "sha": sha,
+        "build_time": BUILD_TIME,
         "branch": branch,
         "service": service,
     }
