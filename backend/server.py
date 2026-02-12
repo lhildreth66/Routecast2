@@ -72,21 +72,6 @@ async def connect_to_mongo():
             db = None
             return False
 
-
-        def _compute_bbox(points: List[Dict[str, float]]) -> Optional[Dict[str, float]]:
-            if not points:
-                return None
-            lats = [p.get("lat") for p in points if p.get("lat") is not None]
-            lons = [p.get("lon") for p in points if p.get("lon") is not None]
-            if not lats or not lons:
-                return None
-            return {
-                "min_lat": min(lats),
-                "max_lat": max(lats),
-                "min_lon": min(lons),
-                "max_lon": max(lons),
-            }
-
         logger.info("Initializing MongoDB client db=%s via %s", db_name, url_source)
         temp_client = AsyncIOMotorClient(mongo_url, serverSelectionTimeoutMS=5000)
         await temp_client.admin.command('ping')
@@ -103,7 +88,8 @@ async def connect_to_mongo():
 # API Keys
 MAPBOX_ACCESS_TOKEN = os.environ.get('MAPBOX_ACCESS_TOKEN', '')
 ROUTECAST_MODE = os.environ.get('ROUTECAST_MODE', 'prod').lower()
-GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-1.5-flash-latest')
+GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-1.5-flash')
+GOOGLE_PLACES_API_KEY = os.environ.get("GOOGLE_PLACES_API_KEY", "")
 BUILD_SHA = os.environ.get("RENDER_GIT_COMMIT") or os.environ.get("BUILD_SHA") or "unknown"
 BUILD_TIME = os.environ.get("BUILD_TIME") or datetime.utcnow().isoformat()
 
@@ -113,12 +99,30 @@ if MAPBOX_ACCESS_TOKEN:
 else:
     logger.error("MAPBOX_ACCESS_TOKEN is missing - Mapbox directions/geocoding will fail.")
 
+if not GOOGLE_PLACES_API_KEY:
+    logger.warning("GOOGLE_PLACES_API_KEY is missing - Walmart search will be unavailable.")
+
 
 def require_mapbox_token():
     if MAPBOX_ACCESS_TOKEN or ROUTECAST_MODE in {"demo", "test"}:
         return
     logger.error("MAPBOX_ACCESS_TOKEN missing for Mapbox request")
     raise HTTPException(status_code=500, detail="MAPBOX_ACCESS_TOKEN not set on backend")
+
+
+def _compute_bbox(points: List[Dict[str, float]]) -> Optional[Dict[str, float]]:
+    if not points:
+        return None
+    lats = [p.get("lat") for p in points if p.get("lat") is not None]
+    lons = [p.get("lon") for p in points if p.get("lon") is not None]
+    if not lats or not lons:
+        return None
+    return {
+        "min_lat": min(lats),
+        "max_lat": max(lats),
+        "min_lon": min(lons),
+        "max_lon": max(lons),
+    }
 
 # NOAA API Headers
 NOAA_USER_AGENT = os.environ.get('NOAA_USER_AGENT', 'Routecast/1.0 (contact@routecast.app)')
@@ -165,7 +169,11 @@ def get_gemini_model() -> "genai.GenerativeModel":
         logger.error("GEMINI_API_KEY is not set")
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY is not set")
 
-    genai.configure(api_key=api_key)
+    genai.configure(
+        api_key=api_key,
+        client_options={"api_endpoint": "https://generativelanguage.googleapis.com"},
+        api_version="v1",
+    )
     model_name = os.environ.get("GEMINI_MODEL", GEMINI_MODEL)
     return genai.GenerativeModel(model_name)
 
@@ -1766,6 +1774,12 @@ def derive_road_condition(weather: Optional[WeatherData], alerts: List[WeatherAl
 async def get_turn_by_turn_directions(origin_coords: tuple, dest_coords: tuple, waypoints_weather: List[WaypointWeather]) -> List[TurnByTurnStep]:
     """Get turn-by-turn directions with road conditions from Mapbox."""
     steps = []
+    if not MAPBOX_ACCESS_TOKEN:
+        logger.warning("Turn-by-turn skipped: MAPBOX_ACCESS_TOKEN missing")
+        return steps
+    if not origin_coords or not dest_coords:
+        logger.warning("Turn-by-turn skipped: origin/destination missing")
+        return steps
     
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
@@ -1783,9 +1797,14 @@ async def get_turn_by_turn_directions(origin_coords: tuple, dest_coords: tuple, 
             if response.status_code != 200:
                 logger.warning("Turn-by-turn request failed status=%s body=%s", response.status_code, response.text[:200])
                 return steps
-                
+
             data = response.json()
+            api_code = data.get('code')
+            if api_code and api_code != 'Ok':
+                logger.warning("Turn-by-turn Mapbox error code=%s message=%s", api_code, data.get('message'))
+                return steps
             if not data.get('routes'):
+                logger.warning("Turn-by-turn: no routes returned")
                 return steps
             
             route = data['routes'][0]
@@ -1837,8 +1856,10 @@ async def get_turn_by_turn_directions(origin_coords: tuple, dest_coords: tuple, 
                             has_alert=has_alert
                         ))
     
-    except Exception as e:
-        logger.warning(f"Turn-by-turn directions error: {e}")
+    except httpx.TimeoutException:
+        logger.warning("Turn-by-turn directions timeout")
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Turn-by-turn directions error", exc_info=e)
     
     return steps[:50]  # Limit to 50 steps
 
@@ -4138,6 +4159,78 @@ def _empty_overpass_response(source: str = "overpass_unavailable") -> OvernightS
     return OvernightSearchResponse(spots=[], is_premium_locked=False, ok=True, source=source)
 
 
+async def _search_walmart_google_places(request: OvernightSearchRequest) -> List[OvernightStop]:
+    """Search Walmart locations via Google Places Nearby Search (v1)."""
+    if not GOOGLE_PLACES_API_KEY:
+        logger.error("GOOGLE_PLACES_API_KEY missing for Walmart search")
+        raise HTTPException(status_code=503, detail="Walmart search unavailable: missing GOOGLE_PLACES_API_KEY")
+
+    radius_meters = int(request.radius_miles * 1609.34)
+    url = "https://places.googleapis.com/v1/places:searchNearby"
+    body = {
+        "location": {"latLng": {"latitude": request.latitude, "longitude": request.longitude}},
+        "radius": radius_meters,
+        "includedTypes": ["supermarket", "department_store", "grocery_store"],
+        "keyword": "Walmart",
+        "maxResultCount": 30,
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": GOOGLE_PLACES_API_KEY,
+        "X-Goog-FieldMask": "places.displayName,places.formattedAddress,places.location,places.nationalPhoneNumber,places.websiteUri,places.regularOpeningHours",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=12.0) as client:
+            resp = await client.post(url, headers=headers, json=body)
+            resp.raise_for_status()
+            payload = resp.json()
+    except httpx.HTTPStatusError as exc:
+        detail = getattr(exc.response, "text", "")[:200]
+        logger.warning("Walmart Google Places status error %s body=%s", exc.response.status_code, detail)
+        raise HTTPException(status_code=503, detail="Walmart search service error")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Walmart Google Places request failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Walmart search temporarily unavailable")
+
+    places = payload.get("places", []) or []
+    stops: List[OvernightStop] = []
+
+    for place in places:
+        loc = place.get("location") or {}
+        lat = loc.get("latitude")
+        lon = loc.get("longitude")
+        if lat is None or lon is None:
+            continue
+
+        distance_miles = _haversine_meters(request.latitude, request.longitude, lat, lon) * 0.000621371
+        display_name = (place.get("displayName") or {}).get("text") or "Walmart"
+        address = place.get("formattedAddress")
+        phone = place.get("nationalPhoneNumber")
+        website = place.get("websiteUri")
+        hours_desc = place.get("regularOpeningHours", {}).get("weekdayDescriptions")
+        hours = "; ".join(hours_desc) if hours_desc else None
+
+        stops.append(
+            OvernightStop(
+                name=display_name,
+                category="Walmart",
+                label=display_name,
+                distance_miles=distance_miles,
+                latitude=lat,
+                longitude=lon,
+                address=address,
+                phone=phone,
+                website=website,
+                hours=hours,
+                notes="Free overnight RV stays welcome. Call ahead to confirm with store manager.",
+            )
+        )
+
+    stops.sort(key=lambda x: x.distance_miles)
+    return stops
+
+
 @api_router.post("/casinos/search", response_model=OvernightSearchResponse)
 async def search_casinos(request: OvernightSearchRequest):
     try:
@@ -4180,45 +4273,45 @@ async def search_casinos(request: OvernightSearchRequest):
 @api_router.post("/walmart-parking/search", response_model=OvernightSearchResponse)
 async def search_walmart_parking(request: OvernightSearchRequest):
     try:
-        radius_meters = int(request.radius_miles * 1609.34)
-        overpass_query = f"""
-        [out:json][timeout:25];
-        (
-                    node["shop"="supermarket"]["name"~"Walmart|Wal-Mart",i](around:{radius_meters},{request.latitude},{request.longitude});
-                    way["shop"="supermarket"]["name"~"Walmart|Wal-Mart",i](around:{radius_meters},{request.latitude},{request.longitude});
-                    node["shop"="department_store"]["name"~"Walmart|Wal-Mart",i](around:{radius_meters},{request.latitude},{request.longitude});
-                    way["shop"="department_store"]["name"~"Walmart|Wal-Mart",i](around:{radius_meters},{request.latitude},{request.longitude});
-                    node["brand"~"Walmart|Wal-Mart",i](around:{radius_meters},{request.latitude},{request.longitude});
-                    way["brand"~"Walmart|Wal-Mart",i](around:{radius_meters},{request.latitude},{request.longitude});
-        );
-        out body;
-        >;
-        out skel qt;
-        """
+        logger.info(
+            "Walmart search start",
+            extra={
+                "lat": request.latitude,
+                "lon": request.longitude,
+                "radius_miles": request.radius_miles,
+                "source": "google_places",
+            },
+        )
 
-        osm_data = await _fetch_overpass_data(overpass_query, "Walmart")
-
-        stops: List[OvernightStop] = []
-        for element in osm_data.get("elements", []):
-            stop = _build_stop(
-                element,
-                request,
-                "Walmart",
-                "Free overnight RV stays welcome. Call ahead to confirm with store manager.",
-            )
-            if stop:
-                stops.append(stop)
-
-        stops.sort(key=lambda x: x.distance_miles)
+        stops = await _search_walmart_google_places(request)
+        logger.info(
+            "Walmart search complete",
+            extra={
+                "count": len(stops),
+                "radius_miles": request.radius_miles,
+                "source": "google_places",
+            },
+        )
         return OvernightSearchResponse(
             spots=_dedupe_and_limit(stops),
             is_premium_locked=False,
             ok=True,
-            source="overpass",
+            source="google_places",
         )
+    except HTTPException:
+        raise
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Walmart search using Overpass failed: %s", exc)
-        return _empty_overpass_response()
+        logger.warning(
+            "Walmart search failed",
+            exc_info=exc,
+            extra={
+                "lat": request.latitude,
+                "lon": request.longitude,
+                "radius_miles": request.radius_miles,
+                "source": "google_places",
+            },
+        )
+        raise HTTPException(status_code=503, detail="Walmart search temporarily unavailable")
 
 
 # Alias to support /api/walmart/search

@@ -88,18 +88,46 @@ export default function WalmartParkingScreen() {
   };
 
   const searchWalmart = async () => {
+    const startedAt = Date.now();
+    const controller = new AbortController();
+    // Guard against a stuck request that would leave the spinner active forever
+    const timeoutId = setTimeout(() => {
+      console.log('[walmart] aborting request after 15s without response');
+      controller.abort();
+    }, 15000);
+
+    console.log('[walmart] starting search', {
+      latitude,
+      longitude,
+      searchRadius,
+      url: buildUrl('walmart-parking/search'),
+    });
+
     setLoading(true);
     setSpots([]);
     setError('');
     setOverpassUnavailable(false);
+
     try {
-      const resp = await axios.post(buildUrl('walmart-parking/search'), {
-        latitude: parseFloat(latitude),
-        longitude: parseFloat(longitude),
-        radius_miles: parseInt(searchRadius, 10),
-      });
+      const resp = await axios.post(
+        buildUrl('walmart-parking/search'),
+        {
+          latitude: parseFloat(latitude),
+          longitude: parseFloat(longitude),
+          radius_miles: parseInt(searchRadius, 10),
+        },
+        { signal: controller.signal }
+      );
+
       const data = resp.data || {};
       const results = (data.spots || data.results || []) as OvernightSpot[];
+      console.log('[walmart] response received', {
+        status: resp.status,
+        durationMs: Date.now() - startedAt,
+        count: results.length,
+        source: data.source,
+      });
+
       setSpots(results);
       setOverpassUnavailable(data.source === 'overpass_unavailable');
 
@@ -110,9 +138,17 @@ export default function WalmartParkingScreen() {
         setError('No Walmart stores with overnight parking found nearby. Try increasing the search radius.');
       }
     } catch (err: any) {
-      console.error('Walmart parking search error:', err);
-      setError(err?.response?.data?.detail || err?.message || 'Failed to find Walmart overnight parking. Tap to retry.');
+      const durationMs = Date.now() - startedAt;
+      const isAbort = err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED';
+      console.error('[walmart] search error', { err, durationMs, aborted: isAbort });
+
+      if (isAbort) {
+        setError('Walmart search is taking too long. Please try again or check your connection.');
+      } else {
+        setError(err?.response?.data?.detail || err?.message || 'Failed to find Walmart overnight parking. Tap to retry.');
+      }
     } finally {
+      clearTimeout(timeoutId);
       setLoading(false);
     }
   };
