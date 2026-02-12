@@ -63,6 +63,8 @@ def test_span_computation_and_clamp():
     alert = ice_alerts[0]
     assert alert.road_name == "I-80"
     assert alert.span_miles and 19.5 <= alert.span_miles <= 20.5
+    assert alert.hazard_id, "Hazard ID should be populated"
+    assert alert.rationale, "Rationale should be populated"
 
 
 def test_merge_adjacent_hazards():

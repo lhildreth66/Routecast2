@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 import uuid
 import math
+import hashlib
 from io import BytesIO
 from datetime import datetime, timedelta, timezone
 import httpx
@@ -110,6 +111,7 @@ HAZARD_CONFIG = {
     "slippery_temp_f": _env_float("HAZARD_SLIPPERY_TEMP_F", 36),
     "merge_gap_miles": _env_float("HAZARD_MERGE_GAP_MILES", 5.0),
     "default_span_miles": _env_float("HAZARD_DEFAULT_SPAN_MILES", 5.0),
+    "max_alerts": int(_env_float("MAX_ALERTS_PER_ROUTE", 10)),
 }
 
 # Log Mapbox token presence without exposing the secret
@@ -296,6 +298,8 @@ class HazardAlert(BaseModel):
     span_miles: Optional[float] = None
     alert_level: Optional[str] = None  # Watch | Warning | Advisory | Statement | Unknown
     driver_action: Optional[str] = None
+    rationale: Optional[str] = None  # why this alert fired
+    hazard_id: Optional[str] = None  # stable deterministic id for client diffing
 
 class RestStop(BaseModel):
     name: str
@@ -1467,6 +1471,20 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
             return "Reduce speed and prepare to stop if conditions worsen."
         return "Drive cautiously and allow extra stopping distance."
 
+    def build_rationale(**kwargs) -> str:
+        parts = []
+        for k, v in kwargs.items():
+            parts.append(f"{k}={v}")
+        return ", ".join(parts)
+
+    def compute_hazard_id(alert: HazardAlert) -> str:
+        start = round(alert.distance_miles or 0.0, 2)
+        span = round(alert.span_miles or cfg["default_span_miles"], 2)
+        road = alert.road_name or "road"
+        level = alert.alert_level or alert.severity or ""
+        raw = f"{alert.type}|{level}|{road}|{start}|{span}"
+        return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
+
     def extract_road_and_span(text: Optional[str]) -> tuple[Optional[str], Optional[float]]:
         if not text:
             return None, None
@@ -1551,6 +1569,7 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
             span_miles = sanitize_span(span_miles)
             alert_level = classify_level(nws.event or nws.headline)
             driver_action = pick_driver_action(alert_level, nws.instruction)
+            rationale = build_rationale(source="nws", event=nws.event or nws.headline)
 
             props = {
                 "event": nws.event,
@@ -1589,6 +1608,7 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                 span_miles=span_miles,
                 alert_level=alert_level,
                 driver_action=driver_action,
+                rationale=rationale,
             )
             enrich_alert_fields(alert_obj)
             alerts.append(alert_obj)
@@ -1609,6 +1629,7 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                 severity = "medium"
             alert_level = level_for_severity(severity)
             driver_action = driver_advice("wind", severity)
+            rationale = build_rationale(wind_mph=wind_speed, threshold_medium=cfg["wind_medium_mph"], threshold_high=cfg["wind_high_mph"], threshold_extreme=cfg["wind_extreme_mph"])
             alert_obj = HazardAlert(
                 type="wind",
                 severity=severity,
@@ -1623,7 +1644,8 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                 alert_level=alert_level,
                 driver_action=driver_action,
                 description=conditions_detail or None,
-                full_description=conditions_detail or None
+                full_description=conditions_detail or None,
+                rationale=rationale,
             )
             enrich_alert_fields(alert_obj)
             alerts.append(alert_obj)
@@ -1634,6 +1656,7 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
             span = hazard_span_miles(idx, is_slippery_wp)
             alert_level = level_for_severity("high")
             driver_action = driver_advice("rain", "high")
+            rationale = build_rationale(conditions=conditions, span_miles=span or cfg["default_span_miles"])
             alert_obj = HazardAlert(
                 type="rain",
                 severity="high",
@@ -1648,7 +1671,8 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                 alert_level=alert_level,
                 driver_action=driver_action,
                 description=conditions_detail or None,
-                full_description=conditions_detail or None
+                full_description=conditions_detail or None,
+                rationale=rationale,
             )
             enrich_alert_fields(alert_obj)
             alerts.append(alert_obj)
@@ -1656,6 +1680,7 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
             span = hazard_span_miles(idx, is_slippery_wp)
             alert_level = level_for_severity("medium")
             driver_action = driver_advice("rain", "medium")
+            rationale = build_rationale(conditions=conditions, span_miles=span or cfg["default_span_miles"])
             alert_obj = HazardAlert(
                 type="rain",
                 severity="medium",
@@ -1670,7 +1695,8 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                 alert_level=alert_level,
                 driver_action=driver_action,
                 description=conditions_detail or None,
-                full_description=conditions_detail or None
+                full_description=conditions_detail or None,
+                rationale=rationale,
             )
             enrich_alert_fields(alert_obj)
             alerts.append(alert_obj)
@@ -1680,6 +1706,7 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
             span = hazard_span_miles(idx, is_snow_wp)
             alert_level = level_for_severity("high")
             driver_action = driver_advice("snow", "high")
+            rationale = build_rationale(conditions=conditions, temp_f=wp.weather.temperature, span_miles=span or cfg["default_span_miles"])
             alert_obj = HazardAlert(
                 type="snow",
                 severity="high",
@@ -1694,7 +1721,8 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                 alert_level=alert_level,
                 driver_action=driver_action,
                 description=conditions_detail or None,
-                full_description=conditions_detail or None
+                full_description=conditions_detail or None,
+                rationale=rationale,
             )
             enrich_alert_fields(alert_obj)
             alerts.append(alert_obj)
@@ -1705,6 +1733,7 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
             span = hazard_span_miles(idx, is_ice_wp)
             alert_level = level_for_severity("high")
             driver_action = driver_advice("ice", "high")
+            rationale = build_rationale(temp_f=temp, threshold=cfg["ice_temp_f"], span_miles=span or cfg["default_span_miles"])
             alert_obj = HazardAlert(
                 type="ice",
                 severity="high",
@@ -1719,7 +1748,8 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                 alert_level=alert_level,
                 driver_action=driver_action,
                 description=conditions_detail or None,
-                full_description=conditions_detail or None
+                full_description=conditions_detail or None,
+                rationale=rationale,
             )
             enrich_alert_fields(alert_obj)
             alerts.append(alert_obj)
@@ -1729,6 +1759,7 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
             span = hazard_span_miles(idx, is_slippery_wp)
             alert_level = level_for_severity("medium")
             driver_action = driver_advice("visibility", "medium")
+            rationale = build_rationale(conditions=conditions, span_miles=span or cfg["default_span_miles"])
             alert_obj = HazardAlert(
                 type="visibility",
                 severity="high",
@@ -1743,7 +1774,8 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                 alert_level=alert_level,
                 driver_action=driver_action,
                 description=conditions_detail or None,
-                full_description=conditions_detail or None
+                full_description=conditions_detail or None,
+                rationale=rationale,
             )
             enrich_alert_fields(alert_obj)
             alerts.append(alert_obj)
@@ -1817,9 +1849,19 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
             seen_messages.add(message_key)
             unique_alerts.append(alert)
     
-    # Sort by severity (most critical first), then by distance
+    # Sort by severity (most critical first), then by distance (earlier), then by span descending
     severity_order = {"extreme": 0, "high": 1, "medium": 2, "low": 3}
-    unique_alerts.sort(key=lambda x: (severity_order.get(x.severity, 3), x.distance_miles))
+    unique_alerts.sort(key=lambda x: (severity_order.get(x.severity, 3), x.distance_miles or 0, -(x.span_miles or 0)))
+
+    # Apply deterministic hazard IDs and rationale if missing
+    for alert in unique_alerts:
+        if not alert.rationale:
+            alert.rationale = "generated hazard"
+        alert.hazard_id = compute_hazard_id(alert)
+
+    # Cap total alerts per route (env-driven)
+    max_alerts = max(1, cfg.get("max_alerts", 10))
+    limited_alerts = unique_alerts[:max_alerts]
 
     if route_id:
         logger.info(
@@ -1831,9 +1873,11 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                 "alerts_pre": len(alerts),
                 "alerts_merged": len(merged_alerts),
                 "alerts_final": len(unique_alerts),
+                "alerts_returned": len(limited_alerts),
+                "max_alerts": max_alerts,
             },
         )
-    for alert in unique_alerts:
+    for alert in limited_alerts:
         logger.debug(
             "hazard_alert_detail",
             extra={
@@ -1843,11 +1887,11 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                 "road": alert.road_name,
                 "start_miles": alert.distance_miles,
                 "span_miles": alert.span_miles,
+                "hazard_id": alert.hazard_id,
             },
         )
     
-    # Limit to 10 most important alerts to avoid overwhelming users
-    return unique_alerts[:10]
+    return limited_alerts
 
 async def find_rest_stops(route_geometry: str, waypoints_weather: List[WaypointWeather]) -> List[RestStop]:
     """Find rest stops, gas stations along the route with weather at arrival."""
