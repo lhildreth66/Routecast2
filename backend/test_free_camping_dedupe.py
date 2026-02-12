@@ -69,3 +69,40 @@ def test_free_camping_dedupes_by_bucket_and_prefers_rating_cell_then_distance():
     other = next(s for s in deduped if s.name == "Different Bucket")
     assert other.latitude == pytest.approx(41.7721)
     assert other.longitude == pytest.approx(-91.5701)
+
+
+def test_free_camping_dedupes_deterministically_on_tie():
+    base = {
+        "type": "Campground",
+        "description": "Test",
+        "amenities": ["Water"],
+        "stay_limit": "14 days",
+        "access_difficulty": "easy",
+        "elevation_ft": 1000,
+        "free": True,
+        "cell_coverage": "good",
+        "rating": 4.0,
+    }
+
+    spot1 = CampingSpot(
+        name="A",
+        distance_miles=2.0,
+        latitude=41.7610,
+        longitude=-91.5660,
+        source_id="osm-2",
+        **base,
+    )
+    spot2 = CampingSpot(
+        name="B",
+        distance_miles=2.0,
+        latitude=41.7611,
+        longitude=-91.5661,
+        source_id="osm-1",
+        **base,
+    )
+
+    deduped = _dedupe_camping_spots([spot1, spot2], precision=3)
+
+    assert len(deduped) == 1
+    # osm-1 should win because of stable id ordering when all else ties
+    assert deduped[0].source_id == "osm-1"

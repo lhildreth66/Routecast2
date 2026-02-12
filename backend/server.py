@@ -697,6 +697,7 @@ class CampingSpot(BaseModel):
     elevation_ft: int
     rating: float  # 0-5
     free: bool
+    source_id: Optional[str] = None
     phone: Optional[str] = None
     website: Optional[str] = None
     contact: Optional[str] = None
@@ -4733,6 +4734,20 @@ def _dedupe_camping_spots(spots: List[CampingSpot], precision: int = 3) -> List[
         return (rating, coverage, -distance)
 
     buckets: Dict[Any, CampingSpot] = {}
+    replaced_debug: List[str] = []
+
+    def _stable_tiebreak(candidate: CampingSpot, current: CampingSpot) -> bool:
+        """Return True if candidate should replace current when primary scores tie."""
+        cand_id = candidate.source_id or ""
+        curr_id = current.source_id or ""
+        if cand_id and curr_id and cand_id != curr_id:
+            return cand_id < curr_id
+        cand_coord = f"{candidate.latitude:.6f},{candidate.longitude:.6f}"
+        curr_coord = f"{current.latitude:.6f},{current.longitude:.6f}"
+        if cand_coord != curr_coord:
+            return cand_coord < curr_coord
+        return False  # keep first-seen if everything matches
+
     for spot in spots:
         key = (round(spot.latitude, precision), round(spot.longitude, precision))
         existing = buckets.get(key)
@@ -4740,8 +4755,28 @@ def _dedupe_camping_spots(spots: List[CampingSpot], precision: int = 3) -> List[
             buckets[key] = spot
             continue
 
-        if _score(spot) > _score(existing):
+        existing_score = _score(existing)
+        candidate_score = _score(spot)
+
+        if candidate_score > existing_score:
             buckets[key] = spot
+            replaced_debug.append(f"bucket={key} reason=score")
+            continue
+
+        if candidate_score == existing_score and spot.distance_miles == existing.distance_miles:
+            if _stable_tiebreak(spot, existing):
+                buckets[key] = spot
+                replaced_debug.append(f"bucket={key} reason=stable_tiebreak")
+                continue
+
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            "[camping] dedupe buckets=%d original=%d deduped=%d replacements=%s",
+            len(buckets),
+            len(spots),
+            len(buckets.values()),
+            replaced_debug,
+        )
 
     return sorted(buckets.values(), key=lambda x: x.distance_miles)
 
@@ -4827,7 +4862,7 @@ async def search_free_camping(request: FreeCampingRequest):
                 elif tags.get("tourism") == "camp_site":
                     name = "Public Campsite"
                 else:
-                    name = f"Camping near ({round(lat, 3)}, {round(lon, 3)})"
+                    name = "Free Camping Spot"
             
             # Extract contact information
             phone = tags.get("phone") or tags.get("contact:phone")
@@ -4910,6 +4945,7 @@ async def search_free_camping(request: FreeCampingRequest):
                 distance_miles=round(distance_miles, 1),
                 latitude=lat,
                 longitude=lon,
+                source_id=str(element.get("id")) if element.get("id") else None,
                 description=description,
                 amenities=amenities,
                 stay_limit=stay_limit,
@@ -5291,6 +5327,7 @@ def _build_stop(element: Dict[str, Any], request: OvernightSearchRequest, catego
 
 def _dedupe_and_limit(stops: List[OvernightStop], limit: int = 25) -> List[OvernightStop]:
     seen: Dict[Any, OvernightStop] = {}
+    replaced_debug: List[str] = []
 
     def _score(stop: OvernightStop) -> int:
         # Prefer named items with addresses and contact info when deduping
@@ -5312,9 +5349,26 @@ def _dedupe_and_limit(stops: List[OvernightStop], limit: int = 25) -> List[Overn
             candidate_score = _score(stop)
             if candidate_score > current_score:
                 seen[key] = stop
+                replaced_debug.append(f"bucket={key} reason=score")
                 continue
-            if candidate_score == current_score and stop.distance_miles < existing.distance_miles:
-                seen[key] = stop
+            if candidate_score == current_score:
+                if stop.distance_miles < existing.distance_miles:
+                    seen[key] = stop
+                    replaced_debug.append(f"bucket={key} reason=distance")
+                    continue
+                if stop.distance_miles == existing.distance_miles:
+                    existing_id = existing.osm_id or 0
+                    candidate_id = stop.osm_id or 0
+                    if candidate_id and existing_id and candidate_id != existing_id:
+                        if candidate_id < existing_id:
+                            seen[key] = stop
+                            replaced_debug.append(f"bucket={key} reason=osm_id")
+                            continue
+                    existing_coord = f"{existing.latitude:.6f},{existing.longitude:.6f}"
+                    candidate_coord = f"{stop.latitude:.6f},{stop.longitude:.6f}"
+                    if candidate_coord < existing_coord:
+                        seen[key] = stop
+                        replaced_debug.append(f"bucket={key} reason=coord")
             continue
         seen[key] = stop
 
@@ -5355,6 +5409,15 @@ def _dedupe_and_limit(stops: List[OvernightStop], limit: int = 25) -> List[Overn
 
         if not replaced:
             merged.append(stop)
+
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug(
+            "[overnight] dedupe buckets=%d original=%d deduped=%d replacements=%s",
+            len(seen),
+            len(stops),
+            len(unique),
+            replaced_debug,
+        )
 
     return merged[:limit]
 
