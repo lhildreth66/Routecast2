@@ -1367,6 +1367,24 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
             "Statement": "Monitor conditions and drive cautiously.",
         }
         return lookup.get(level, "Drive with caution and follow posted guidance.")
+
+    def enrich_alert_fields(alert: HazardAlert):
+        if not alert.road_name or alert.span_miles is None:
+            for text in [alert.full_description, alert.description, alert.message, alert.recommendation]:
+                road, span = extract_road_and_span(text or "")
+                if not alert.road_name and road:
+                    alert.road_name = road
+                if alert.span_miles is None and span is not None:
+                    alert.span_miles = span
+                if alert.road_name and alert.span_miles is not None:
+                    break
+
+        if not alert.alert_level:
+            level_map = {"extreme": "Warning", "high": "Warning", "medium": "Advisory", "low": "Statement"}
+            alert.alert_level = level_map.get(alert.severity.lower(), "Unknown") if hasattr(alert, "severity") else "Unknown"
+
+        if not alert.driver_action:
+            alert.driver_action = alert.recommendation or "Drive with caution and follow posted guidance."
     
     for wp in waypoints_weather:
         if not wp.weather:
@@ -1405,31 +1423,31 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                 "issued": nws.issued,
             }
 
-            alerts.append(
-                HazardAlert(
-                    type="nws",
-                    severity=severity,
-                    distance_miles=distance,
-                    eta_minutes=eta_mins,
-                    message=nws.headline or nws.event or "Weather Alert",
-                    recommendation="Follow NWS guidance and monitor local conditions",
-                    countdown_text=f"{nws.event or 'Alert'} near mile {int(distance)}",
-                    location_name=location_name,
-                    event=nws.event,
-                    headline=nws.headline,
-                    description=nws.description,
-                    full_description=nws.description,
-                    instruction=nws.instruction,
-                    areaDesc=nws.areas,
-                    onset=nws.onset,
-                    expires=nws.expires,
-                    properties=props,
-                    road_name=road_name,
-                    span_miles=span_miles,
-                    alert_level=alert_level,
-                    driver_action=driver_action,
-                )
+            alert_obj = HazardAlert(
+                type="nws",
+                severity=severity,
+                distance_miles=distance,
+                eta_minutes=eta_mins,
+                message=nws.headline or nws.event or "Weather Alert",
+                recommendation="Follow NWS guidance and monitor local conditions",
+                countdown_text=f"{nws.event or 'Alert'} near mile {int(distance)}",
+                location_name=location_name,
+                event=nws.event,
+                headline=nws.headline,
+                description=nws.description,
+                full_description=nws.description,
+                instruction=nws.instruction,
+                areaDesc=nws.areas,
+                onset=nws.onset,
+                expires=nws.expires,
+                properties=props,
+                road_name=road_name,
+                span_miles=span_miles,
+                alert_level=alert_level,
+                driver_action=driver_action,
             )
+            enrich_alert_fields(alert_obj)
+            alerts.append(alert_obj)
         
         # Wind hazards
         wind_str = wp.weather.wind_speed or "0 mph"
@@ -1440,7 +1458,7 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
             
         if wind_speed > 25:
             severity = "extreme" if wind_speed > 40 else "high" if wind_speed > 30 else "medium"
-            alerts.append(HazardAlert(
+            alert_obj = HazardAlert(
                 type="wind",
                 severity=severity,
                 distance_miles=distance,
@@ -1449,12 +1467,14 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                 recommendation=f"Reduce speed to {max(35, 65 - wind_speed + 25)} mph",
                 countdown_text=f"High winds in {eta_mins} minutes" if eta_mins > 0 else "High winds at start",
                 location_name=location_name
-            ))
+            )
+            enrich_alert_fields(alert_obj)
+            alerts.append(alert_obj)
             
         # Rain/visibility hazards
         conditions = (wp.weather.conditions or "").lower()
         if "heavy rain" in conditions or "storm" in conditions:
-            alerts.append(HazardAlert(
+            alert_obj = HazardAlert(
                 type="rain",
                 severity="high",
                 distance_miles=distance,
@@ -1463,9 +1483,11 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                 recommendation="Reduce speed, increase following distance to 4 seconds",
                 countdown_text=f"Heavy rain in {eta_mins} minutes at mile {int(distance)}",
                 location_name=location_name
-            ))
+            )
+            enrich_alert_fields(alert_obj)
+            alerts.append(alert_obj)
         elif "rain" in conditions or "shower" in conditions:
-            alerts.append(HazardAlert(
+            alert_obj = HazardAlert(
                 type="rain",
                 severity="medium",
                 distance_miles=distance,
@@ -1474,11 +1496,13 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                 recommendation="Turn on headlights and wipers",
                 countdown_text=f"Rain in {eta_mins} minutes",
                 location_name=location_name
-            ))
+            )
+            enrich_alert_fields(alert_obj)
+            alerts.append(alert_obj)
             
         # Snow/ice hazards
         if "snow" in conditions:
-            alerts.append(HazardAlert(
+            alert_obj = HazardAlert(
                 type="snow",
                 severity="high",
                 distance_miles=distance,
@@ -1487,12 +1511,14 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                 recommendation="Reduce speed by 50%, use winter tires if available",
                 countdown_text=f"Snow conditions in {eta_mins} minutes",
                 location_name=location_name
-            ))
+            )
+            enrich_alert_fields(alert_obj)
+            alerts.append(alert_obj)
             
         # Temperature-based ice warnings
         temp = wp.weather.temperature or 70
         if temp <= 32:
-            alerts.append(HazardAlert(
+            alert_obj = HazardAlert(
                 type="ice",
                 severity="high",
                 distance_miles=distance,
@@ -1501,11 +1527,13 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                 recommendation="Watch for black ice on bridges and overpasses",
                 countdown_text=f"Ice risk zone in {eta_mins} minutes",
                 location_name=location_name
-            ))
+            )
+            enrich_alert_fields(alert_obj)
+            alerts.append(alert_obj)
             
         # Fog warnings
         if "fog" in conditions:
-            alerts.append(HazardAlert(
+            alert_obj = HazardAlert(
                 type="visibility",
                 severity="high",
                 distance_miles=distance,
@@ -1514,7 +1542,9 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                 recommendation="Use low beams, reduce speed to match visibility",
                 countdown_text=f"Fog in {eta_mins} minutes",
                 location_name=location_name
-            ))
+            )
+            enrich_alert_fields(alert_obj)
+            alerts.append(alert_obj)
             
         # Weather alerts from NOAA - deduplicate by alert ID and event type
         seen_alert_ids = set()
@@ -1526,7 +1556,7 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
             seen_alert_ids.add(alert_key)
             
             severity_map = {"Extreme": "extreme", "Severe": "high", "Moderate": "medium"}
-            alerts.append(HazardAlert(
+            alert_obj = HazardAlert(
                 type="alert",
                 severity=severity_map.get(alert.severity, "medium"),
                 distance_miles=distance,
@@ -1535,7 +1565,9 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                 recommendation=alert.headline[:100],
                 countdown_text=f"{alert.event} in {eta_mins} minutes",
                 location_name=location_name
-            ))
+            )
+            enrich_alert_fields(alert_obj)
+            alerts.append(alert_obj)
     
     # Deduplicate by message content (second level deduplication)
     seen_messages = set()
@@ -1852,10 +1884,33 @@ async def get_turn_by_turn_directions(origin_coords: tuple, dest_coords: tuple, 
     if not origin_coords or not dest_coords:
         logger.warning("Turn-by-turn skipped: origin/destination missing")
         return steps
+
+    def normalize_coords(val) -> Optional[tuple]:
+        try:
+            # dict with lat/lon or lat/lng
+            if isinstance(val, dict):
+                lat = val.get("lat") or val.get("latitude")
+                lon = val.get("lon") or val.get("lng") or val.get("longitude")
+                if lat is not None and lon is not None:
+                    return float(lat), float(lon)
+            # list/tuple [lat, lon]
+            if isinstance(val, (list, tuple)) and len(val) >= 2:
+                return float(val[0]), float(val[1])
+        except Exception:
+            return None
+        return None
+
+    origin_norm = normalize_coords(origin_coords)
+    dest_norm = normalize_coords(dest_coords)
+    if not origin_norm or not dest_norm:
+        logger.warning("Turn-by-turn skipped: unable to normalize coords", extra={"origin": origin_coords, "dest": dest_coords})
+        return steps
+    origin_lat, origin_lon = origin_norm
+    dest_lat, dest_lon = dest_norm
     
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            coords_str = f"{origin_coords[1]},{origin_coords[0]};{dest_coords[1]},{dest_coords[0]}"
+            coords_str = f"{origin_lon},{origin_lat};{dest_lon},{dest_lat}"
             url = f"https://api.mapbox.com/directions/v5/mapbox/driving/{coords_str}"
             params = {
                 'access_token': MAPBOX_ACCESS_TOKEN,
