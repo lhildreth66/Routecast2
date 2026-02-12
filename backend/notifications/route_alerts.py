@@ -502,7 +502,9 @@ class CriticalRouteAlertWorker:
             bbox,
         )
 
-        if sample_points_count == 0 and route_points:
+        resample_needed = sample_points_count < 3
+
+        if resample_needed and route_points:
             sample_miles = float(os.environ.get("ROUTE_ALERTS_SAMPLING_MILES", 10.0))
             max_points = int(os.environ.get("ROUTE_ALERTS_MAX_POINTS", 25))
             try:
@@ -644,11 +646,10 @@ class CriticalRouteAlertWorker:
         props = alert.get("properties", {})
         event = props.get("event", "")
         severity = (props.get("severity") or "").lower()
-        if event not in self.CRITICAL_EVENTS:
+        # Accept all NWS alerts except explicitly minor/unknown/test levels; do not filter by event type.
+        if not event:
             return False
-        if event == "Severe Thunderstorm Warning" and severity not in {"severe", "extreme"}:
-            return False
-        if severity in {"minor", "unknown"}:
+        if severity in {"minor", "unknown", "test"}:
             return False
         return True
 
