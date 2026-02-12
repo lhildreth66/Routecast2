@@ -227,6 +227,7 @@ ROAD_CONDITIONS = {
     "flooded": {"severity": 4, "color": "#dc2626", "icon": "🌊", "label": "FLOODING"},
     "low_visibility": {"severity": 2, "color": "#9ca3af", "icon": "🌫️", "label": "LOW VIS"},
     "dangerous_wind": {"severity": 3, "color": "#8b5cf6", "icon": "💨", "label": "HIGH WIND"},
+    "out_of_coverage": {"severity": 0, "color": "#6b7280", "icon": "📡", "label": "OUT OF COVERAGE"},
 }
 
 class StopPoint(BaseModel):
@@ -421,6 +422,8 @@ class RouteWeatherResponse(BaseModel):
     alternate_routes: List[AlternateRoute] = []
     reroute_recommended: bool = False
     reroute_reason: Optional[str] = None
+    coverage_gaps_segments: int = 0
+    coverage_gaps_miles: float = 0.0
 
 class SavedRoute(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -2100,17 +2103,31 @@ def calculate_optimal_departure(origin: str, destination: str, waypoints_weather
         conditions_summary=conditions_summary
     )
 
+def _weather_is_missing(weather: Optional[WeatherData]) -> bool:
+    """Return True when provider returned no usable weather data."""
+    if not weather:
+        return True
+    fields = [
+        weather.temperature,
+        weather.wind_speed,
+        weather.conditions,
+        weather.icon,
+        weather.humidity,
+    ]
+    return all(v in (None, "", []) for v in fields)
+
+
 def derive_road_condition(weather: Optional[WeatherData], alerts: List[WeatherAlert]) -> RoadCondition:
     """Derive road surface condition from weather data."""
-    if not weather:
+    if _weather_is_missing(weather):
         return RoadCondition(
-            condition="unknown",
+            condition="out_of_coverage",
             severity=0,
-            label="UNKNOWN",
-            icon="❓",
+            label="OUT OF COVERAGE",
+            icon="📡",
             color="#6b7280",
-            description="Weather data unavailable",
-            recommendation="Drive with normal caution"
+            description="No provider coverage for this segment",
+            recommendation="Coverage limited here; drive with normal caution"
         )
     
     temp = weather.temperature or 50
@@ -2359,35 +2376,55 @@ def analyze_route_conditions(waypoints_weather: List[WaypointWeather]) -> tuple:
     worst_condition = "dry"
     reroute_needed = False
     reroute_reason = None
-    
-    for wp in waypoints_weather:
+    coverage_gaps_segments = 0
+    coverage_gap_miles = 0.0
+
+    # Precompute distances to estimate gap miles
+    distances = [wp.waypoint.distance_from_start for wp in waypoints_weather]
+
+    for idx, wp in enumerate(waypoints_weather):
         road_cond = derive_road_condition(wp.weather, wp.alerts)
         all_conditions.append(road_cond)
-        
-        if road_cond.severity > worst_severity:
+
+        if road_cond.condition == "out_of_coverage":
+            coverage_gaps_segments += 1
+            # Estimate span to next point to approximate coverage gap mileage
+            if idx + 1 < len(waypoints_weather):
+                curr = wp.waypoint.distance_from_start or 0.0
+                nxt = distances[idx + 1] if distances[idx + 1] is not None else curr
+                span = max(0.0, (nxt or curr) - curr)
+                coverage_gap_miles += span
+        elif road_cond.severity > worst_severity:
             worst_severity = road_cond.severity
             worst_condition = road_cond.condition
-        
+
         # Check if reroute should be recommended
         if road_cond.severity >= 3:
             reroute_needed = True
             if not reroute_reason:
                 location = wp.waypoint.name or f"Mile {int(wp.waypoint.distance_from_start or 0)}"
                 reroute_reason = f"{road_cond.label} conditions at {location} - {road_cond.description}"
-    
+
     # Generate summary
     condition_counts = {}
     for c in all_conditions:
-        if c.condition != "dry":
+        if c.condition not in {"dry", "out_of_coverage"}:
             condition_counts[c.label] = condition_counts.get(c.label, 0) + 1
-    
-    if not condition_counts:
+
+    total_segments = len(all_conditions) or 1
+    coverage_majority = coverage_gaps_segments > (total_segments / 2)
+
+    if coverage_majority or (coverage_gaps_segments and not condition_counts):
+        summary = f"⚠️ Limited hazard coverage: {coverage_gaps_segments} segments out of provider coverage."
+    elif not condition_counts:
         summary = "✅ Good road conditions expected throughout your route"
     else:
         summary_parts = [f"{count} segments with {label}" for label, count in condition_counts.items()]
+        if coverage_gaps_segments:
+            summary_parts.append(f"coverage gaps: {coverage_gaps_segments} segments")
         summary = f"⚠️ Road hazards detected: {', '.join(summary_parts)}"
-    
-    return summary, worst_condition, reroute_needed, reroute_reason
+
+    return summary, worst_condition, reroute_needed, reroute_reason, coverage_gaps_segments, round(coverage_gap_miles, 1)
 
 
 def parse_lat_lng(value: Optional[str]) -> Optional[Dict[str, float]]:
@@ -2703,7 +2740,7 @@ async def get_route_weather(request: RouteRequest):
         trucker_warnings = generate_trucker_warnings(list(waypoints_weather), request.vehicle_height_ft)
     
     # NEW: Analyze road conditions
-    road_condition_summary, worst_road_condition, reroute_recommended, reroute_reason = analyze_route_conditions(list(waypoints_weather))
+    road_condition_summary, worst_road_condition, reroute_recommended, reroute_reason, coverage_gaps_segments, coverage_gap_miles = analyze_route_conditions(list(waypoints_weather))
     
     response = RouteWeatherResponse(
         id=route_id,
@@ -2731,7 +2768,9 @@ async def get_route_weather(request: RouteRequest):
         road_condition_summary=road_condition_summary,
         worst_road_condition=worst_road_condition,
         reroute_recommended=reroute_recommended,
-        reroute_reason=reroute_reason
+        reroute_reason=reroute_reason,
+        coverage_gaps_segments=coverage_gaps_segments,
+        coverage_gaps_miles=coverage_gap_miles,
     )
     
     # Save to database when configured

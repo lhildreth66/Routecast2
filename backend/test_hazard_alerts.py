@@ -3,6 +3,8 @@ import datetime
 import pytest
 
 from backend.server import (
+    analyze_route_conditions,
+    derive_road_condition,
     TurnByTurnStep,
     Waypoint,
     WaypointWeather,
@@ -222,6 +224,31 @@ def test_empty_steps_total_distance_fallback():
     assert a.road_name is not None
     assert a.hazard_id
     assert a.hazard_schema_version == 1
+
+
+def test_coverage_gaps_marked_out_of_coverage():
+    waypoints = []
+    for dist in [0, 50, 100, 150]:
+        wp = Waypoint(
+            lat=0.0,
+            lon=0.0,
+            name=f"Mile {dist}",
+            distance_from_start=dist,
+            eta_minutes=int(dist),
+            arrival_time=datetime.datetime.utcnow().isoformat(),
+        )
+        waypoints.append(WaypointWeather(waypoint=wp, weather=None, alerts=[]))
+
+    summary, worst_condition, reroute_needed, reroute_reason, coverage_segments, coverage_miles = analyze_route_conditions(waypoints)
+
+    assert "limited hazard coverage" in summary.lower()
+    assert "hazards detected" not in summary.lower()
+    assert coverage_segments == len(waypoints)
+    assert coverage_miles >= 149.9
+    assert reroute_needed is False
+
+    rc = derive_road_condition(None, [])
+    assert rc.condition == "out_of_coverage"
 
 
 def test_mapbox_route_empty_steps_distance_used():
