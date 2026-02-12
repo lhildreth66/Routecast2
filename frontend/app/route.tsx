@@ -74,13 +74,13 @@ const parseAlertTimestamp = (alert: HazardAlert): number | null => {
 const filterRecentAlerts = (
   alerts: HazardAlert[],
   windowMs = 2 * 60 * 60 * 1000,
-  limit = 5
+  limit = 10
 ): HazardAlert[] => {
   const cutoff = Date.now() - windowMs;
 
   return alerts
     .map((alert) => ({ alert, timestamp: parseAlertTimestamp(alert) }))
-    .filter(({ timestamp }) => timestamp === null || timestamp >= cutoff)
+    .filter(({ timestamp }) => timestamp !== null && timestamp >= cutoff)
     .sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
     .slice(0, limit)
     .map(({ alert }) => alert);
@@ -144,6 +144,10 @@ interface WaypointWeather {
   weather: WeatherData | null;
   alerts: WeatherAlert[];
 }
+  road_name?: string;
+  span_miles?: number;
+  alert_level?: string;
+  driver_action?: string;
 
 interface SafetyScore {
   overall_score: number;
@@ -533,13 +537,33 @@ export default function RouteScreen() {
     if (params.routeData) {
       try {
         const data = JSON.parse(params.routeData as string);
-        setRouteData(data);
+        const sanitized = {
+          ...data,
+          hazard_alerts: filterRecentAlerts(data?.hazard_alerts || [], 2 * 60 * 60 * 1000, 10),
+        };
+        setRouteData(sanitized);
       } catch (e) {
         console.error('Error parsing route data:', e);
       }
     }
     setLoading(false);
   }, [params.routeData]);
+
+  useEffect(() => {
+    const clearStaleAlertsCache = async () => {
+      try {
+        const keys = await AsyncStorage.getAllKeys();
+        const candidateKeys = keys.filter((k) => k.toLowerCase().includes('alert'));
+        if (candidateKeys.length > 0) {
+          await AsyncStorage.multiRemove(candidateKeys);
+        }
+      } catch (err) {
+        console.warn('[alerts] failed to clear cached alerts', err);
+      }
+    };
+
+    clearStaleAlertsCache();
+  }, []);
 
   useEffect(() => {
     if (requestedTab === 'alerts') {

@@ -271,6 +271,10 @@ class HazardAlert(BaseModel):
     onset: Optional[str] = None
     expires: Optional[str] = None
     properties: Optional[Dict[str, Any]] = None
+    road_name: Optional[str] = None
+    span_miles: Optional[float] = None
+    alert_level: Optional[str] = None  # Watch | Warning | Advisory | Statement | Unknown
+    driver_action: Optional[str] = None
 
 class RestStop(BaseModel):
     name: str
@@ -1018,7 +1022,8 @@ async def get_noaa_alerts(lat: float, lon: float) -> List[WeatherAlert]:
         raw_alerts = await get_providers().alerts.get_alerts(lat, lon)
         alerts: List[WeatherAlert] = []
         now = datetime.utcnow()
-        
+        cutoff = now - timedelta(hours=2)
+
         for alert in raw_alerts:
             # Parse timestamps to filter active alerts
             onset_str = alert.get('onset')
@@ -1029,6 +1034,12 @@ async def get_noaa_alerts(lat: float, lon: float) -> List[WeatherAlert]:
             instruction = alert.get('instruction')
             summary = alert.get('summary')
             urgency = alert.get('urgency')
+            sent_dt = None
+            try:
+                if sent_str:
+                    sent_dt = datetime.fromisoformat(sent_str.replace('Z', '+00:00'))
+            except Exception:
+                sent_dt = None
             
             # Determine if alert is currently active
             is_active = True
@@ -1057,7 +1068,7 @@ async def get_noaa_alerts(lat: float, lon: float) -> List[WeatherAlert]:
                 # If timestamp parsing fails, include the alert
                 pass
             
-            if is_active:
+            if is_active and (sent_dt is None or sent_dt >= cutoff):
                 alerts.append(
                     WeatherAlert(
                         id=alert.get('id', str(uuid.uuid4())),
@@ -1077,7 +1088,18 @@ async def get_noaa_alerts(lat: float, lon: float) -> List[WeatherAlert]:
                         ends=ends_str,
                     )
                 )
-        return alerts
+        # Sort newest first by sent/issued/effective and cap at 10
+        def _ts(a: WeatherAlert):
+            for candidate in [a.sent, a.issued, a.effective, a.onset, a.expires]:
+                if candidate:
+                    try:
+                        return datetime.fromisoformat(candidate.replace('Z', '+00:00'))
+                    except Exception:
+                        continue
+            return datetime.min
+
+        alerts.sort(key=_ts, reverse=True)
+        return alerts[:10]
     except Exception as e:
         logger.error(f"Alerts provider error for {lat},{lon}: {e}")
         return []
@@ -1303,6 +1325,48 @@ def calculate_safety_score(waypoints_weather: List[WaypointWeather], vehicle_typ
 def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_time: datetime) -> List[HazardAlert]:
     """Generate proactive hazard alerts with countdown timers."""
     alerts = []
+
+    def extract_road_and_span(text: Optional[str]) -> tuple[Optional[str], Optional[float]]:
+        if not text:
+            return None, None
+        road = None
+        span = None
+        # Simple highway pattern match (I-80, US-50, SR 24, Hwy 101)
+        road_match = re.search(r"\b(I-[0-9]{1,3}|US[- ]?[0-9]{1,3}|SR[- ]?[0-9]{1,3}|Hwy[- ]?[0-9]{1,3})\b", text, re.IGNORECASE)
+        if road_match:
+            road = road_match.group(1)
+        span_match = re.search(r"(\d+(?:\.\d+)?)\s*(?:mile|mi)\b", text, re.IGNORECASE)
+        if span_match:
+            try:
+                span = float(span_match.group(1))
+            except Exception:
+                span = None
+        return road, span
+
+    def classify_level(event_name: Optional[str]) -> str:
+        if not event_name:
+            return "Unknown"
+        name = event_name.lower()
+        if "warning" in name:
+            return "Warning"
+        if "watch" in name:
+            return "Watch"
+        if "advisory" in name:
+            return "Advisory"
+        if "statement" in name:
+            return "Statement"
+        return "Unknown"
+
+    def pick_driver_action(level: str, instruction: Optional[str]) -> str:
+        if instruction:
+            return instruction.strip()
+        lookup = {
+            "Warning": "Reduce speed and be prepared to stop if conditions worsen.",
+            "Watch": "Stay alert and plan for changing conditions ahead.",
+            "Advisory": "Use caution and allow extra travel time.",
+            "Statement": "Monitor conditions and drive cautiously.",
+        }
+        return lookup.get(level, "Drive with caution and follow posted guidance.")
     
     for wp in waypoints_weather:
         if not wp.weather:
@@ -1321,6 +1385,10 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                 "moderate": "medium",
                 "minor": "low",
             }.get(severity_raw, severity_raw or "medium")
+
+            road_name, span_miles = extract_road_and_span(nws.description or nws.summary or nws.headline or "")
+            alert_level = classify_level(nws.event or nws.headline)
+            driver_action = pick_driver_action(alert_level, nws.instruction)
 
             props = {
                 "event": nws.event,
@@ -1356,6 +1424,10 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                     onset=nws.onset,
                     expires=nws.expires,
                     properties=props,
+                    road_name=road_name,
+                    span_miles=span_miles,
+                    alert_level=alert_level,
+                    driver_action=driver_action,
                 )
             )
         

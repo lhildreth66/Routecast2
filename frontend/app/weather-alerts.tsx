@@ -49,6 +49,10 @@ interface HazardAlert {
     onset?: string;
     expires?: string;
   };
+  road_name?: string;
+  span_miles?: number;
+  alert_level?: string;
+  driver_action?: string;
 }
 
 interface TruckerWarning {
@@ -134,6 +138,10 @@ export default function WeatherAlertsScreen() {
               const areaDesc = alert.areaDesc || props.areaDesc;
               const onset = alert.onset || props.onset;
               const expires = alert.expires || props.expires;
+              const roadName = alert.road_name;
+              const spanMiles = alert.span_miles;
+              const alertLevel = alert.alert_level;
+              const driverAction = alert.driver_action || instruction || alert.recommendation;
               const detailText = pickAlertDetails(alert);
               
               return (
@@ -203,6 +211,20 @@ export default function WeatherAlertsScreen() {
                         </View>
                       ) : null}
 
+                      {roadName ? (
+                        <View style={styles.alertMetaRow}>
+                          <Ionicons name="navigate" size={16} color="#a1a1aa" />
+                          <Text style={styles.alertMetaText}>Road: {roadName}{spanMiles ? ` • ~${spanMiles.toFixed(1)} mi` : ''}</Text>
+                        </View>
+                      ) : null}
+
+                      {alertLevel ? (
+                        <View style={styles.alertMetaRow}>
+                          <Ionicons name="alert" size={16} color="#a1a1aa" />
+                          <Text style={styles.alertMetaText}>Type: {alertLevel}</Text>
+                        </View>
+                      ) : null}
+
                       {formatTimeRange(onset as string | undefined, expires as string | undefined) && (
                         <View style={styles.alertMetaRow}>
                           <Ionicons name="time" size={16} color="#a1a1aa" />
@@ -212,10 +234,10 @@ export default function WeatherAlertsScreen() {
                         </View>
                       )}
                       
-                      {instruction && (
+                      {(instruction || driverAction) && (
                         <View style={styles.alertInstructionBox}>
                           <Text style={styles.alertInstructionTitle}>📋 What To Do</Text>
-                          <Text style={styles.alertInstructionText}>{instruction}</Text>
+                          <Text style={styles.alertInstructionText}>{instruction || driverAction}</Text>
                         </View>
                       )}
                       
@@ -231,6 +253,12 @@ export default function WeatherAlertsScreen() {
                         <View style={styles.alertBriefRow}>
                           {areaDesc ? (
                             <Text style={styles.alertBriefText}>Areas: {areaDesc}</Text>
+                          ) : null}
+                          {roadName ? (
+                            <Text style={styles.alertBriefText}>Road: {roadName}{spanMiles ? ` (~${spanMiles.toFixed(1)} mi)` : ''}</Text>
+                          ) : null}
+                          {alertLevel ? (
+                            <Text style={styles.alertBriefText}>{alertLevel}</Text>
                           ) : null}
                           {formatTimeRange(onset as string | undefined, expires as string | undefined) && (
                             <Text style={styles.alertBriefText}>
