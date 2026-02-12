@@ -1,4 +1,4 @@
-import { Stack } from 'expo-router';
+import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import * as Notifications from 'expo-notifications';
@@ -28,6 +28,8 @@ async function ensureAndroidChannel() {
 }
 
 export default function RootLayout() {
+  const router = useRouter();
+
   useEffect(() => {
     // Request notification permissions
     async function requestPermissions() {
@@ -47,10 +49,41 @@ export default function RootLayout() {
       void addNotificationToHistory(notification);
     });
 
+    const responseSub = Notifications.addNotificationResponseReceivedListener((response) => {
+      // Persist on tap (covers cases where receive listener might not run)
+      console.log('[notifications] tapped', response.notification?.request?.identifier);
+      void addNotificationToHistory(response.notification);
+      // Small delay helps when app is cold-started and navigation not ready yet
+      setTimeout(() => {
+        try {
+          router.push('/notifications');
+        } catch (err) {
+          console.log('[notifications] navigation failed', err);
+        }
+      }, 50);
+    });
+
+    // Handle cold-start taps (app opened from killed state)
+    void (async () => {
+      const last = await Notifications.getLastNotificationResponseAsync();
+      if (last) {
+        console.log('[notifications] last response on launch', last.notification?.request?.identifier);
+        void addNotificationToHistory(last.notification);
+        setTimeout(() => {
+          try {
+            router.push('/notifications');
+          } catch (err) {
+            console.log('[notifications] navigation failed (launch)', err);
+          }
+        }, 50);
+      }
+    })();
+
     return () => {
       sub.remove();
+      responseSub.remove();
     };
-  }, []);
+  }, [router]);
 
   return (
     <>
