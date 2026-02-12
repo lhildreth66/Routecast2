@@ -4168,8 +4168,12 @@ async def _search_walmart_google_places(request: OvernightSearchRequest) -> List
     radius_meters = int(request.radius_miles * 1609.34)
     url = "https://places.googleapis.com/v1/places:searchNearby"
     body = {
-        "location": {"latLng": {"latitude": request.latitude, "longitude": request.longitude}},
-        "radius": radius_meters,
+        "locationRestriction": {
+            "circle": {
+                "center": {"latitude": request.latitude, "longitude": request.longitude},
+                "radius": float(radius_meters),
+            }
+        },
         "includedTypes": ["supermarket", "department_store", "grocery_store"],
         "keyword": "Walmart",
         "maxResultCount": 30,
