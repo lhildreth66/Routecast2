@@ -75,8 +75,8 @@ class FakePushGateway:
         self.sent = []
         self.succeed = succeed
 
-    def send(self, token: str, title: str, body: str, data=None) -> bool:  # noqa: ANN001
-        self.sent.append({"token": token, "title": title, "body": body, "data": data})
+    def send(self, token: str, title: str, body: str, expanded_body=None, data=None) -> bool:  # noqa: ANN001
+        self.sent.append({"token": token, "title": title, "body": body, "expanded_body": expanded_body, "data": data})
         return self.succeed
 
 
@@ -138,6 +138,7 @@ def test_worker_dedupes_and_applies_band_and_severity_filter():
         user_id="u1",
         push_token="token",
         route_points=[{"lat": 40.0, "lon": -105.0}, {"lat": 40.1, "lon": -105.1}],
+        route_id="route-1",
         sample_miles=100,
         max_points=5,
     )
@@ -175,6 +176,7 @@ def test_worker_respects_hourly_cap_for_non_tornado():
         user_id="u1",
         push_token="token",
         route_points=[{"lat": 40.0, "lon": -105.0}, {"lat": 40.1, "lon": -105.1}],
+        route_id="route-2",
         sample_miles=100,
         max_points=5,
     )

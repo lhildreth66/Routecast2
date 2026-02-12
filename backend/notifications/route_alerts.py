@@ -199,6 +199,7 @@ class PushGateway:
         token: str,
         title: str,
         body: str,
+        expanded_body: Optional[str] = None,
         data: Optional[Dict[str, Any]] = None,
     ) -> bool:
         if self._disabled:
@@ -211,9 +212,10 @@ class PushGateway:
             try:
                 from firebase_admin import messaging
 
+                merged_data = {**{k: str(v) for k, v in (data or {}).items()}, "expandedBody": str(expanded_body or body)}
                 msg = messaging.Message(
                     token=token,
-                    data={k: str(v) for k, v in (data or {}).items()},
+                    data=merged_data,
                     notification=messaging.Notification(title=title, body=body),
                 )
                 messaging.send(msg, app=self._firebase_app)
@@ -222,7 +224,10 @@ class PushGateway:
                 logger.warning("Firebase push failed: %s", exc)
 
         if self._provider == "expo" and self._expo_client:
-            return self._expo_client.send_notification(token, title, body, data)
+            payload = data.copy() if data else {}
+            if expanded_body:
+                payload["expandedBody"] = expanded_body
+            return self._expo_client.send_notification(token, title, body, payload)
 
         logger.warning("[route-alerts] No push gateway available; drop message")
         return False
@@ -326,18 +331,23 @@ class RouteAlertService:
     def get_active_monitors(self, limit: int = 200) -> List[Dict[str, Any]]:
         return list(self.db.route_monitors.find({"active": True}).limit(limit))
 
-    def has_sent(self, route_signature: str, route_id: str, alert_id: str, band: str) -> bool:
-        return (
-            self.db.sent_alerts.find_one(
-                {
-                    "route_signature": route_signature,
-                    "route_id": route_id,
-                    "alert_id": alert_id,
-                    "band": band,
-                }
-            )
-            is not None
-        )
+    def has_sent(self, route_signature: str, route_id: str, alert_id: str, band: str, monitor_id: Optional[str] = None) -> bool:
+        query: Dict[str, Any] = {"alert_id": alert_id, "band": band}
+        if route_signature:
+            query["route_signature"] = route_signature
+        if route_id:
+            query["route_id"] = route_id
+        if monitor_id:
+            query["monitor_id"] = monitor_id
+        found = self.db.sent_alerts.find_one(query)
+        if found:
+            return True
+        if monitor_id:
+            legacy_query = {"alert_id": alert_id, "band": band, "monitor_id": monitor_id}
+            legacy_found = self.db.sent_alerts.find_one(legacy_query)
+            if legacy_found:
+                return True
+        return False
 
     def count_recent(self, monitor_id: str, minutes: int = 60, exclude_events: Optional[List[str]] = None) -> int:
         cutoff = self.now() - timedelta(minutes=minutes)
@@ -589,12 +599,12 @@ class CriticalRouteAlertWorker:
                     continue
 
                 # If we already sent within-5, suppress later within-15 for same alert
-                if band == "within_15" and self.service.has_sent(route_signature, route_id, alert_id, "within_5"):
+                if band == "within_15" and self.service.has_sent(route_signature, route_id, alert_id, "within_5", monitor_id=monitor_id):
                     stats["skipped"] += 1
                     stats["skipped_dedupe"] += 1
                     continue
 
-                if self.service.has_sent(route_signature, route_id, alert_id, band):
+                if self.service.has_sent(route_signature, route_id, alert_id, band, monitor_id=monitor_id) or self.service.has_sent(route_signature, route_id, alert_id, "within_5", monitor_id=monitor_id) or self.service.has_sent(route_signature, route_id, alert_id, "within_15", monitor_id=monitor_id):
                     stats["skipped"] += 1
                     stats["skipped_dedupe"] += 1
                     continue
@@ -607,22 +617,21 @@ class CriticalRouteAlertWorker:
                         stats["skipped_cap"] += 1
                         continue
 
-                title = f"{event} {band.replace('_', '-')}"
-                headline = alert.get("properties", {}).get("headline") or event
-                expires = alert.get("properties", {}).get("expires")
+                payload = self._build_notification_payload(
+                    alert=alert,
+                    alert_id=alert_id,
+                    distance=distance,
+                    band=band,
+                    route_id=route_id,
+                    sample_points=sample_points,
+                )
 
                 if self.service.push_gateway.send(
                     token,
-                    title=title,
-                    body=headline,
-                    data={
-                        "type": "critical_route_alert",
-                        "event": event,
-                        "distanceMiles": f"{distance:.1f}",
-                        "band": band,
-                        "alertId": alert_id,
-                        "routeId": route_id,
-                    },
+                    title=payload["title"],
+                    body=payload["collapsed_body"],
+                    expanded_body=payload["expanded_body"],
+                    data=payload["data"],
                 ):
                     self.service.record_sent(
                         monitor_id,
@@ -632,8 +641,8 @@ class CriticalRouteAlertWorker:
                         event,
                         band,
                         distance,
-                        headline,
-                        expires,
+                        payload["headline"],
+                        payload["expires"],
                     )
                     stats["sent"] += 1
                 else:
@@ -642,6 +651,169 @@ class CriticalRouteAlertWorker:
 
         return stats
 
+    def _build_notification_payload(
+        self,
+        *,
+        alert: Dict[str, Any],
+        alert_id: str,
+        distance: float,
+        band: str,
+        route_id: str,
+        sample_points: List[Dict[str, float]],
+    ) -> Dict[str, Any]:
+        props = alert.get("properties", {})
+        event = props.get("event") or "Weather Alert"
+        severity = (props.get("severity") or "").lower()
+        severity_icon = {"extreme": "🔴", "severe": "🟠", "moderate": "🟡"}.get(severity, "🟢")
+        title = f"{severity_icon} {event.upper()}"
+
+        headline = props.get("headline") or event
+        description = props.get("description") or ""
+        area_desc = props.get("areaDesc") or ""
+        onset = props.get("onset")
+        expires = props.get("expires")
+
+        sections = self._parse_nws_sections(description)
+        what = props.get("headline") or sections.get("what") or event
+        impacts = sections.get("impacts") or ""
+        when_detail = sections.get("when") or self._format_time_window(onset, expires)
+        where_detail = self._format_where(area_desc, alert.get("geometry"), sample_points, band)
+
+        time_range = self._format_time_range(onset, expires)
+        collapsed_parts = [p for p in [time_range, where_detail] if p]
+        collapsed_body = " · ".join(collapsed_parts) if collapsed_parts else headline
+
+        expanded_lines = []
+        if what:
+            expanded_lines.append(f"WHAT: {what}")
+        if where_detail:
+            expanded_lines.append(f"WHERE: {where_detail}")
+        if when_detail:
+            expanded_lines.append(f"WHEN: {when_detail}")
+        if impacts:
+            expanded_lines.append(f"IMPACTS: {impacts}")
+        expanded_body = "\n".join(expanded_lines) if expanded_lines else headline
+
+        data = {
+            "type": "critical_route_alert",
+            "event": event,
+            "distanceMiles": f"{distance:.1f}",
+            "band": band,
+            "alertId": alert_id,
+            "routeId": route_id,
+            "collapsedBody": collapsed_body,
+            "expandedBody": expanded_body,
+            "what": what,
+            "where": where_detail,
+            "when": when_detail,
+            "impacts": impacts,
+        }
+
+        return {
+            "title": title,
+            "headline": headline,
+            "collapsed_body": collapsed_body,
+            "expanded_body": expanded_body,
+            "expires": expires,
+            "data": data,
+        }
+
+    def _parse_iso(self, value: Optional[str]) -> Optional[datetime]:
+        if not value:
+            return None
+        try:
+            normalized = value.replace("Z", "+00:00")
+            return datetime.fromisoformat(normalized)
+        except Exception:
+            return None
+
+    def _format_time_range(self, onset: Optional[str], expires: Optional[str]) -> Optional[str]:
+        start = self._parse_iso(onset)
+        end = self._parse_iso(expires)
+        if not start and not end:
+            return None
+        if start and end:
+            return f"{start:%a %-I:%M %p} to {end:%a %-I:%M %p}"
+        if start:
+            return f"{start:%a %-I:%M %p}"
+        return f"Until {end:%a %-I:%M %p}"
+
+    def _format_time_window(self, onset: Optional[str], expires: Optional[str]) -> Optional[str]:
+        start = self._parse_iso(onset)
+        end = self._parse_iso(expires)
+        if start and end:
+            return f"From {start:%a %-I:%M %p} through {end:%a %-I:%M %p}"
+        if start:
+                return f"From {start:%a %-I:%M %p}"
+        if end:
+            return f"Until {end:%a %-I:%M %p}"
+        return None
+
+    def _parse_nws_sections(self, description: str) -> Dict[str, str]:
+        sections = {"what": "", "where": "", "when": "", "impacts": ""}
+        lines = [line.strip() for line in description.splitlines() if line.strip()]
+        for line in lines:
+            lowered = line.lower()
+            if lowered.startswith("what"):
+                sections["what"] = line.split(":", 1)[-1].strip() if ":" in line else line
+            elif lowered.startswith("where"):
+                sections["where"] = line.split(":", 1)[-1].strip() if ":" in line else line
+            elif lowered.startswith("when"):
+                sections["when"] = line.split(":", 1)[-1].strip() if ":" in line else line
+            elif "impact" in lowered:
+                sections["impacts"] = line.split(":", 1)[-1].strip() if ":" in line else line
+        return sections
+
+    def _format_where(
+        self,
+        area_desc: str,
+        geometry: Optional[Dict[str, Any]],
+        sample_points: List[Dict[str, float]],
+        band: str,
+    ) -> Optional[str]:
+        areas = [a.strip() for a in area_desc.split(";") if a.strip()]
+        if not areas:
+            return None
+        filtered = self._filter_areas_by_geometry(areas, geometry, sample_points)
+        display = filtered or areas
+        display = display[:4]
+        band_label = "within 5 miles" if band == "within_5" else "within 15 miles"
+        return f"{', '.join(display)} ({band_label})"
+
+    def _filter_areas_by_geometry(
+        self,
+        areas: List[str],
+        geometry: Optional[Dict[str, Any]],
+        sample_points: List[Dict[str, float]],
+    ) -> List[str]:
+        if not geometry or not sample_points:
+            return []
+        rings = list(self._iter_geojson_coordinates(geometry.get("coordinates")))
+        if not rings:
+            return []
+        for point in sample_points:
+            lat = point.get("lat")
+            lon = point.get("lon")
+            if lat is None or lon is None:
+                continue
+            if any(self._point_in_polygon(lat, lon, ring) for ring in rings):
+                return areas
+        return []
+
+    def _point_in_polygon(self, lat: float, lon: float, ring: List[Tuple[float, float]]) -> bool:
+        inside = False
+        j = len(ring) - 1
+        for i in range(len(ring)):
+            xi, yi = ring[i]
+            xj, yj = ring[j]
+            intersect = ((yi > lat) != (yj > lat)) and (
+                lon < (xj - xi) * (lat - yi) / ((yj - yi) + 1e-9) + xi
+            )
+            if intersect:
+                inside = not inside
+            j = i
+        return inside
+
     def _is_critical(self, alert: Dict[str, Any]) -> bool:
         props = alert.get("properties", {})
         event = props.get("event", "")
@@ -649,7 +821,7 @@ class CriticalRouteAlertWorker:
         # Accept all NWS alerts except explicitly minor/unknown/test levels; do not filter by event type.
         if not event:
             return False
-        if severity in {"minor", "unknown", "test"}:
+        if severity in {"minor", "unknown", "test", "moderate"}:
             return False
         return True
 
