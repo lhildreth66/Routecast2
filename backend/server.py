@@ -119,7 +119,7 @@ HAZARD_CONFIG = {
 RESAMPLE_MILES = _env_float("RESAMPLE_MILES", 10.0)
 MIN_STEPS_FOR_NATIVE = int(_env_float("MIN_STEPS_FOR_NATIVE", 30))
 
-HAZARD_SCHEMA_VERSION = 1
+HAZARD_SCHEMA_VERSION = 2
 
 # Log hazard config once at startup for ops visibility
 logger.info("hazard_config_resolved", extra={"hazard_config": HAZARD_CONFIG, "schema_version": HAZARD_SCHEMA_VERSION})
@@ -312,6 +312,12 @@ class HazardAlert(BaseModel):
     alert_level: Optional[str] = None  # Watch | Warning | Advisory | Statement | Unknown
     driver_action: Optional[str] = None
     rationale: Optional[str] = None  # why this alert fired
+    temp_f: Optional[float] = None
+    wind_mph: Optional[int] = None
+    wind_gust_mph: Optional[int] = None
+    precip_type: Optional[str] = None
+    precip_intensity: Optional[str] = None
+    visibility: Optional[str] = None
     hazard_id: Optional[str] = None  # stable deterministic id for client diffing
     hazard_schema_version: int = HAZARD_SCHEMA_VERSION
 
@@ -1630,6 +1636,68 @@ def generate_hazard_alerts(
         }
         return lookup.get(level, "Drive with caution and follow posted guidance.")
 
+    def extract_wind_gust_mph(weather: Optional[WeatherData]) -> Optional[int]:
+        if not weather:
+            return None
+        gust_candidates = [
+            getattr(weather, "wind_gust", None),
+            getattr(weather, "wind_gust_mph", None),
+            getattr(weather, "gust", None),
+            getattr(weather, "gust_mph", None),
+        ]
+        for gust in gust_candidates:
+            if gust is None:
+                continue
+            if isinstance(gust, (int, float)):
+                return int(round(gust))
+            if isinstance(gust, str):
+                parsed = parse_wind(gust)
+                if parsed:
+                    return parsed
+        return None
+
+    def compute_precip_intensity(conditions: Optional[str], precip_type: str) -> Optional[str]:
+        cond = (conditions or "").lower()
+        if not cond and precip_type == "none":
+            return None
+        if any(key in cond for key in ["whiteout", "blizzard", "heavy", "torrential", "downpour"]):
+            return "heavy"
+        if any(key in cond for key in ["moderate", "steady"]):
+            return "moderate"
+        if any(key in cond for key in ["light", "drizzle", "shower", "sprinkle"]):
+            return "light"
+        if precip_type in {"snow", "rain"}:
+            return "moderate"
+        return None
+
+    def compute_visibility_label(conditions: Optional[str], precip_type: str, wind_mph: int) -> str:
+        cond = (conditions or "").lower()
+        heavy_snow = precip_type == "snow" and ("heavy" in cond or "blizzard" in cond or "whiteout" in cond)
+        moderate_snow = precip_type == "snow" and "snow" in cond
+        foggy = "fog" in cond
+        if heavy_snow or wind_mph > 25:
+            return "Severely Reduced"
+        if moderate_snow or wind_mph >= 15 or foggy:
+            return "Reduced"
+        return "Normal"
+
+    def apply_weather_fields(
+        alert: HazardAlert,
+        *,
+        temp_f: Optional[int],
+        wind_mph: Optional[int],
+        wind_gust_mph: Optional[int],
+        precip_type: str,
+        precip_intensity: Optional[str],
+        visibility: Optional[str],
+    ) -> None:
+        alert.temp_f = temp_f
+        alert.wind_mph = wind_mph if wind_mph is not None else None
+        alert.wind_gust_mph = wind_gust_mph
+        alert.precip_type = precip_type if precip_type != "none" else None
+        alert.precip_intensity = precip_intensity
+        alert.visibility = visibility
+
     def enrich_alert_fields(alert: HazardAlert):
         if not alert.road_name or alert.span_miles is None:
             for text in [alert.full_description, alert.description, alert.message, alert.recommendation]:
@@ -1661,6 +1729,10 @@ def generate_hazard_alerts(
         conditions_detail = build_conditions_detail(wp)
         wind_speed = parse_wind(wp.weather.wind_speed)
         precip_type = primary_precip(wp.weather.temperature, wp.weather.conditions or "")
+        temp_f = wp.weather.temperature
+        wind_gust_mph = extract_wind_gust_mph(wp.weather)
+        precip_intensity = compute_precip_intensity(wp.weather.conditions, precip_type)
+        visibility_level = compute_visibility_label(wp.weather.conditions, precip_type, wind_speed)
 
         # Include any active NWS alerts with full detail fields
         for nws in wp.alerts:
@@ -1717,6 +1789,15 @@ def generate_hazard_alerts(
                 driver_action=driver_action,
                 rationale=rationale,
             )
+            apply_weather_fields(
+                alert_obj,
+                temp_f=temp_f,
+                wind_mph=wind_speed,
+                wind_gust_mph=wind_gust_mph,
+                precip_type=precip_type,
+                precip_intensity=precip_intensity,
+                visibility=visibility_level,
+            )
             enrich_alert_fields(alert_obj)
             alerts.append(alert_obj)
         
@@ -1748,6 +1829,15 @@ def generate_hazard_alerts(
                 full_description=conditions_detail or None,
                 rationale=rationale,
             )
+            apply_weather_fields(
+                alert_obj,
+                temp_f=temp_f,
+                wind_mph=wind_speed,
+                wind_gust_mph=wind_gust_mph,
+                precip_type=precip_type,
+                precip_intensity=precip_intensity,
+                visibility=visibility_level,
+            )
             enrich_alert_fields(alert_obj)
             alerts.append(alert_obj)
             
@@ -1775,6 +1865,15 @@ def generate_hazard_alerts(
                 full_description=conditions_detail or None,
                 rationale=rationale,
             )
+            apply_weather_fields(
+                alert_obj,
+                temp_f=temp_f,
+                wind_mph=wind_speed,
+                wind_gust_mph=wind_gust_mph,
+                precip_type=precip_type,
+                precip_intensity=precip_intensity,
+                visibility=visibility_level,
+            )
             enrich_alert_fields(alert_obj)
             alerts.append(alert_obj)
             key = round(distance, 1)
@@ -1800,6 +1899,15 @@ def generate_hazard_alerts(
                 description=conditions_detail or None,
                 full_description=conditions_detail or None,
                 rationale=rationale,
+            )
+            apply_weather_fields(
+                alert_obj,
+                temp_f=temp_f,
+                wind_mph=wind_speed,
+                wind_gust_mph=wind_gust_mph,
+                precip_type=precip_type,
+                precip_intensity=precip_intensity,
+                visibility=visibility_level,
             )
             enrich_alert_fields(alert_obj)
             key = round(distance, 1)
@@ -1838,6 +1946,15 @@ def generate_hazard_alerts(
                 full_description=conditions_detail or None,
                 rationale=rationale,
             )
+            apply_weather_fields(
+                alert_obj,
+                temp_f=temp_f,
+                wind_mph=wind_speed,
+                wind_gust_mph=wind_gust_mph,
+                precip_type=precip_type,
+                precip_intensity=precip_intensity,
+                visibility=visibility_level,
+            )
             enrich_alert_fields(alert_obj)
             key = round(distance, 1)
             prev = seen_primary.get(key)
@@ -1873,6 +1990,15 @@ def generate_hazard_alerts(
                 full_description=conditions_detail or None,
                 rationale=rationale,
             )
+            apply_weather_fields(
+                alert_obj,
+                temp_f=temp_f,
+                wind_mph=wind_speed,
+                wind_gust_mph=wind_gust_mph,
+                precip_type=precip_type,
+                precip_intensity=precip_intensity,
+                visibility=visibility_level,
+            )
             enrich_alert_fields(alert_obj)
             alerts.append(alert_obj)
             
@@ -1899,6 +2025,15 @@ def generate_hazard_alerts(
                 full_description=conditions_detail or None,
                 rationale=rationale,
             )
+            apply_weather_fields(
+                alert_obj,
+                temp_f=temp_f,
+                wind_mph=wind_speed,
+                wind_gust_mph=wind_gust_mph,
+                precip_type=precip_type,
+                precip_intensity=precip_intensity,
+                visibility=visibility_level,
+            )
             enrich_alert_fields(alert_obj)
             alerts.append(alert_obj)
             
@@ -1921,6 +2056,15 @@ def generate_hazard_alerts(
                 recommendation=alert.headline[:100],
                 countdown_text=f"{alert.event} in {eta_mins} minutes",
                 location_name=location_name
+            )
+            apply_weather_fields(
+                alert_obj,
+                temp_f=temp_f,
+                wind_mph=wind_speed,
+                wind_gust_mph=wind_gust_mph,
+                precip_type=precip_type,
+                precip_intensity=precip_intensity,
+                visibility=visibility_level,
             )
             enrich_alert_fields(alert_obj)
             alerts.append(alert_obj)
