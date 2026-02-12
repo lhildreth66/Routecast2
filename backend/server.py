@@ -12,7 +12,7 @@ from typing import List, Optional, Dict, Any
 import uuid
 import math
 from io import BytesIO
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import httpx
 import polyline
 from notifications.route_alerts import sample_route_points
@@ -1021,7 +1021,7 @@ async def get_noaa_alerts(lat: float, lon: float) -> List[WeatherAlert]:
     try:
         raw_alerts = await get_providers().alerts.get_alerts(lat, lon)
         alerts: List[WeatherAlert] = []
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         cutoff = now - timedelta(hours=2)
 
         for alert in raw_alerts:
@@ -1035,11 +1035,16 @@ async def get_noaa_alerts(lat: float, lon: float) -> List[WeatherAlert]:
             summary = alert.get('summary')
             urgency = alert.get('urgency')
             sent_dt = None
-            try:
-                if sent_str:
-                    sent_dt = datetime.fromisoformat(sent_str.replace('Z', '+00:00'))
-            except Exception:
-                sent_dt = None
+            if sent_str:
+                try:
+                    sent_dt = datetime.fromisoformat(sent_str.replace('Z', '+00:00')).astimezone(timezone.utc)
+                except Exception:
+                    sent_dt = None
+            # Drop alerts without a sent timestamp or older than 2 hours
+            if not sent_dt:
+                continue
+            if (now - sent_dt).total_seconds() > 7200:
+                continue
             
             # Determine if alert is currently active
             is_active = True
@@ -1068,7 +1073,7 @@ async def get_noaa_alerts(lat: float, lon: float) -> List[WeatherAlert]:
                 # If timestamp parsing fails, include the alert
                 pass
             
-            if is_active and (sent_dt is None or sent_dt >= cutoff):
+            if is_active and sent_dt >= cutoff:
                 alerts.append(
                     WeatherAlert(
                         id=alert.get('id', str(uuid.uuid4())),
