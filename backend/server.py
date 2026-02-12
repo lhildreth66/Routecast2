@@ -4714,6 +4714,37 @@ async def check_notification(request: CheckNotificationRequest):
 
 # ==================== Free Camping Finder Endpoint ====================
 
+def _dedupe_camping_spots(spots: List[CampingSpot], precision: int = 3) -> List[CampingSpot]:
+    """Deduplicate clustered camping spots using a rounded lat/lon bucket.
+
+    Tie-breakers (in order): higher rating, known cell coverage over unknown, then shorter distance.
+    """
+
+    def _coverage_score(value: Optional[str]) -> int:
+        if not value:
+            return 0
+        lowered = value.lower()
+        return 0 if lowered == "unknown" else 1
+
+    def _score(spot: CampingSpot) -> tuple:
+        rating = spot.rating or 0
+        coverage = _coverage_score(spot.cell_coverage)
+        distance = spot.distance_miles
+        return (rating, coverage, -distance)
+
+    buckets: Dict[Any, CampingSpot] = {}
+    for spot in spots:
+        key = (round(spot.latitude, precision), round(spot.longitude, precision))
+        existing = buckets.get(key)
+        if existing is None:
+            buckets[key] = spot
+            continue
+
+        if _score(spot) > _score(existing):
+            buckets[key] = spot
+
+    return sorted(buckets.values(), key=lambda x: x.distance_miles)
+
 @api_router.post("/free-camping/search", response_model=FreeCampingResponse)
 async def search_free_camping(request: FreeCampingRequest):
     """Find free camping spots (BLM, National Forest, etc.) near given coordinates using OpenStreetMap data."""
@@ -4762,7 +4793,6 @@ async def search_free_camping(request: FreeCampingRequest):
                 raise last_error or Exception("All Overpass instances failed")
         
         spots = []
-        seen_coords = set()  # Avoid duplicates
         
         for element in osm_data.get("elements", []):
             # Get coordinates
@@ -4777,12 +4807,6 @@ async def search_free_camping(request: FreeCampingRequest):
             
             if not lat or not lon:
                 continue
-            
-            # Avoid duplicate locations
-            coord_key = (round(lat, 4), round(lon, 4))
-            if coord_key in seen_coords:
-                continue
-            seen_coords.add(coord_key)
             
             # Calculate distance
             distance_miles = math.sqrt(
@@ -4899,9 +4923,12 @@ async def search_free_camping(request: FreeCampingRequest):
                 contact=contact
             ))
         
+        # Deduplicate closely clustered points before sorting/limiting
+        spots = _dedupe_camping_spots(spots)
+
         # Sort by distance
         spots.sort(key=lambda x: x.distance_miles)
-        
+
         # Limit to 20 results
         spots = spots[:20]
         
@@ -5281,7 +5308,12 @@ def _dedupe_and_limit(stops: List[OvernightStop], limit: int = 25) -> List[Overn
         key = (round(stop.latitude, 3), round(stop.longitude, 3))
         existing = seen.get(key)
         if existing:
-            if _score(stop) > _score(existing):
+            current_score = _score(existing)
+            candidate_score = _score(stop)
+            if candidate_score > current_score:
+                seen[key] = stop
+                continue
+            if candidate_score == current_score and stop.distance_miles < existing.distance_miles:
                 seen[key] = stop
             continue
         seen[key] = stop
