@@ -675,6 +675,8 @@ class CriticalRouteAlertWorker:
         for point in sample_points:
             key = self._point_cache_key(point["lat"], point["lon"])
             alerts = alerts_cache.get(key, [])
+            if alerts is None:
+                continue
             stats["alerts_seen"] += len(alerts)
             for alert in alerts:
                 if not self._is_critical(alert):
@@ -954,7 +956,7 @@ class CriticalRouteAlertWorker:
                 return rings
         return []
 
-    def _fetch_alerts(self, lat: float, lon: float) -> Iterable[Dict[str, Any]]:
+    def _fetch_alerts(self, lat: float, lon: float) -> Optional[Iterable[Dict[str, Any]]]:
         url = f"https://api.weather.gov/alerts/active?point={lat},{lon}"
         headers = {
             "User-Agent": DEFAULT_NOAA_UA,
@@ -968,7 +970,7 @@ class CriticalRouteAlertWorker:
                 return data.get("features", [])
         except Exception as exc:  # noqa: BLE001
             logger.warning("NWS fetch failed for point %.3f,%.3f: %s", lat, lon, exc)
-            return []
+            return None
 
     def _point_cache_key(self, lat: float, lon: float, precision: int = 1) -> str:
         rounded_lat = round(lat, precision)
@@ -976,12 +978,15 @@ class CriticalRouteAlertWorker:
         fmt = f"{{:.{precision}f}}"
         return f"{fmt.format(rounded_lat)},{fmt.format(rounded_lon)}"
 
-    def _safe_fetch_alerts(self, lat: float, lon: float) -> List[Dict[str, Any]]:
+    def _safe_fetch_alerts(self, lat: float, lon: float) -> Optional[List[Dict[str, Any]]]:
         try:
-            return list(self.fetcher(lat, lon))
+            result = self.fetcher(lat, lon)
+            if result is None:
+                return None
+            return list(result)
         except Exception as exc:  # noqa: BLE001
             logger.warning("[route-alerts] fetch failed for point %.3f,%.3f: %s", lat, lon, exc)
-            return []
+            return None
 
     def _fetch_alerts_concurrent(self, unique_points: Dict[str, Tuple[float, float]]) -> Dict[str, List[Dict[str, Any]]]:
         if not unique_points:
@@ -989,7 +994,7 @@ class CriticalRouteAlertWorker:
 
         max_workers_env = int(os.environ.get("ROUTE_ALERTS_MAX_WORKERS", "32"))
         per_call_timeout = float(os.environ.get("ROUTE_ALERTS_POINT_TIMEOUT", "5.0"))
-        max_workers = max(1, min(max_workers_env, max(1, len(unique_points))))
+        max_workers = max(1, min(32, min(max_workers_env, len(unique_points))))
 
         results: Dict[str, List[Dict[str, Any]]] = {}
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -998,23 +1003,21 @@ class CriticalRouteAlertWorker:
                 for key, (lat, lon) in unique_points.items()
             }
 
-            done, not_done = concurrent.futures.wait(
-                future_map.keys(), timeout=per_call_timeout, return_when=concurrent.futures.ALL_COMPLETED
-            )
-
-            for future in done:
+            for future in concurrent.futures.as_completed(future_map, timeout=per_call_timeout):
                 key = future_map[future]
                 try:
                     alerts = future.result()
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("[route-alerts] NWS fetch error for %s: %s", key, exc)
-                    alerts = []
-                results[key] = list(alerts) if alerts else []
+                    alerts = None
+                results[key] = list(alerts) if alerts else None
 
-            for future in not_done:
-                key = future_map[future]
+            # Futures still pending after timeout
+            for future, key in future_map.items():
+                if future.done():
+                    continue
                 future.cancel()
                 logger.warning("[route-alerts] NWS fetch timed out for %s after %.1fs", key, per_call_timeout)
-                results[key] = []
+                results[key] = None
 
         return results
