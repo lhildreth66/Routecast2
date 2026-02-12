@@ -4174,8 +4174,7 @@ async def _search_walmart_google_places(request: OvernightSearchRequest) -> List
                 "radius": float(radius_meters),
             }
         },
-        "includedTypes": ["parking"],
-        "textQuery": "Walmart",
+        "includedTypes": ["parking", "truck_stop"],
         "maxResultCount": 30,
     }
     headers = {
