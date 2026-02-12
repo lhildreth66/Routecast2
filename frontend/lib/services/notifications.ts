@@ -69,6 +69,14 @@ export async function registerForPushNotificationsAsync(): Promise<string | null
       sound: 'default',
     });
 
+    await Notifications.setNotificationChannelAsync('route-alerts', {
+      name: 'Route Alerts',
+      importance: Notifications.AndroidImportance.HIGH,
+      vibrationPattern: [0, 250, 250, 250],
+      sound: 'default',
+      lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+    });
+
     await Notifications.setNotificationChannelAsync('general', {
       name: 'General',
       importance: Notifications.AndroidImportance.DEFAULT,

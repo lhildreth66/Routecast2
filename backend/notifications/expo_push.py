@@ -75,6 +75,8 @@ class ExpoPushClient:
         sound: str = "default",
         priority: str = "high",
         channel_id: str = "weather-alerts",
+        collapse_id: Optional[str] = None,
+        sticky: bool = False,
     ) -> bool:
         """
         Send a push notification via Expo.
@@ -109,6 +111,12 @@ class ExpoPushClient:
         
         if data:
             payload["data"] = data
+
+        if collapse_id:
+            payload["collapseId"] = collapse_id
+
+        if sticky:
+            payload["sticky"] = True
         
         try:
             response = self.client.post(

@@ -635,12 +635,17 @@ class CriticalRouteAlertWorker:
 
     def _send_notification(self, token: str, payload: Dict[str, Any]) -> bool:
         try:
+            alert_id = payload.get("data", {}).get("alertId")
+            collapse_id = f"routecast_alert_{alert_id}" if alert_id else None
             return self.service.push_gateway.send(
                 token,
                 title=payload["title"],
                 body=payload["collapsed_body"],
                 expanded_body=payload.get("expanded_body"),
                 data=payload.get("data"),
+                channel_id="route-alerts",
+                collapse_id=collapse_id,
+                sticky=True,
             )
         except TypeError:
             try:

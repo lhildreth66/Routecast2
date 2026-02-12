@@ -123,7 +123,7 @@ async def send_expo_notification(push_token: str, title: str, body: str, data: D
                     "body": body,
                     "data": data or {},
                     "priority": "high",
-                    "channelId": "weather-alerts",
+                    "channelId": "route-alerts",
                     "badge": 1,
                 },
                 headers={"Accept": "application/json", "Accept-Encoding": "gzip, deflate"},

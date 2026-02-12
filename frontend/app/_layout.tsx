@@ -25,6 +25,14 @@ async function ensureAndroidChannel() {
     vibrationPattern: [0, 250, 250, 250],
     lightColor: '#FF231F7C',
   });
+
+  await Notifications.setNotificationChannelAsync('route-alerts', {
+    name: 'Route Alerts',
+    importance: Notifications.AndroidImportance.HIGH,
+    sound: 'default',
+    vibrationPattern: [0, 250, 250, 250],
+    lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+  });
 }
 
 export default function RootLayout() {
@@ -45,6 +53,7 @@ export default function RootLayout() {
     registerDevicePushTokenOnce();
 
     const sub = Notifications.addNotificationReceivedListener((notification) => {
+      console.log('[notifications] received', notification.request.identifier, notification.request.content?.title);
       // fire-and-forget persist to history
       void addNotificationToHistory(notification);
     });
