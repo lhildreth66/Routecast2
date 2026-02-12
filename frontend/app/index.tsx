@@ -1,4 +1,4 @@
-import React, { useState, useEffect, forwardRef } from 'react';
+import React, { useState, useEffect, forwardRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -42,7 +42,7 @@ const NoAutofillInput = forwardRef<any, TextInputProps>((props, ref) => {
 });
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { router, usePathname, useSegments } from 'expo-router';
+import { router, useFocusEffect, usePathname, useSegments } from 'expo-router';
 import Constants from 'expo-constants';
 import * as Notifications from 'expo-notifications';
 import axios from 'axios';
@@ -51,6 +51,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { format } from 'date-fns';
 import { WebView } from 'react-native-webview';
 import { API_BASE, API_BASE_ERROR, API_BASE_SOURCE, buildUrl } from './apiConfig';
+import { getNotificationCounts } from './notificationHistory';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -104,6 +105,8 @@ export default function HomeScreen() {
   const [lastToggleAt, setLastToggleAt] = useState<string | null>(null);
   const [lastRegisterResult, setLastRegisterResult] = useState<string | null>(null);
   const [lastTestResult, setLastTestResult] = useState<string | null>(null);
+  const [notificationTotal, setNotificationTotal] = useState(0);
+  const [notificationUnseen, setNotificationUnseen] = useState(0);
   const [healthStatus, setHealthStatus] = useState<string>('pending');
   const [healthSnippet, setHealthSnippet] = useState<string>('');
   const [healthStatusCode, setHealthStatusCode] = useState<number | null>(null);
@@ -203,6 +206,28 @@ export default function HomeScreen() {
       }).catch((err) => console.log('[push] weather channel error', err));
     }
   }, []);
+
+  const refreshNotificationCounts = useCallback(async () => {
+    const { total, unseen } = await getNotificationCounts();
+    setNotificationTotal(total);
+    setNotificationUnseen(unseen);
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      refreshNotificationCounts();
+    }, [refreshNotificationCounts]),
+  );
+
+  useEffect(() => {
+    refreshNotificationCounts();
+    const sub = Notifications.addNotificationReceivedListener(() => {
+      refreshNotificationCounts();
+    });
+    return () => {
+      sub.remove();
+    };
+  }, [refreshNotificationCounts]);
 
   const loadCachedRoute = async () => {
     try {
@@ -1402,13 +1427,33 @@ export default function HomeScreen() {
                   <Ionicons name="notifications-outline" size={22} color="#eab308" />
                   <Text style={styles.alertsText}>Push Weather Alerts</Text>
                 </View>
-                <Switch
-                  value={alertsEnabled}
-                  onValueChange={handleTogglePushNotifications}
-                  disabled={pushToggleLoading}
-                  trackColor={{ false: '#3f3f46', true: '#eab30880' }}
-                  thumbColor={alertsEnabled ? '#eab308' : '#71717a'}
-                />
+                <View style={styles.alertsActions}>
+                  <TouchableOpacity
+                    style={styles.notificationButton}
+                    onPress={() => router.push('/notifications')}
+                    accessibilityRole="button"
+                    accessibilityLabel="Open notification history"
+                  >
+                    <Ionicons name="notifications" size={20} color="#eab308" />
+                    <Text style={styles.notificationText}>
+                      {notificationTotal ? `${notificationTotal}` : 'History'}
+                    </Text>
+                    {notificationUnseen > 0 ? (
+                      <View style={styles.notificationBadge}>
+                        <Text style={styles.notificationBadgeText}>
+                          {notificationUnseen > 99 ? '99+' : notificationUnseen}
+                        </Text>
+                      </View>
+                    ) : null}
+                  </TouchableOpacity>
+                  <Switch
+                    value={alertsEnabled}
+                    onValueChange={handleTogglePushNotifications}
+                    disabled={pushToggleLoading}
+                    trackColor={{ false: '#3f3f46', true: '#eab30880' }}
+                    thumbColor={alertsEnabled ? '#eab308' : '#71717a'}
+                  />
+                </View>
               </View>
 
               <View style={styles.pushActionsRow}>
@@ -1976,6 +2021,29 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     marginBottom: 12,
   },
+  alertsActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  notificationButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    backgroundColor: '#0b1224',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#1f2937',
+  },
+  notificationText: { color: '#e5e7eb', marginLeft: 6, fontSize: 14, fontWeight: '600' },
+  notificationBadge: {
+    marginLeft: 6,
+    backgroundColor: '#ef4444',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+    minWidth: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  notificationBadgeText: { color: '#fff', fontSize: 12, fontWeight: '700' },
   alertsLeft: {
     flexDirection: 'row',
     alignItems: 'center',

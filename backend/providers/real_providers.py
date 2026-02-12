@@ -153,7 +153,7 @@ class MapboxDirectionsProvider(DirectionsProvider):
                 params = {
                     "access_token": MAPBOX_ACCESS_TOKEN,
                     "geometries": "polyline6",
-                    "overview": "false",
+                    "overview": "full",
                     "steps": "true",
                     "annotations": "distance,duration",
                 }

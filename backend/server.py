@@ -93,6 +93,7 @@ GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-1.5-flash')
 GOOGLE_PLACES_API_KEY = os.environ.get("GOOGLE_PLACES_API_KEY", "")
 BUILD_SHA = os.environ.get("RENDER_GIT_COMMIT") or os.environ.get("BUILD_SHA") or "unknown"
 BUILD_TIME = os.environ.get("BUILD_TIME") or datetime.utcnow().isoformat()
+ALERT_DEBUG = bool(int(os.environ.get("ALERT_DEBUG", "0") or 0))
 
 
 def _env_float(key: str, default: float) -> float:
@@ -1415,33 +1416,17 @@ def compute_total_distance_miles(
     return max(total_distance_miles, 0.0)
 
 
-def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_time: datetime, route_steps: Optional[List[TurnByTurnStep]] = None, total_route_miles: Optional[float] = None, route_id: Optional[str] = None) -> List[HazardAlert]:
+def generate_hazard_alerts(
+    waypoints_weather: List[WaypointWeather],
+    departure_time: datetime,
+    total_route_miles: Optional[float] = None,
+    total_route_minutes: Optional[float] = None,
+    route_id: Optional[str] = None,
+) -> List[HazardAlert]:
     """Generate proactive hazard alerts with countdown timers."""
     alerts: List[HazardAlert] = []
 
     cfg = HAZARD_CONFIG
-
-    step_index = []
-    if route_steps:
-        for step in route_steps:
-            start = step.start_distance_miles if step.start_distance_miles is not None else 0.0
-            end = step.end_distance_miles if step.end_distance_miles is not None else start + (step.distance_miles or 0.0)
-            step_index.append((start, end, step.road_name or "Unnamed road", step))
-
-    def road_for_distance(distance_miles: float) -> Optional[str]:
-        if not step_index or distance_miles is None:
-            return None
-        best_name = None
-        best_gap = 1e9
-        for start, end, name, _ in step_index:
-            if start <= distance_miles <= end:
-                return name
-            mid = (start + end) / 2
-            gap = abs(mid - distance_miles)
-            if gap < best_gap:
-                best_gap = gap
-                best_name = name
-        return best_name or "Unnamed road"
 
     def sanitize_span(span: Optional[float]) -> Optional[float]:
         if span is None:
@@ -1612,6 +1597,28 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
             return "Statement"
         return "Unknown"
 
+    def primary_precip(temp_f: Optional[float], conditions: str) -> str:
+        c = (conditions or "").lower()
+        snowy_terms = ["snow", "blizzard", "sleet", "freezing", "wintry", "ice"]
+        precip_terms = ["snow", "sleet", "freezing", "rain", "drizzle", "storm", "shower", "precip"]
+        has_snowy = any(k in c for k in snowy_terms)
+        has_precip = any(k in c for k in precip_terms)
+        if has_snowy:
+            return "snow"
+        if temp_f is not None and temp_f <= 34 and has_precip:
+            return "snow"
+        if has_precip:
+            return "rain"
+        return "none"
+
+    def compute_eta(distance_miles: float) -> int:
+        if total_route_miles and total_route_minutes is not None:
+            miles = max(total_route_miles, 1e-3)
+            minutes = max(total_route_minutes or 0.0, 0.0)
+            ratio = max(0.0, distance_miles) / miles
+            return int(round(ratio * minutes))
+        return calculate_eta(distance_miles)
+
     def pick_driver_action(level: str, instruction: Optional[str]) -> str:
         if instruction:
             return instruction.strip()
@@ -1641,16 +1648,19 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
         if not alert.driver_action:
             alert.driver_action = alert.recommendation or "Drive with caution and follow posted guidance."
     
+    seen_primary: Dict[float, tuple[str, str]] = {}
+
     for idx, wp in enumerate(waypoints_weather):
         if not wp.weather:
             continue
             
         distance = wp.waypoint.distance_from_start or 0
-        eta_mins = wp.waypoint.eta_minutes or int(distance / 55 * 60)
+        eta_mins = compute_eta(distance)
         location_name = wp.waypoint.name or f"Mile {int(distance)}"
-        road_name_from_steps = road_for_distance(distance) or wp.waypoint.name
+        road_name = wp.waypoint.name or "Unnamed road"
         conditions_detail = build_conditions_detail(wp)
         wind_speed = parse_wind(wp.weather.wind_speed)
+        precip_type = primary_precip(wp.weather.temperature, wp.weather.conditions or "")
 
         # Include any active NWS alerts with full detail fields
         for nws in wp.alerts:
@@ -1730,7 +1740,7 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                 recommendation=f"Reduce speed to {max(35, 65 - wind_speed + 25)} mph",
                 countdown_text=f"High winds in {eta_mins} minutes" if eta_mins > 0 else "High winds at start",
                 location_name=location_name,
-                road_name=road_name_from_steps,
+                road_name=road_name,
                 span_miles=None,
                 alert_level=alert_level,
                 driver_action=driver_action,
@@ -1743,7 +1753,7 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
             
         # Rain/visibility hazards
         conditions = (wp.weather.conditions or "").lower()
-        if "heavy rain" in conditions or "storm" in conditions:
+        if precip_type == "rain" and ("heavy rain" in conditions or "storm" in conditions):
             span = hazard_span_miles(idx, is_slippery_wp)
             alert_level = level_for_severity("high")
             driver_action = driver_advice("rain", "high")
@@ -1757,7 +1767,7 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                 recommendation="Reduce speed, increase following distance to 4+ seconds; consider waiting at next truck stop",
                 countdown_text=f"Heavy rain in {eta_mins} minutes at mile {int(distance)}",
                 location_name=location_name,
-                road_name=road_name_from_steps,
+                road_name=road_name,
                 span_miles=span,
                 alert_level=alert_level,
                 driver_action=driver_action,
@@ -1767,7 +1777,9 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
             )
             enrich_alert_fields(alert_obj)
             alerts.append(alert_obj)
-        elif "rain" in conditions or "shower" in conditions:
+            key = round(distance, 1)
+            seen_primary[key] = ("rain", "high")
+        elif precip_type == "rain" and ("rain" in conditions or "shower" in conditions):
             span = hazard_span_miles(idx, is_slippery_wp)
             alert_level = level_for_severity("medium")
             driver_action = driver_advice("rain", "medium")
@@ -1781,7 +1793,7 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                 recommendation="Turn on headlights and wipers",
                 countdown_text=f"Rain in {eta_mins} minutes",
                 location_name=location_name,
-                road_name=road_name_from_steps,
+                road_name=road_name,
                 span_miles=span,
                 alert_level=alert_level,
                 driver_action=driver_action,
@@ -1790,10 +1802,14 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                 rationale=rationale,
             )
             enrich_alert_fields(alert_obj)
-            alerts.append(alert_obj)
+            key = round(distance, 1)
+            prev = seen_primary.get(key)
+            if not prev or prev != ("rain", "medium"):
+                alerts.append(alert_obj)
+                seen_primary[key] = ("rain", "medium")
             
         # Snow/ice hazards
-        if "snow" in conditions:
+        if precip_type == "snow":
             span = hazard_span_miles(idx, is_snow_wp)
             alert_level = level_for_severity("high")
             whiteout = wind_speed >= 35
@@ -1814,7 +1830,7 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                 recommendation="Visibility may drop to near zero; slow sharply or pause travel" if whiteout else "Reduce speed by 50%, chains may be required; plan for reduced traction",
                 countdown_text=f"Snow in {eta_mins} minutes" if not whiteout else f"Whiteout risk in {eta_mins} minutes",
                 location_name=location_name,
-                road_name=road_name_from_steps,
+                road_name=road_name,
                 span_miles=span,
                 alert_level=alert_level if not whiteout else "Warning",
                 driver_action=driver_action,
@@ -1823,7 +1839,11 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                 rationale=rationale,
             )
             enrich_alert_fields(alert_obj)
-            alerts.append(alert_obj)
+            key = round(distance, 1)
+            prev = seen_primary.get(key)
+            if not prev or prev != (alert_obj.type, alert_obj.severity):
+                alerts.append(alert_obj)
+                seen_primary[key] = (alert_obj.type, alert_obj.severity)
             
         # Temperature-based ice warnings
         temp = wp.weather.temperature or 70
@@ -1845,7 +1865,7 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                 recommendation="Reduce speed; black ice likely on bridges/overpasses" if include_bridges else "Reduce speed; traction reduced",
                 countdown_text=f"Ice risk in {eta_mins} minutes",
                 location_name=location_name,
-                road_name=road_name_from_steps,
+                road_name=road_name,
                 span_miles=span,
                 alert_level=alert_level,
                 driver_action=driver_action,
@@ -1871,7 +1891,7 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                 recommendation="Use low beams, reduce speed to match visibility",
                 countdown_text=f"Fog in {eta_mins} minutes",
                 location_name=location_name,
-                road_name=road_name_from_steps,
+                road_name=road_name,
                 span_miles=span,
                 alert_level=alert_level,
                 driver_action=driver_action,
@@ -1919,7 +1939,8 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
             if merged:
                 prev = merged[-1]
                 same_type_level = (alert.type == prev.type) and ((alert.alert_level or "") == (prev.alert_level or ""))
-                roads_compatible = (not prev.road_name) or (not alert.road_name) or (prev.road_name == alert.road_name)
+                allow_any_road = alert.type in {"rain", "snow", "whiteout", "ice"}
+                roads_compatible = allow_any_road or (not prev.road_name) or (not alert.road_name) or (prev.road_name == alert.road_name)
                 if same_type_level and roads_compatible:
                     prev_start = max(0.0, prev.distance_miles or 0.0)
                     prev_span = sanitize_span(prev.span_miles)
@@ -1942,18 +1963,38 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
 
     merged_alerts = merge_adjacent(alerts)
 
-    # Deduplicate by message content (second level deduplication)
+    # Deduplicate by message content + start (second level deduplication)
     seen_messages = set()
     unique_alerts = []
     for alert in merged_alerts:
-        message_key = f"{alert.type}:{alert.message}"
+        start_key = round(alert.distance_miles or 0.0, 1)
+        message_key = f"{alert.type}:{alert.message}:{start_key}"
         if message_key not in seen_messages:
             seen_messages.add(message_key)
             unique_alerts.append(alert)
     
-    # Sort by severity (most critical first), then by distance (earlier), then by span descending
+    # Sort by severity (most critical first), then by distance (earlier), then by type priority, then by span descending
     severity_order = {"extreme": 0, "high": 1, "medium": 2, "low": 3}
-    unique_alerts.sort(key=lambda x: (severity_order.get(x.severity, 3), round(x.distance_miles or 0, 1), -(x.span_miles or 0)))
+    type_priority = {"ice": 0, "whiteout": 0, "snow": 1, "rain": 2}
+    unique_alerts.sort(
+        key=lambda x: (
+            severity_order.get(x.severity, 3),
+            round(x.distance_miles or 0, 1),
+            type_priority.get(x.type, 5),
+            -(x.span_miles or 0),
+        )
+    )
+
+    # Collapse duplicates at the same start mile, keeping highest severity (earliest in sorted list)
+    collapsed: List[HazardAlert] = []
+    seen_start: set[float] = set()
+    for alert in unique_alerts:
+        start_key = round(alert.distance_miles or 0.0, 1)
+        if start_key in seen_start:
+            continue
+        seen_start.add(start_key)
+        collapsed.append(alert)
+    unique_alerts = collapsed
 
     # Apply deterministic hazard IDs and rationale if missing; compute end_mile and sanitize
     for alert in unique_alerts:
@@ -1965,6 +2006,7 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
         if total_route_miles is not None:
             end_mile = min(end_mile, max(0.0, total_route_miles))
         alert.end_mile = round(end_mile, 1)
+        alert.eta_minutes = compute_eta(alert.distance_miles)
         if not alert.rationale:
             alert.rationale = "generated hazard"
         alert.hazard_id = compute_hazard_id(alert)
@@ -1979,13 +2021,50 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
             "hazard_alerts_generated",
             extra={
                 "route_id": route_id,
-                "steps": len(route_steps or []),
                 "waypoints": len(waypoints_weather),
                 "alerts_pre": len(alerts),
                 "alerts_merged": len(merged_alerts),
                 "alerts_final": len(unique_alerts),
                 "alerts_returned": len(limited_alerts),
                 "max_alerts": max_alerts,
+            },
+        )
+
+    sample = limited_alerts[:5]
+    logger.info(
+        "hazard_alerts_segments_sample",
+        extra={
+            "total_miles": total_route_miles,
+            "total_minutes": total_route_minutes,
+            "num_segments": len(limited_alerts),
+            "sample": [
+                {
+                    "start_mile": a.distance_miles,
+                    "span_miles": a.span_miles,
+                    "eta_minutes": a.eta_minutes,
+                    "type": a.type,
+                    "level": a.alert_level,
+                }
+                for a in sample
+            ],
+        },
+    )
+    if ALERT_DEBUG:
+        logger.info(
+            "hazard_alerts_debug",
+            extra={
+                "total_miles": total_route_miles,
+                "total_minutes": total_route_minutes,
+                "segments": [
+                    {
+                        "start_mile": a.distance_miles,
+                        "span_miles": a.span_miles,
+                        "eta_minutes": a.eta_minutes,
+                        "type": a.type,
+                        "level": a.alert_level,
+                    }
+                    for a in limited_alerts
+                ],
             },
         )
     if cfg.get("log_detail", 0) > 0:
@@ -2009,7 +2088,7 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
 def build_condition_segments(alerts: List[HazardAlert], *, category: str) -> List[ConditionSegment]:
     """Project hazard alerts into condensed condition bands for road or weather."""
     road_types = {"ice", "whiteout", "snow", "rain", "visibility"}
-    weather_types = {"snow", "whiteout", "wind", "rain", "visibility", "nws", "alert"}
+    weather_types = {"ice", "snow", "whiteout", "wind", "rain", "visibility", "nws", "alert"}
     allowed = road_types if category == "road" else weather_types
     avg_speed_mph = 55.0
     interval = max(1.0, RESAMPLE_MILES)
@@ -2451,7 +2530,7 @@ async def get_turn_by_turn_directions(origin_coords: tuple, dest_coords: tuple, 
                 'access_token': MAPBOX_ACCESS_TOKEN,
                 'steps': 'true',
                 'geometries': 'polyline6',
-                'overview': 'false',
+                'overview': 'full',
                 'annotations': 'distance,duration'
             }
             
@@ -2849,9 +2928,10 @@ async def get_route_weather(request: RouteRequest):
         except Exception:
             total_distance_meters = 0.0
 
-    total_duration = int(route_data.get('duration', 0))
-    if total_duration <= 0 and total_distance_meters > 0:
-        total_duration = int(calculate_eta(total_distance_meters / 1609.344) * 60)
+    total_duration_seconds = int(route_data.get('duration', 0) or 0)
+    if total_duration_seconds <= 0 and total_distance_meters > 0:
+        total_duration_seconds = int(calculate_eta(total_distance_meters / 1609.344) * 60)
+    total_duration_minutes = int(round(total_duration_seconds / 60)) if total_duration_seconds > 0 else int(round(calculate_eta(total_distance_meters / 1609.344)))
 
     # Build waypoints: prefer provided waypoints, else resample geometry, else synthesize start/end
     dep_time = departure_time or datetime.now()
@@ -2956,6 +3036,13 @@ async def get_route_weather(request: RouteRequest):
     tasks = [fetch_waypoint_weather(wp, i, total_waypoints, request.origin, request.destination) for i, wp in enumerate(waypoints)]
     waypoints_weather = await asyncio.gather(*tasks)
 
+    hazard_waypoints = extract_waypoints_from_route(route_geometry, interval_miles=10.0, departure_time=departure_time)
+    if not hazard_waypoints:
+        hazard_waypoints = list(waypoints)
+    hazard_total_waypoints = len(hazard_waypoints)
+    hazard_tasks = [fetch_waypoint_weather(wp, i, hazard_total_waypoints, request.origin, request.destination) for i, wp in enumerate(hazard_waypoints)]
+    hazard_waypoints_weather = await asyncio.gather(*hazard_tasks)
+
     # Persist active route monitor for alerts if push token provided and DB available
     if db is not None and request.push_token:
         try:
@@ -3030,7 +3117,13 @@ async def get_route_weather(request: RouteRequest):
         )
 
     # NEW: Generate hazard alerts with countdown using route context
-    hazard_alerts = generate_hazard_alerts(list(waypoints_weather), departure_time, turn_by_turn, total_distance, route_id)
+    hazard_alerts = generate_hazard_alerts(
+        list(hazard_waypoints_weather),
+        departure_time,
+        total_route_miles=total_distance,
+        total_route_minutes=total_duration_minutes,
+        route_id=route_id,
+    )
 
     road_conditions = build_condition_segments(hazard_alerts, category="road")
     weather_conditions = build_condition_segments(hazard_alerts, category="weather")
@@ -3056,7 +3149,7 @@ async def get_route_weather(request: RouteRequest):
         destination=request.destination,
         stops=request.stops or [],
         departure_time=departure_time.isoformat(),
-        total_duration_minutes=total_duration,
+        total_duration_minutes=total_duration_minutes,
         total_distance_miles=round(total_distance, 1),
         route_geometry=route_geometry,
         waypoints=list(waypoints_weather),

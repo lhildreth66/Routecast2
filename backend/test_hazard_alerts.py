@@ -10,7 +10,6 @@ from backend.server import (
     get_turn_by_turn_directions,
     get_route_weather,
     RouteRequest,
-    TurnByTurnStep,
     Waypoint,
     WaypointWeather,
     WeatherData,
@@ -46,32 +45,17 @@ def make_wp(distance: float, temp: int = 30, conditions: str = "Snow") -> Waypoi
 
 def test_span_computation_and_clamp():
     waypoints = [make_wp(0), make_wp(10), make_wp(20)]
-    steps = [
-        TurnByTurnStep(
-            instruction="Continue",
-            distance_miles=30,
-            duration_minutes=30,
-            road_name="I-80",
-            maneuver="straight",
-            road_condition=None,
-            weather_at_step=None,
-            temperature=None,
-            has_alert=False,
-            start_distance_miles=0,
-            end_distance_miles=30,
-        )
-    ]
     alerts = generate_hazard_alerts(
         waypoints,
         datetime.datetime.utcnow(),
-        steps,
         total_route_miles=100,
+        total_route_minutes=120,
         route_id="test-span",
     )
     ice_alerts = [a for a in alerts if a.type == "ice"]
     assert ice_alerts, "Expected ice alert from freezing temperatures"
     alert = ice_alerts[0]
-    assert alert.road_name == "I-80"
+    assert alert.road_name == waypoints[0].waypoint.name
     assert alert.span_miles and 19.5 <= alert.span_miles <= 20.5
     assert alert.hazard_id, "Hazard ID should be populated"
     assert alert.rationale, "Rationale should be populated"
@@ -81,26 +65,11 @@ def test_span_computation_and_clamp():
 
 def test_merge_adjacent_hazards():
     waypoints = [make_wp(10, temp=45, conditions="heavy rain"), make_wp(15, temp=45, conditions="heavy rain")]
-    steps = [
-        TurnByTurnStep(
-            instruction="Continue",
-            distance_miles=30,
-            duration_minutes=30,
-            road_name="US-50",
-            maneuver="straight",
-            road_condition=None,
-            weather_at_step=None,
-            temperature=None,
-            has_alert=False,
-            start_distance_miles=0,
-            end_distance_miles=30,
-        )
-    ]
     alerts = generate_hazard_alerts(
         waypoints,
         datetime.datetime.utcnow(),
-        steps,
         total_route_miles=100,
+        total_route_minutes=120,
         route_id="test-merge",
     )
     rain_alerts = [a for a in alerts if a.type == "rain"]
@@ -111,57 +80,27 @@ def test_merge_adjacent_hazards():
     assert rain_alerts[0].hazard_schema_version == 1
 
 
-def test_road_name_fallback():
+def test_road_name_defaults_to_waypoint():
     waypoints = [make_wp(5)]
-    steps = [
-        TurnByTurnStep(
-            instruction="Continue",
-            distance_miles=10,
-            duration_minutes=10,
-            road_name="",
-            maneuver="straight",
-            road_condition=None,
-            weather_at_step=None,
-            temperature=None,
-            has_alert=False,
-            start_distance_miles=0,
-            end_distance_miles=10,
-        )
-    ]
     alerts = generate_hazard_alerts(
         waypoints,
         datetime.datetime.utcnow(),
-        steps,
         total_route_miles=50,
+        total_route_minutes=60,
         route_id="test-road",
     )
     ice_alerts = [a for a in alerts if a.type == "ice"]
     assert ice_alerts, "Expected ice alert from freezing temp"
-    assert ice_alerts[0].road_name == "Unnamed road"
+    assert ice_alerts[0].road_name == waypoints[0].waypoint.name
 
 
 def test_schema_expectations():
     waypoints = [make_wp(0), make_wp(5, temp=31, conditions="rain"), make_wp(10, temp=31, conditions="rain")]
-    steps = [
-        TurnByTurnStep(
-            instruction="Continue",
-            distance_miles=20,
-            duration_minutes=20,
-            road_name="I-5",
-            maneuver="straight",
-            road_condition=None,
-            weather_at_step=None,
-            temperature=None,
-            has_alert=False,
-            start_distance_miles=0,
-            end_distance_miles=20,
-        )
-    ]
     alerts = generate_hazard_alerts(
         waypoints,
         datetime.datetime.utcnow(),
-        steps,
         total_route_miles=30,
+        total_route_minutes=40,
         route_id="test-schema",
     )
     assert alerts, "Expected at least one hazard alert"
@@ -179,33 +118,18 @@ def test_schema_expectations():
 
 def test_hazard_id_determinism():
     waypoints = [make_wp(0), make_wp(5, temp=31, conditions="rain"), make_wp(10, temp=31, conditions="rain")]
-    steps = [
-        TurnByTurnStep(
-            instruction="Continue",
-            distance_miles=20,
-            duration_minutes=20,
-            road_name=" I-5  ",
-            maneuver="straight",
-            road_condition=None,
-            weather_at_step=None,
-            temperature=None,
-            has_alert=False,
-            start_distance_miles=0,
-            end_distance_miles=20,
-        )
-    ]
     alerts1 = generate_hazard_alerts(
         waypoints,
         datetime.datetime.utcnow(),
-        steps,
         total_route_miles=30,
+        total_route_minutes=40,
         route_id="test-hash-1",
     )
     alerts2 = generate_hazard_alerts(
         waypoints,
         datetime.datetime.utcnow(),
-        steps,
         total_route_miles=30,
+        total_route_minutes=40,
         route_id="test-hash-2",
     )
     ids1 = {a.hazard_id for a in alerts1}
@@ -213,14 +137,13 @@ def test_hazard_id_determinism():
     assert ids1 == ids2, "Hazard IDs should be deterministic across runs"
 
 
-def test_empty_steps_total_distance_fallback():
+def test_hazards_without_turn_by_turn():
     waypoints = [make_wp(0), make_wp(5, temp=30, conditions="Snow")]
-    steps = []  # simulate missing/empty turn-by-turn steps
     alerts = generate_hazard_alerts(
         waypoints,
         datetime.datetime.utcnow(),
-        steps,
         total_route_miles=0,
+        total_route_minutes=0,
         route_id="test-empty-steps",
     )
     # Should not crash and should return at least one hazard (ice/snow)
@@ -323,13 +246,13 @@ async def test_mapbox_steps_return_real_road_names(monkeypatch):
     alerts = generate_hazard_alerts(
         waypoints,
         datetime.datetime.utcnow(),
-        steps,
         total_route_miles=10,
+        total_route_minutes=20,
         route_id="mapbox-steps",
     )
 
     assert alerts, "Hazards should generate with real road names"
-    assert alerts[0].road_name not in {"Route", "Unnamed road"}
+    assert alerts[0].road_name.startswith("Mile")
     assert alerts[0].driver_action
 
 
@@ -391,8 +314,8 @@ async def test_low_resolution_routes_resample_and_generate_segments(monkeypatch)
     alerts = generate_hazard_alerts(
         waypoints,
         datetime.datetime.utcnow(),
-        steps,
         total_route_miles=372,
+        total_route_minutes=360,
         route_id="low-res",
     )
 
@@ -403,7 +326,7 @@ async def test_low_resolution_routes_resample_and_generate_segments(monkeypatch)
     assert any(seg.start_mile > 0 for seg in road_segments), "Segments should carry start miles"
     assert all(seg.span_miles > 0 for seg in road_segments), "Segments should have span miles"
     assert all(seg.eta_end_min >= seg.eta_start_min for seg in road_segments), "ETA ranges should be non-decreasing"
-    assert any(seg.road_name == "AK-1" for seg in road_segments), "Road segments should keep road name"
+    assert all(seg.road_name for seg in road_segments), "Road segments should have names"
 
 
 @pytest.mark.asyncio
@@ -514,7 +437,7 @@ async def test_route_weather_allows_origin_dest_only(monkeypatch):
     assert resp.total_distance_miles is not None
 
 
-def test_mapbox_route_empty_steps_distance_used():
+def test_hazard_generation_uses_route_distance():
     # Mapbox route shape: distance at route + leg, but steps empty
     waypoints = [make_wp(0), make_wp(50, temp=30, conditions="Snow"), make_wp(100, temp=28, conditions="Snow")]
     route = {"distance": 160934.4, "legs": [{"steps": [], "distance": 160934.4}]}
@@ -526,8 +449,8 @@ def test_mapbox_route_empty_steps_distance_used():
     alerts = generate_hazard_alerts(
         waypoints,
         datetime.datetime.utcnow(),
-        turn_by_turn,
         total_route_miles=total_distance_miles,
+        total_route_minutes=120,
         route_id="mapbox-empty-steps",
     )
 

@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { registerDevicePushTokenOnce } from './pushRegistration';
+import { addNotificationToHistory } from './notificationHistory';
 
 // Configure notifications
 Notifications.setNotificationHandler({
@@ -40,6 +41,15 @@ export default function RootLayout() {
     requestPermissions();
     ensureAndroidChannel();
     registerDevicePushTokenOnce();
+
+    const sub = Notifications.addNotificationReceivedListener((notification) => {
+      // fire-and-forget persist to history
+      void addNotificationToHistory(notification);
+    });
+
+    return () => {
+      sub.remove();
+    };
   }, []);
 
   return (
@@ -80,6 +90,7 @@ export default function RootLayout() {
         <Stack.Screen name="radar-map" />
         <Stack.Screen name="weather-alerts" />
         <Stack.Screen name="user-guide" />
+        <Stack.Screen name="notifications" />
       </Stack>
     </>
   );
