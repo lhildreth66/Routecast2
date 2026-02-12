@@ -7,6 +7,8 @@ Key responsibilities:
 - Deduplicate and rate-limit push notifications.
 """
 
+import asyncio
+import concurrent.futures
 import hashlib
 import json
 import logging
@@ -432,8 +434,31 @@ class CriticalRouteAlertWorker:
             "monitors_without_geometry": 0,
         }
 
+        prepared: List[Dict[str, Any]] = []
         for monitor in monitors:
-            result = self._process_monitor(monitor)
+            prepared_monitor, prep_stats = self._prepare_monitor(monitor)
+            for key in summary:
+                if key in prep_stats:
+                    summary[key] += prep_stats[key]
+            if prepared_monitor:
+                prepared.append(prepared_monitor)
+
+        unique_points: Dict[str, Tuple[float, float]] = {}
+        for item in prepared:
+            for point in item["sample_points"]:
+                lat = point.get("lat")
+                lon = point.get("lon")
+                if lat is None or lon is None:
+                    continue
+                key = self._point_cache_key(lat, lon)
+                if key not in unique_points:
+                    unique_points[key] = (lat, lon)
+
+        alerts_cache = self._fetch_alerts_concurrent(unique_points)
+        summary["nws_calls"] += len(unique_points)
+
+        for item in prepared:
+            result = self._process_monitor_with_cache(item, alerts_cache)
             for key in summary:
                 if key in result:
                     summary[key] += result[key]
@@ -461,6 +486,23 @@ class CriticalRouteAlertWorker:
         return summary
 
     def _process_monitor(self, monitor: Dict[str, Any]) -> Dict[str, int]:
+        prepared, stats = self._prepare_monitor(monitor)
+        if not prepared:
+            return stats
+
+        # Fallback: sequential fetch if caller bypasses run_once concurrency
+        cache: Dict[str, List[Dict[str, Any]]] = {}
+        for point in prepared["sample_points"]:
+            key = self._point_cache_key(point["lat"], point["lon"])
+            cache[key] = list(self.fetcher(point["lat"], point["lon"]))
+        stats["nws_calls"] += len(cache)
+
+        result = self._process_monitor_with_cache(prepared, cache)
+        for k, v in result.items():
+            stats[k] = stats.get(k, 0) + v
+        return stats
+
+    def _prepare_monitor(self, monitor: Dict[str, Any]) -> tuple[Optional[Dict[str, Any]], Dict[str, int]]:
         stats = {
             "sent": 0,
             "skipped": 0,
@@ -486,7 +528,6 @@ class CriticalRouteAlertWorker:
         legs_val = monitor.get("legs") or monitor.get("route_legs")
         explicit_points = monitor.get("points") or monitor.get("coords")
 
-        # Instrumentation for each monitor to understand sampling and token wiring
         sample_points_count = len(sample_points)
         first_points = sample_points[:2]
         expires_at = monitor.get("expires_at") or monitor.get("expires") or monitor.get("expiresAt")
@@ -526,7 +567,6 @@ class CriticalRouteAlertWorker:
                     len(route_points),
                     sample_points_count,
                 )
-                # Persist back so future runs have points
                 try:
                     self.service.db.route_monitors.update_one(
                         {"monitor_id": monitor_id},
@@ -570,19 +610,73 @@ class CriticalRouteAlertWorker:
             stats["skipped"] += 1
             stats["skipped_points"] += 1
             stats["skipped_geometry"] += 1
-            return stats
+            return None, stats
 
         stats["monitors_with_geometry"] += 1
 
         if route_signature is None:
-            # Backfill signature for legacy monitors
             route_signature = self.service._route_signature(route_id, sample_points)
 
+        prepared = {
+            "monitor": monitor,
+            "monitor_id": monitor_id,
+            "token": token,
+            "route_id": route_id,
+            "route_signature": route_signature,
+            "sample_points": sample_points,
+        }
+        return prepared, stats
+
+    def _has_sent(self, route_signature: str, route_id: str, alert_id: str, band: str, monitor_id: Optional[str] = None) -> bool:
+        try:
+            return self.service.has_sent(route_signature, route_id, alert_id, band, monitor_id=monitor_id)
+        except TypeError:
+            return self.service.has_sent(route_signature, route_id, alert_id, band)
+
+    def _send_notification(self, token: str, payload: Dict[str, Any]) -> bool:
+        try:
+            return self.service.push_gateway.send(
+                token,
+                title=payload["title"],
+                body=payload["collapsed_body"],
+                expanded_body=payload.get("expanded_body"),
+                data=payload.get("data"),
+            )
+        except TypeError:
+            try:
+                return self.service.push_gateway.send(
+                    token,
+                    payload["title"],
+                    payload["collapsed_body"],
+                    payload.get("data"),
+                )
+            except TypeError:
+                return self.service.push_gateway.send(token, payload["title"], payload["collapsed_body"])
+
+    def _process_monitor_with_cache(self, prepared: Dict[str, Any], alerts_cache: Dict[str, List[Dict[str, Any]]]) -> Dict[str, int]:
+        stats = {
+            "sent": 0,
+            "skipped": 0,
+            "nws_calls": 0,
+            "alerts_seen": 0,
+            "skipped_type": 0,
+            "skipped_distance": 0,
+            "skipped_dedupe": 0,
+            "skipped_cap": 0,
+            "skipped_push": 0,
+        }
+
+        monitor_id = prepared["monitor_id"]
+        token = prepared["token"]
+        route_id = prepared["route_id"]
+        route_signature = prepared["route_signature"]
+        sample_points = prepared["sample_points"]
+
         for point in sample_points:
-            alerts = list(self.fetcher(point["lat"], point["lon"]))
-            stats["nws_calls"] += 1
+            key = self._point_cache_key(point["lat"], point["lon"])
+            alerts = alerts_cache.get(key, [])
+            stats["alerts_seen"] += len(alerts)
             for alert in alerts:
-                stats["alerts_seen"] += 1
                 if not self._is_critical(alert):
                     stats["skipped"] += 1
                     stats["skipped_type"] += 1
@@ -598,13 +692,12 @@ class CriticalRouteAlertWorker:
                     stats["skipped_distance"] += 1
                     continue
 
-                # If we already sent within-5, suppress later within-15 for same alert
-                if band == "within_15" and self.service.has_sent(route_signature, route_id, alert_id, "within_5", monitor_id=monitor_id):
+                if band == "within_15" and self._has_sent(route_signature, route_id, alert_id, "within_5", monitor_id=monitor_id):
                     stats["skipped"] += 1
                     stats["skipped_dedupe"] += 1
                     continue
 
-                if self.service.has_sent(route_signature, route_id, alert_id, band, monitor_id=monitor_id) or self.service.has_sent(route_signature, route_id, alert_id, "within_5", monitor_id=monitor_id) or self.service.has_sent(route_signature, route_id, alert_id, "within_15", monitor_id=monitor_id):
+                if self._has_sent(route_signature, route_id, alert_id, band, monitor_id=monitor_id):
                     stats["skipped"] += 1
                     stats["skipped_dedupe"] += 1
                     continue
@@ -626,13 +719,7 @@ class CriticalRouteAlertWorker:
                     sample_points=sample_points,
                 )
 
-                if self.service.push_gateway.send(
-                    token,
-                    title=payload["title"],
-                    body=payload["collapsed_body"],
-                    expanded_body=payload["expanded_body"],
-                    data=payload["data"],
-                ):
+                if self._send_notification(token, payload):
                     self.service.record_sent(
                         monitor_id,
                         route_signature,
@@ -744,7 +831,7 @@ class CriticalRouteAlertWorker:
         if start and end:
             return f"From {start:%a %-I:%M %p} through {end:%a %-I:%M %p}"
         if start:
-                return f"From {start:%a %-I:%M %p}"
+            return f"From {start:%a %-I:%M %p}"
         if end:
             return f"Until {end:%a %-I:%M %p}"
         return None
@@ -874,7 +961,7 @@ class CriticalRouteAlertWorker:
             "Accept": "application/geo+json",
         }
         try:
-            with httpx.Client(timeout=15.0) as client:
+            with httpx.Client(timeout=5.0) as client:
                 resp = client.get(url, headers=headers)
                 resp.raise_for_status()
                 data = resp.json()
@@ -882,3 +969,52 @@ class CriticalRouteAlertWorker:
         except Exception as exc:  # noqa: BLE001
             logger.warning("NWS fetch failed for point %.3f,%.3f: %s", lat, lon, exc)
             return []
+
+    def _point_cache_key(self, lat: float, lon: float, precision: int = 1) -> str:
+        rounded_lat = round(lat, precision)
+        rounded_lon = round(lon, precision)
+        fmt = f"{{:.{precision}f}}"
+        return f"{fmt.format(rounded_lat)},{fmt.format(rounded_lon)}"
+
+    def _safe_fetch_alerts(self, lat: float, lon: float) -> List[Dict[str, Any]]:
+        try:
+            return list(self.fetcher(lat, lon))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[route-alerts] fetch failed for point %.3f,%.3f: %s", lat, lon, exc)
+            return []
+
+    def _fetch_alerts_concurrent(self, unique_points: Dict[str, Tuple[float, float]]) -> Dict[str, List[Dict[str, Any]]]:
+        if not unique_points:
+            return {}
+
+        max_workers_env = int(os.environ.get("ROUTE_ALERTS_MAX_WORKERS", "32"))
+        per_call_timeout = float(os.environ.get("ROUTE_ALERTS_POINT_TIMEOUT", "5.0"))
+        max_workers = max(1, min(max_workers_env, max(1, len(unique_points))))
+
+        results: Dict[str, List[Dict[str, Any]]] = {}
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_map = {
+                executor.submit(self._safe_fetch_alerts, lat, lon): key
+                for key, (lat, lon) in unique_points.items()
+            }
+
+            done, not_done = concurrent.futures.wait(
+                future_map.keys(), timeout=per_call_timeout, return_when=concurrent.futures.ALL_COMPLETED
+            )
+
+            for future in done:
+                key = future_map[future]
+                try:
+                    alerts = future.result()
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("[route-alerts] NWS fetch error for %s: %s", key, exc)
+                    alerts = []
+                results[key] = list(alerts) if alerts else []
+
+            for future in not_done:
+                key = future_map[future]
+                future.cancel()
+                logger.warning("[route-alerts] NWS fetch timed out for %s after %.1fs", key, per_call_timeout)
+                results[key] = []
+
+        return results

@@ -1,6 +1,7 @@
 from datetime import datetime, timezone, timedelta
 import hashlib
 import json
+import httpx
 
 from notifications.route_alerts import (
     CriticalRouteAlertWorker,
@@ -195,3 +196,80 @@ def test_hourly_cap_and_tornado(monkeypatch):
     worker.fetcher = lambda lat, lon: [tornado_alert]
     result2 = worker._process_monitor(monitor)
     assert result2["sent"] == 1
+
+
+def test_dedupe_shared_bucket(monkeypatch):
+    now = datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+    def now_fn(tz=None):
+        return now
+
+    service = InMemoryService(now_fn=now_fn)
+
+    points_a = [{"lat": 0.04, "lon": 0.06}]
+    points_b = [{"lat": 0.03, "lon": 0.07}]  # same 0.1° bucket as points_a
+
+    monitor_a = {
+        "monitor_id": "m1",
+        "push_token": "token1",
+        "sample_points": points_a,
+        "route_id": "r1",
+        "route_signature": route_signature("r1", points_a),
+    }
+    monitor_b = {
+        "monitor_id": "m2",
+        "push_token": "token2",
+        "sample_points": points_b,
+        "route_id": "r2",
+        "route_signature": route_signature("r2", points_b),
+    }
+    service.monitors = [monitor_a, monitor_b]
+
+    fetch_calls = {"count": 0}
+
+    def fetcher(lat, lon):
+        fetch_calls["count"] += 1
+        return [make_alert(alert_id="shared")]
+
+    worker = CriticalRouteAlertWorker(service, fetcher=fetcher)
+    monkeypatch.setattr(worker, "_distance_to_alert", lambda p, a: 4.0)
+
+    result = worker.run_once()
+
+    assert fetch_calls["count"] == 1  # shared bucket yields single network call
+    assert result["nws_calls"] == 1
+    assert result["sent"] == 2  # both monitors still notified
+
+
+def test_timeout_is_skipped(monkeypatch):
+    now = datetime(2024, 1, 1, tzinfo=timezone.utc)
+
+    def now_fn(tz=None):
+        return now
+
+    service = InMemoryService(now_fn=now_fn)
+    points = [{"lat": 1.23, "lon": 4.56}]
+    monitor = {
+        "monitor_id": "m1",
+        "push_token": "token1",
+        "sample_points": points,
+        "route_id": "r-timeout",
+        "route_signature": route_signature("r-timeout", points),
+    }
+    service.monitors = [monitor]
+
+    fetch_calls = {"count": 0}
+
+    def fetcher(lat, lon):
+        fetch_calls["count"] += 1
+        raise httpx.ReadTimeout("timeout")
+
+    worker = CriticalRouteAlertWorker(service, fetcher=fetcher)
+    monkeypatch.setattr(worker, "_distance_to_alert", lambda p, a: 4.0)
+
+    result = worker.run_once()
+
+    assert fetch_calls["count"] == 1
+    assert result["nws_calls"] == 1
+    assert result["alerts_seen"] == 0
+    assert result["sent"] == 0
