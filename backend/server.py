@@ -1360,6 +1360,33 @@ def calculate_safety_score(waypoints_weather: List[WaypointWeather], vehicle_typ
         recommendations=recommendations[:4]
     )
 
+def compute_total_distance_miles(
+    route_data: Optional[dict],
+    turn_by_turn: Optional[List[TurnByTurnStep]] = None,
+    waypoints_weather: Optional[List[WaypointWeather]] = None,
+) -> float:
+    """Compute total route distance in miles with safe fallbacks."""
+    route_data = route_data or {}
+    route_distance_meters = (
+        route_data.get("distance")
+        or sum((leg.get("distance") or 0.0) for leg in route_data.get("legs", []))
+        or 0.0
+    )
+    total_distance_miles = route_distance_meters / 1609.344
+
+    if total_distance_miles <= 0 and turn_by_turn:
+        step_dist = sum(s.distance_miles or 0.0 for s in turn_by_turn)
+        if step_dist > 0:
+            total_distance_miles = float(step_dist)
+
+    if total_distance_miles <= 0 and waypoints_weather:
+        last_wp = waypoints_weather[-1].waypoint if waypoints_weather else None
+        if last_wp and last_wp.distance_from_start is not None:
+            total_distance_miles = float(last_wp.distance_from_start)
+
+    return max(total_distance_miles, 0.0)
+
+
 def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_time: datetime, route_steps: Optional[List[TurnByTurnStep]] = None, total_route_miles: Optional[float] = None, route_id: Optional[str] = None) -> List[HazardAlert]:
     """Generate proactive hazard alerts with countdown timers."""
     alerts: List[HazardAlert] = []
@@ -1565,7 +1592,7 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
         distance = wp.waypoint.distance_from_start or 0
         eta_mins = wp.waypoint.eta_minutes or int(distance / 55 * 60)
         location_name = wp.waypoint.name or f"Mile {int(distance)}"
-        road_name_from_steps = road_for_distance(distance)
+        road_name_from_steps = road_for_distance(distance) or wp.waypoint.name or "Route"
         conditions_detail = build_conditions_detail(wp)
 
         # Include any active NWS alerts with full detail fields
@@ -2649,6 +2676,16 @@ async def get_route_weather(request: RouteRequest):
 
     # NEW: Get turn-by-turn directions with road conditions (used for hazard enrichment)
     turn_by_turn = await get_turn_by_turn_directions(origin_coords, dest_coords, list(waypoints_weather))
+    turn_by_turn = turn_by_turn or []
+
+    total_distance = compute_total_distance_miles(route_data, turn_by_turn, list(waypoints_weather))
+
+    if not turn_by_turn:
+        logger.info(
+            "turn_by_turn empty; using route distance fallback total_distance_miles=%s",
+            total_distance,
+            extra={"route_id": route_id},
+        )
 
     # NEW: Generate hazard alerts with countdown using route context
     hazard_alerts = generate_hazard_alerts(list(waypoints_weather), departure_time, turn_by_turn, total_distance, route_id)
@@ -2667,9 +2704,6 @@ async def get_route_weather(request: RouteRequest):
     
     # NEW: Analyze road conditions
     road_condition_summary, worst_road_condition, reroute_recommended, reroute_reason = analyze_route_conditions(list(waypoints_weather))
-    
-    # Calculate total distance
-    total_distance = route_data.get('distance', 0) / 1609.34  # meters to miles
     
     response = RouteWeatherResponse(
         id=route_id,

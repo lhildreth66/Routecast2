@@ -1,10 +1,13 @@
 import datetime
 
+import pytest
+
 from backend.server import (
     TurnByTurnStep,
     Waypoint,
     WaypointWeather,
     WeatherData,
+    compute_total_distance_miles,
     generate_hazard_alerts,
 )
 
@@ -201,3 +204,45 @@ def test_hazard_id_determinism():
     ids1 = {a.hazard_id for a in alerts1}
     ids2 = {a.hazard_id for a in alerts2}
     assert ids1 == ids2, "Hazard IDs should be deterministic across runs"
+
+
+def test_empty_steps_total_distance_fallback():
+    waypoints = [make_wp(0), make_wp(5, temp=30, conditions="Snow")]
+    steps = []  # simulate missing/empty turn-by-turn steps
+    alerts = generate_hazard_alerts(
+        waypoints,
+        datetime.datetime.utcnow(),
+        steps,
+        total_route_miles=0,
+        route_id="test-empty-steps",
+    )
+    # Should not crash and should return at least one hazard (ice/snow)
+    assert alerts, "Expected hazard generation even when steps are empty"
+    a = alerts[0]
+    assert a.road_name is not None
+    assert a.hazard_id
+    assert a.hazard_schema_version == 1
+
+
+def test_mapbox_route_empty_steps_distance_used():
+    # Mapbox route shape: distance at route + leg, but steps empty
+    waypoints = [make_wp(0), make_wp(50, temp=30, conditions="Snow"), make_wp(100, temp=28, conditions="Snow")]
+    route = {"distance": 160934.4, "legs": [{"steps": [], "distance": 160934.4}]}
+    turn_by_turn = []
+
+    total_distance_miles = compute_total_distance_miles(route, turn_by_turn, waypoints)
+    assert total_distance_miles == pytest.approx(100.0)
+
+    alerts = generate_hazard_alerts(
+        waypoints,
+        datetime.datetime.utcnow(),
+        turn_by_turn,
+        total_route_miles=total_distance_miles,
+        route_id="mapbox-empty-steps",
+    )
+
+    assert alerts, "Expected hazard generation with Mapbox-style empty steps"
+    a = alerts[0]
+    assert a.road_name is not None
+    assert a.hazard_id
+    assert a.hazard_schema_version == 1
