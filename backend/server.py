@@ -4165,7 +4165,7 @@ async def _search_walmart_google_places(request: OvernightSearchRequest) -> List
         logger.error("GOOGLE_PLACES_API_KEY missing for Walmart search")
         raise HTTPException(status_code=503, detail="Walmart search unavailable: missing GOOGLE_PLACES_API_KEY")
 
-    radius_meters = int(request.radius_miles * 1609.34)
+    radius_meters = min(50000.0, float(request.radius_miles * 1609.34))
     url = "https://places.googleapis.com/v1/places:searchNearby"
     body = {
         "locationRestriction": {
@@ -4175,7 +4175,7 @@ async def _search_walmart_google_places(request: OvernightSearchRequest) -> List
             }
         },
         "includedTypes": ["parking", "truck_stop"],
-        "maxResultCount": 30,
+        "maxResultCount": 20,
     }
     headers = {
         "Content-Type": "application/json",
