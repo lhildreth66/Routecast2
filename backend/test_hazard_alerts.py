@@ -459,6 +459,61 @@ async def test_route_weather_handles_missing_waypoints(monkeypatch):
     assert resp.total_distance_miles is not None
 
 
+@pytest.mark.asyncio
+async def test_route_weather_allows_origin_dest_only(monkeypatch):
+    called = {"count": 0}
+
+    async def fake_route(origin, dest, waypoints=None, options=None):
+        called["count"] += 1
+        return {
+            "duration": 1800,
+            "distance": 80467.2,
+            "geometry": None,  # force geometry fallback
+            "legs": [{"distance": 80467.2}],
+        }
+
+    async def fake_weather(lat, lon):
+        return WeatherData(
+            temperature=40,
+            temperature_unit="F",
+            wind_speed="5 mph",
+            wind_direction="N",
+            conditions="Clear",
+            icon="",
+            humidity=50,
+            is_daytime=True,
+            sunrise=None,
+            sunset=None,
+            hourly_forecast=[],
+        )
+
+    async def fake_alerts(lat, lon):
+        return []
+
+    async def fake_reverse(lat, lon):
+        return None
+
+    async def fake_turn_by_turn(origin, dest, waypoints_weather):
+        return []
+
+    async def fake_rest(route_geometry, waypoints_weather):
+        return []
+
+    monkeypatch.setattr("backend.server.get_mapbox_route", fake_route)
+    monkeypatch.setattr("backend.server.get_noaa_weather", fake_weather)
+    monkeypatch.setattr("backend.server.get_noaa_alerts", fake_alerts)
+    monkeypatch.setattr("backend.server.reverse_geocode", fake_reverse)
+    monkeypatch.setattr("backend.server.get_turn_by_turn_directions", fake_turn_by_turn)
+    monkeypatch.setattr("backend.server.find_rest_stops", fake_rest)
+
+    req = RouteRequest(origin="0,0", destination="0,1", departure_time=None, stops=None, waypoints=None)
+    resp = await get_route_weather(req)
+
+    assert called["count"] == 1, "Mapbox route should be invoked"
+    assert resp.waypoints, "Waypoints should be synthesized when missing"
+    assert resp.total_distance_miles is not None
+
+
 def test_mapbox_route_empty_steps_distance_used():
     # Mapbox route shape: distance at route + leg, but steps empty
     waypoints = [make_wp(0), make_wp(50, temp=30, conditions="Snow"), make_wp(100, temp=28, conditions="Snow")]
