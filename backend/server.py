@@ -115,6 +115,9 @@ HAZARD_CONFIG = {
     "log_detail": int(_env_float("HAZARD_LOG_DETAIL", 0)),
 }
 
+RESAMPLE_MILES = _env_float("RESAMPLE_MILES", 10.0)
+MIN_STEPS_FOR_NATIVE = int(_env_float("MIN_STEPS_FOR_NATIVE", 30))
+
 HAZARD_SCHEMA_VERSION = 1
 
 # Log hazard config once at startup for ops visibility
@@ -310,6 +313,21 @@ class HazardAlert(BaseModel):
     hazard_id: Optional[str] = None  # stable deterministic id for client diffing
     hazard_schema_version: int = HAZARD_SCHEMA_VERSION
 
+
+class ConditionSegment(BaseModel):
+    type: str
+    category: str  # road or weather
+    road_name: str
+    start_mile: float
+    end_mile: float
+    span_miles: float
+    eta_start_min: Optional[int] = None
+    eta_end_min: Optional[int] = None
+    conditions: Optional[str] = None
+    rationale: Optional[str] = None
+    driver_action: Optional[str] = None
+    severity: Optional[str] = None
+
 class RestStop(BaseModel):
     name: str
     type: str  # gas, food, rest_area
@@ -411,6 +429,8 @@ class RouteWeatherResponse(BaseModel):
     # New fields for enhanced features
     safety_score: Optional[SafetyScore] = None
     hazard_alerts: List[HazardAlert] = []
+    road_conditions: List[ConditionSegment] = []
+    weather_conditions: List[ConditionSegment] = []
     rest_stops: List[RestStop] = []
     optimal_departure: Optional[DepartureWindow] = None
     trucker_warnings: List[str] = []
@@ -908,10 +928,10 @@ def calculate_eta(distance_miles: float, avg_speed_mph: float = 55) -> int:
     """Calculate ETA in minutes."""
     return int((distance_miles / avg_speed_mph) * 60)
 
-def extract_waypoints_from_route(encoded_polyline: str, interval_miles: float = 50, departure_time: Optional[datetime] = None) -> List[Waypoint]:
+def extract_waypoints_from_route(encoded_polyline: str, interval_miles: float = RESAMPLE_MILES, departure_time: Optional[datetime] = None) -> List[Waypoint]:
     """Extract waypoints along route at specified intervals with ETAs."""
     try:
-        coords = polyline.decode(encoded_polyline)
+        coords = polyline.decode(encoded_polyline, 6)
         if not coords:
             return []
         
@@ -1980,10 +2000,55 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
     
     return limited_alerts
 
+
+def build_condition_segments(alerts: List[HazardAlert], *, category: str) -> List[ConditionSegment]:
+    """Project hazard alerts into condensed condition bands for road or weather."""
+    road_types = {"ice", "whiteout", "snow", "rain", "visibility"}
+    weather_types = {"snow", "whiteout", "wind", "rain", "visibility", "nws", "alert"}
+    allowed = road_types if category == "road" else weather_types
+    avg_speed_mph = 55.0
+    interval = max(1.0, RESAMPLE_MILES)
+
+    segments: List[ConditionSegment] = []
+    for alert in alerts or []:
+        if alert.type not in allowed:
+            continue
+        start = max(0.0, alert.distance_miles or 0.0)
+        span = alert.span_miles or HAZARD_CONFIG.get("default_span_miles", 5.0)
+        end = max(start, start + span)
+        eta_start = alert.eta_minutes if alert.eta_minutes is not None else int(start / avg_speed_mph * 60)
+        eta_end = eta_start + int(span / max(avg_speed_mph, 1e-3) * 60)
+        chunk_start = start
+        while chunk_start < end - 1e-6:
+            chunk_end = min(end, chunk_start + interval)
+            chunk_span = max(0.0, chunk_end - chunk_start)
+            chunk_eta_start = int((chunk_start / max(avg_speed_mph, 1e-3)) * 60)
+            chunk_eta_end = int((chunk_end / max(avg_speed_mph, 1e-3)) * 60)
+            segments.append(
+                ConditionSegment(
+                    type=alert.type,
+                    category=category,
+                    road_name=alert.road_name or "Unnamed road",
+                    start_mile=round(chunk_start, 1),
+                    end_mile=round(chunk_end, 1),
+                    span_miles=round(chunk_span, 1),
+                    eta_start_min=chunk_eta_start,
+                    eta_end_min=chunk_eta_end,
+                    conditions=alert.message or alert.type,
+                    rationale=alert.rationale,
+                    driver_action=alert.driver_action or alert.recommendation,
+                    severity=alert.severity,
+                )
+            )
+            chunk_start = chunk_end
+
+    segments.sort(key=lambda s: s.start_mile)
+    return segments
+
 async def find_rest_stops(route_geometry: str, waypoints_weather: List[WaypointWeather]) -> List[RestStop]:
     """Find rest stops, gas stations along the route with weather at arrival."""
     rest_stops = []
-    route_coords = polyline.decode(route_geometry)
+    route_coords = polyline.decode(route_geometry, 6)
     
     # Sample points along route (every ~75 miles)
     total_points = len(route_coords)
@@ -2317,6 +2382,60 @@ async def get_turn_by_turn_directions(origin_coords: tuple, dest_coords: tuple, 
     origin_lat, origin_lon = origin_norm
     dest_lat, dest_lon = dest_norm
     
+    def _haversine_miles(lat1, lon1, lat2, lon2):
+        R = 3958.8
+        from math import radians, sin, cos, asin, sqrt
+        dlat = radians(lat2 - lat1)
+        dlon = radians(lon2 - lon1)
+        a = sin(dlat/2)**2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon/2)**2
+        return 2 * R * asin(sqrt(a))
+
+    def _build_synthetic_steps(route_geom: Optional[str], total_miles: float, *, interval_miles: float, road_name: str, avg_speed_mph: float) -> List[TurnByTurnStep]:
+        if not route_geom or total_miles <= 0:
+            return []
+        try:
+            coords = polyline.decode(route_geom, 6)
+        except Exception:
+            return []
+        if len(coords) < 2:
+            return []
+        # cumulative distances along polyline
+        cum = [0.0]
+        for i in range(1, len(coords)):
+            miles = _haversine_miles(coords[i-1][0], coords[i-1][1], coords[i][0], coords[i][1])
+            cum.append(cum[-1] + miles)
+        total_poly_miles = cum[-1] if cum else 0.0
+        if total_poly_miles <= 0:
+            return []
+
+        targets = []
+        d = 0.0
+        while d < total_miles:
+            targets.append(d)
+            d += interval_miles
+        targets.append(total_miles)
+
+        synth_steps = []
+        for i in range(len(targets)-1):
+            start_t = targets[i]
+            end_t = targets[i+1]
+            segment_miles = max(0.0, end_t - start_t)
+            duration_minutes = max(1, int((segment_miles / max(avg_speed_mph, 1e-3)) * 60))
+            synth_steps.append(TurnByTurnStep(
+                instruction="Continue",
+                distance_miles=round(segment_miles, 2),
+                duration_minutes=duration_minutes,
+                road_name=road_name or "Unnamed road",
+                maneuver="straight",
+                road_condition=None,
+                weather_at_step=None,
+                temperature=None,
+                has_alert=False,
+                start_distance_miles=round(start_t, 2),
+                end_distance_miles=round(end_t, 2),
+            ))
+        return synth_steps
+
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             coords_str = f"{origin_lon},{origin_lat};{dest_lon},{dest_lat}"
@@ -2324,8 +2443,8 @@ async def get_turn_by_turn_directions(origin_coords: tuple, dest_coords: tuple, 
             params = {
                 'access_token': MAPBOX_ACCESS_TOKEN,
                 'steps': 'true',
-                'geometries': 'polyline',
-                'overview': 'full',
+                'geometries': 'polyline6',
+                'overview': 'false',
                 'annotations': 'distance,duration'
             }
             
@@ -2346,18 +2465,20 @@ async def get_turn_by_turn_directions(origin_coords: tuple, dest_coords: tuple, 
             route = data['routes'][0]
             legs = route.get('legs', [])
             steps_count = sum(len(leg.get('steps', []) or []) for leg in legs)
-            logger.info(
-                "MAPBOX_TBT steps_count=%s legs=%s route_distance_m=%s",
-                steps_count,
-                len(legs),
-                route.get('distance'),
-            )
-            
+            route_distance_m = route.get('distance', 0) or 0
+            route_distance_miles = route_distance_m / 1609.344 if route_distance_m else 0.0
+            route_duration_s = route.get('duration') or 0.0
+            avg_speed_mph = 55.0
+            if route_distance_miles > 0 and route_duration_s > 0:
+                avg_speed_mph = max(10.0, route_distance_miles / (route_duration_s / 3600))
+
+            primary_road_name = None
+
             cumulative_distance = 0.0
-            
+
             for leg in legs:
                 for step in leg.get('steps', []):
-                    distance_mi = max(0.0, step.get('distance', 0) / 1609.34)  # meters to miles
+                    distance_mi = max(0.0, step.get('distance', 0) / 1609.344)  # meters to miles
                     duration_min = step.get('duration', 0) / 60  # seconds to minutes
                     start_distance = max(0.0, cumulative_distance)
                     end_distance = start_distance + distance_mi
@@ -2370,6 +2491,8 @@ async def get_turn_by_turn_directions(origin_coords: tuple, dest_coords: tuple, 
                     # Get road name
                     candidates = [step.get('name'), step.get('ref'), step.get('destinations'), maneuver.get('instruction'), "Unnamed road"]
                     road_name = next((c for c in candidates if c), "Unnamed road")
+                    if not primary_road_name and road_name:
+                        primary_road_name = road_name
                     
                     # Find nearest waypoint for weather/road condition
                     road_condition = None
@@ -2402,13 +2525,37 @@ async def get_turn_by_turn_directions(origin_coords: tuple, dest_coords: tuple, 
                             start_distance_miles=round(start_distance, 2),
                             end_distance_miles=round(end_distance, 2)
                         ))
-    
+
+            synthetic_steps = []
+            synthetic_count = 0
+            low_resolution = route_distance_m > 50000 and steps_count < MIN_STEPS_FOR_NATIVE
+            if low_resolution:
+                synthetic_steps = _build_synthetic_steps(
+                    route.get('geometry'),
+                    route_distance_miles,
+                    interval_miles=RESAMPLE_MILES,
+                    road_name=primary_road_name or (legs[0].get('summary') if legs else "Route"),
+                    avg_speed_mph=avg_speed_mph,
+                )
+                synthetic_count = len(synthetic_steps)
+                if synthetic_steps:
+                    steps = synthetic_steps
+
+            logger.info(
+                "MAPBOX_TBT steps_count=%s synthetic_steps_count=%s legs=%s route_distance_m=%s low_resolution=%s",
+                steps_count,
+                synthetic_count,
+                len(legs),
+                route_distance_m,
+                low_resolution,
+            )
+
     except httpx.TimeoutException:
         logger.warning("Turn-by-turn directions timeout")
     except Exception as e:  # noqa: BLE001
         logger.warning("Turn-by-turn directions error", exc_info=e)
     
-    return steps[:50]  # Limit to 50 steps
+    return steps  # keep all steps (synthetic already sized)
 
 def analyze_route_conditions(waypoints_weather: List[WaypointWeather]) -> tuple:
     """Analyze all road conditions along route and determine if reroute is needed."""
@@ -2638,7 +2785,7 @@ async def get_route_weather(request: RouteRequest):
     total_duration = int(route_data.get('duration', 0))
     
     # Extract waypoints along route
-    waypoints = extract_waypoints_from_route(route_geometry, interval_miles=50, departure_time=departure_time)
+    waypoints = extract_waypoints_from_route(route_geometry, interval_miles=RESAMPLE_MILES, departure_time=departure_time)
     if not waypoints:
         raise HTTPException(status_code=500, detail="Could not extract waypoints from route")
     
@@ -2768,6 +2915,9 @@ async def get_route_weather(request: RouteRequest):
     # NEW: Generate hazard alerts with countdown using route context
     hazard_alerts = generate_hazard_alerts(list(waypoints_weather), departure_time, turn_by_turn, total_distance, route_id)
 
+    road_conditions = build_condition_segments(hazard_alerts, category="road")
+    weather_conditions = build_condition_segments(hazard_alerts, category="weather")
+
     # NEW: Find rest stops along the route
     rest_stops = await find_rest_stops(route_geometry, list(waypoints_weather))
     
@@ -2800,6 +2950,8 @@ async def get_route_weather(request: RouteRequest):
         # New fields
         safety_score=safety_score,
         hazard_alerts=hazard_alerts,
+        road_conditions=road_conditions,
+        weather_conditions=weather_conditions,
         rest_stops=rest_stops,
         optimal_departure=optimal_departure,
         trucker_warnings=trucker_warnings,
@@ -6091,7 +6243,7 @@ async def get_truck_alerts(request: TruckAlertRequest):
     """
     try:
         # Decode the polyline
-        decoded = polyline.decode(request.route_polyline)
+        decoded = polyline.decode(request.route_polyline, 6)
         if not decoded or len(decoded) < 2:
             raise HTTPException(status_code=400, detail="Invalid route polyline")
         

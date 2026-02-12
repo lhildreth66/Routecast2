@@ -1,10 +1,12 @@
 import datetime
 
 import pytest
+import polyline
 
 from backend.server import (
     analyze_route_conditions,
     derive_road_condition,
+    build_condition_segments,
     get_turn_by_turn_directions,
     TurnByTurnStep,
     Waypoint,
@@ -327,6 +329,79 @@ async def test_mapbox_steps_return_real_road_names(monkeypatch):
     assert alerts, "Hazards should generate with real road names"
     assert alerts[0].road_name not in {"Route", "Unnamed road"}
     assert alerts[0].driver_action
+
+
+@pytest.mark.asyncio
+async def test_low_resolution_routes_resample_and_generate_segments(monkeypatch):
+    encoded = polyline.encode([(0.0, 0.0), (0.0, 6.0)], precision=6)
+    sample_route = {
+        "routes": [
+            {
+                "distance": 600000,  # ~372 miles
+                "duration": 21600,  # 6 hours
+                "geometry": encoded,
+                "legs": [
+                    {
+                        "summary": "AK-1",
+                        "steps": [
+                            {"distance": 120000, "duration": 3600, "name": "AK-1", "maneuver": {"instruction": "Head", "type": "depart"}},
+                            {"distance": 120000, "duration": 3600, "name": "AK-1", "maneuver": {"instruction": "Continue", "type": "continue"}},
+                            {"distance": 120000, "duration": 3600, "name": "AK-1", "maneuver": {"instruction": "Continue", "type": "continue"}},
+                            {"distance": 120000, "duration": 3600, "name": "AK-1", "maneuver": {"instruction": "Continue", "type": "continue"}},
+                            {"distance": 120000, "duration": 3600, "name": "AK-1", "maneuver": {"instruction": "Arrive", "type": "arrive"}},
+                        ],
+                    }
+                ],
+            }
+        ],
+        "code": "Ok",
+    }
+
+    class FakeResp:
+        status_code = 200
+        text = "ok"
+
+        def json(self):
+            return sample_route
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, params=None):
+            return FakeResp()
+
+    monkeypatch.setattr("backend.server.MAPBOX_ACCESS_TOKEN", "test-token")
+    monkeypatch.setattr("backend.server.httpx.AsyncClient", FakeClient)
+
+    waypoints = [make_wp(dist, temp=25, conditions="Snow") for dist in range(0, 360, 30)]
+    steps = await get_turn_by_turn_directions((0, 0), (6, 0), waypoints)
+
+    assert len(steps) > 30, "Synthetic resampling should increase step count"
+    assert all(s.road_name.strip() == "AK-1" for s in steps), "Synthetic steps should carry primary road name"
+
+    alerts = generate_hazard_alerts(
+        waypoints,
+        datetime.datetime.utcnow(),
+        steps,
+        total_route_miles=372,
+        route_id="low-res",
+    )
+
+    road_segments = build_condition_segments(alerts, category="road")
+    weather_segments = build_condition_segments(alerts, category="weather")
+
+    assert road_segments and weather_segments, "Expected condition segments from hazards"
+    assert any(seg.start_mile > 0 for seg in road_segments), "Segments should carry start miles"
+    assert all(seg.span_miles > 0 for seg in road_segments), "Segments should have span miles"
+    assert all(seg.eta_end_min >= seg.eta_start_min for seg in road_segments), "ETA ranges should be non-decreasing"
+    assert any(seg.road_name == "AK-1" for seg in road_segments), "Road segments should keep road name"
 
 
 def test_mapbox_route_empty_steps_distance_used():

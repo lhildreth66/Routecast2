@@ -47,7 +47,7 @@ def _decode_polyline_safe(poly: Optional[str]) -> List[Dict[str, float]]:
     try:
         import polyline  # type: ignore
 
-        coords = polyline.decode(poly)
+        coords = polyline.decode(poly, 6)
         return [{"lat": lat, "lon": lon} for lat, lon in coords]
     except Exception as exc:  # noqa: BLE001
         logger.warning("[route-alerts] failed to decode polyline: %s", exc)

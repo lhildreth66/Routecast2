@@ -152,8 +152,8 @@ class MapboxDirectionsProvider(DirectionsProvider):
                 url = f"https://api.mapbox.com/directions/v5/mapbox/driving/{coords_str}"
                 params = {
                     "access_token": MAPBOX_ACCESS_TOKEN,
-                    "geometries": "polyline",
-                    "overview": "full",
+                    "geometries": "polyline6",
+                    "overview": "false",
                     "steps": "true",
                     "annotations": "distance,duration",
                 }
