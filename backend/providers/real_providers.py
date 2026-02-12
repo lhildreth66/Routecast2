@@ -187,7 +187,8 @@ class MapboxDirectionsProvider(DirectionsProvider):
                     )
                     return {
                         "geometry": route.get("geometry"),
-                        "duration": route.get("duration", 0) / 60,
+                        # Mapbox returns duration in seconds; keep seconds so downstream conversions stay correct.
+                        "duration": route.get("duration", 0),
                         "distance": route_distance,  # meters (per Mapbox)
                         "legs": legs,
                     }

@@ -1985,16 +1985,27 @@ def generate_hazard_alerts(
         )
     )
 
-    # Collapse duplicates at the same start mile, keeping highest severity (earliest in sorted list)
-    collapsed: List[HazardAlert] = []
-    seen_start: set[float] = set()
+    # Collapse duplicates at identical start miles: keep the highest-severity/type-priority alert only.
+    def alert_rank(alert: HazardAlert) -> tuple[int, int, float]:
+        return (
+            severity_order.get(alert.severity, 3),
+            type_priority.get(alert.type, 5),
+            -(alert.span_miles or 0.0),
+        )
+
+    best_by_start: dict[float, HazardAlert] = {}
     for alert in unique_alerts:
         start_key = round(alert.distance_miles or 0.0, 1)
-        if start_key in seen_start:
-            continue
-        seen_start.add(start_key)
-        collapsed.append(alert)
-    unique_alerts = collapsed
+        current_best = best_by_start.get(start_key)
+        if current_best is None or alert_rank(alert) < alert_rank(current_best):
+            best_by_start[start_key] = alert
+
+    unique_alerts = sorted(best_by_start.values(), key=lambda a: (
+        severity_order.get(a.severity, 3),
+        round(a.distance_miles or 0, 1),
+        type_priority.get(a.type, 5),
+        -(a.span_miles or 0),
+    ))
 
     # Apply deterministic hazard IDs and rationale if missing; compute end_mile and sanitize
     for alert in unique_alerts:
@@ -2083,6 +2094,78 @@ def generate_hazard_alerts(
             )
     
     return limited_alerts
+
+
+def build_geometry_mile_index(encoded_polyline: Optional[str]) -> List[tuple[float, float, float]]:
+    """Decode a polyline and return coordinates with cumulative mileposts."""
+    if not encoded_polyline:
+        return []
+    try:
+        coords = polyline.decode(encoded_polyline, 6)
+    except Exception:
+        return []
+    if len(coords) < 2:
+        return []
+
+    index: List[tuple[float, float, float]] = []
+    total = 0.0
+    prev_lat, prev_lon = coords[0]
+    index.append((prev_lat, prev_lon, total))
+    for lat, lon in coords[1:]:
+        total += haversine_distance(prev_lat, prev_lon, lat, lon)
+        index.append((lat, lon, total))
+        prev_lat, prev_lon = lat, lon
+    return index
+
+
+def coordinate_at_mile(index: List[tuple[float, float, float]], mile: float) -> Optional[tuple[float, float]]:
+    """Interpolate a coordinate at a given mile along a precomputed index."""
+    if not index:
+        return None
+    target = max(0.0, mile)
+    for i in range(1, len(index)):
+        prev_lat, prev_lon, prev_mile = index[i - 1]
+        curr_lat, curr_lon, curr_mile = index[i]
+        if target <= curr_mile:
+            span = max(curr_mile - prev_mile, 1e-6)
+            ratio = (target - prev_mile) / span
+            lat = prev_lat + (curr_lat - prev_lat) * ratio
+            lon = prev_lon + (curr_lon - prev_lon) * ratio
+            return lat, lon
+    return (index[-1][0], index[-1][1])
+
+
+async def hydrate_alert_roads_from_geometry(alerts: List[HazardAlert], geometry_index: List[tuple[float, float, float]]):
+    """Populate road names via reverse geocoding at each alert start mile."""
+    if not alerts or not geometry_index:
+        return
+
+    for alert in alerts:
+        coord = coordinate_at_mile(geometry_index, alert.distance_miles or 0.0)
+        if not coord:
+            continue
+        lat, lon = coord
+        try:
+            road_name = await reverse_geocode(lat, lon)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("hazard_reverse_geocode_failed", extra={"error": str(exc)})
+            continue
+        if not road_name:
+            continue
+
+        if not alert.road_name:
+            alert.road_name = road_name
+
+        base_title = alert.message or alert.event or alert.headline or alert.type.title() or "Hazard"
+        base_title_clean = base_title.strip()
+        lower_base = base_title_clean.lower()
+        if road_name.lower() not in lower_base:
+            alert.message = f"{base_title_clean} on {road_name}"
+        else:
+            alert.message = base_title_clean
+
+        eta_val = max(alert.eta_minutes or 0, 0)
+        alert.countdown_text = f"{alert.message} in {eta_val} minutes"
 
 
 def build_condition_segments(alerts: List[HazardAlert], *, category: str) -> List[ConditionSegment]:
@@ -2917,6 +3000,8 @@ async def get_route_weather(request: RouteRequest):
             logger.warning("route_weather_missing_geometry_no_fallback", extra={"route_id": route_id})
             route_geometry = ""
 
+    geometry_index = build_geometry_mile_index(route_geometry)
+
     total_distance_meters = route_data.get('distance') or 0.0
     if not total_distance_meters:
         try:
@@ -3124,6 +3209,8 @@ async def get_route_weather(request: RouteRequest):
         total_route_minutes=total_duration_minutes,
         route_id=route_id,
     )
+
+    await hydrate_alert_roads_from_geometry(hazard_alerts, geometry_index)
 
     road_conditions = build_condition_segments(hazard_alerts, category="road")
     weather_conditions = build_condition_segments(hazard_alerts, category="weather")
