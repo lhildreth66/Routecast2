@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -9,18 +9,11 @@ import {
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { format, parseISO } from 'date-fns';
 
 function pickAlertDetails(a: any): string {
   const p = a?.properties ?? a ?? {};
   const clean = (s?: string) => (typeof s === 'string' ? s.trim() : '');
-  return (
-    clean(p.description) ||
-    clean(p.instruction) ||
-    clean(p.summary) ||
-    clean(p.headline) ||
-    'Details not available for this alert.'
-  );
+  return clean(p.description) || clean(p.summary) || clean(p.headline) || '';
 }
 
 interface HazardAlert {
@@ -63,24 +56,66 @@ export default function WeatherAlertsScreen() {
   const params = useLocalSearchParams();
   const routeData = params.routeData ? JSON.parse(params.routeData as string) : null;
   const bridgeAlertsEnabled = params.bridgeAlertsEnabled === 'true';
+  const [expandedBridge, setExpandedBridge] = useState<Set<number>>(new Set());
   
-  const [expandedCards, setExpandedCards] = useState(new Set<number>());
+  const sortedAlerts = useMemo(() => {
+    const list = (routeData?.hazard_alerts as HazardAlert[] | undefined) || [];
+    return [...list].sort((a, b) => (a.eta_minutes ?? 0) - (b.eta_minutes ?? 0));
+  }, [routeData]);
 
-  const formatTimeRange = (start?: string, end?: string) => {
-    if (!start && !end) return null;
-    const startText = start ? format(parseISO(start), 'MMM d, h:mma') : 'Now';
-    const endText = end ? format(parseISO(end), 'MMM d, h:mma') : 'Until further notice';
-    return `${startText} → ${endText}`;
+  const severityFromConditions = (alert: HazardAlert) => {
+    const tempMatch = pickAlertDetails(alert).match(/(-?\d{1,3})\s*°?F/i);
+    const temp = tempMatch ? parseInt(tempMatch[1], 10) : null;
+    const type = (alert.type || '').toLowerCase();
+    const severity = (alert.severity || '').toLowerCase();
+
+    if (type === 'ice' || type === 'whiteout' || (temp !== null && temp < 15)) return { label: 'CRITICAL', emoji: '🔴' };
+    if ((type === 'snow' && temp !== null && temp < 25) || type === 'ice') return { label: 'HIGH', emoji: '🔴' };
+    if (type === 'snow' && temp !== null && temp >= 25 && temp <= 32) return { label: 'MEDIUM-HIGH', emoji: '🟠' };
+    if (temp !== null && temp >= 30 && temp <= 35 && ['snow', 'rain'].includes(type)) return { label: 'CAUTION', emoji: '🟡' };
+    if (severity === 'extreme') return { label: 'CRITICAL', emoji: '🔴' };
+    if (severity === 'high') return { label: 'HIGH', emoji: '🔴' };
+    if (severity === 'medium') return { label: 'MEDIUM-HIGH', emoji: '🟠' };
+    return { label: 'CAUTION', emoji: '🟡' };
   };
 
-  const toggleCardExpand = (index: number) => {
-    const newExpanded = new Set(expandedCards);
-    if (newExpanded.has(index)) {
-      newExpanded.delete(index);
-    } else {
-      newExpanded.add(index);
-    }
-    setExpandedCards(newExpanded);
+  const inferPrecip = (alert: HazardAlert) => {
+    const type = (alert.type || '').toLowerCase();
+    if (!type) return null;
+    const detail = pickAlertDetails(alert).toLowerCase();
+    const intensity = detail.includes('heavy') ? 'Heavy' : detail.includes('moderate') ? 'Moderate' : detail.includes('light') ? 'Light' : null;
+    const label = type === 'ice' ? 'Ice' : type === 'snow' || type === 'whiteout' ? 'Snow' : type === 'rain' ? 'Rain' : type === 'wind' ? 'Wind' : type;
+    return { label, intensity };
+  };
+
+  const inferWind = (alert: HazardAlert) => {
+    const detail = pickAlertDetails(alert);
+    const windMatch = detail.match(/(\d{1,3})\s?mph/gi);
+    if (!windMatch) return null;
+    const speeds = windMatch.map((m) => parseInt(m, 10)).filter((n) => !Number.isNaN(n));
+    if (!speeds.length) return null;
+    const max = Math.max(...speeds);
+    return { speed: max, gust: speeds.length > 1 ? Math.max(...speeds.slice(1)) : null };
+  };
+
+  const inferVisibility = (alert: HazardAlert) => {
+    const detail = pickAlertDetails(alert).toLowerCase();
+    if (!detail) return null;
+    if (detail.includes('whiteout') || detail.includes('blizzard') || detail.includes('zero visibility')) return 'Severely Reduced';
+    if (detail.includes('reduced visibility') || detail.includes('low visibility') || detail.includes('fog')) return 'Reduced';
+    if (detail.includes('visibility')) return 'Reduced';
+    return null;
+  };
+
+  const pickDriverAction = (alert: HazardAlert) => {
+    if (alert.driver_action) return alert.driver_action;
+    if (alert.recommendation) return alert.recommendation;
+    const type = (alert.type || '').toLowerCase();
+    if (type === 'ice') return 'Reduce speed, avoid sudden steering, and increase following distance by 8-10 seconds.';
+    if (type === 'snow' || type === 'whiteout') return 'Slow to conditions, use low beams, and be prepared for rapid visibility drops.';
+    if (type === 'rain') return 'Reduce speed on wet pavement and avoid hard braking on slick sections.';
+    if (type === 'wind') return 'Keep both hands on the wheel and reduce speed, especially on exposed sections.';
+    return 'Adjust speed to conditions and leave extra space.';
   };
 
   if (!routeData) {
@@ -104,185 +139,72 @@ export default function WeatherAlertsScreen() {
         {/* Route Context */}
         <View style={styles.routeContext}>
           <Text style={styles.routeContextTitle}>Your Route</Text>
-          <View style={styles.routeContextRow}>
-            <Text style={styles.routeContextLabel}>From:</Text>
-            <Text style={styles.routeContextValue}>{routeData.origin}</Text>
-          </View>
-          <View style={styles.routeContextRow}>
-            <Text style={styles.routeContextLabel}>To:</Text>
-            <Text style={styles.routeContextValue}>{routeData.destination}</Text>
-          </View>
-          {routeData.total_distance_miles && (
-            <View style={styles.routeContextRow}>
-              <Text style={styles.routeContextLabel}>Distance:</Text>
-              <Text style={styles.routeContextValue}>{Math.round(routeData.total_distance_miles)} miles</Text>
-            </View>
-          )}
-        </View>
+          {/* Weather Alerts Section */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>⚠️ Weather Hazards on This Route</Text>
+            <Text style={styles.sectionSubtitle}>Sorted by nearest hazard using live route weather data</Text>
 
-        {/* Weather Alerts Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>⚠️ Weather Hazards on This Route</Text>
-          <Text style={styles.sectionSubtitle}>Each alert shows the specific NWS details for your route</Text>
-        
-          {routeData.hazard_alerts && routeData.hazard_alerts.length > 0 ? (
-            routeData.hazard_alerts.map((alert: HazardAlert, index: number) => {
-              const isExpanded = expandedCards.has(index);
-              const props = alert.properties || {};
-              const eventName = alert.event || props.event || alert.headline || 'Weather Alert';
-              const isInfo = eventName === 'Special Weather Statement';
-              const eventTitle = isInfo ? 'Info' : eventName;
-              const headline = alert.headline || props.headline;
-              const description = alert.description || alert.full_description || props.description;
-              const instruction = alert.instruction || props.instruction;
-              const areaDesc = alert.areaDesc || props.areaDesc;
-              const onset = alert.onset || props.onset;
-              const expires = alert.expires || props.expires;
-              const roadName = alert.road_name;
-              const spanMiles = alert.span_miles;
-              const alertLevel = alert.alert_level;
-              const driverAction = alert.driver_action || instruction || alert.recommendation;
-              const detailText = pickAlertDetails(alert);
-              
-              return (
-                <TouchableOpacity 
-                  key={index} 
-                  style={[
-                    styles.alertCard,
-                    isInfo
-                      ? styles.alertInfoCard
-                      : alert.severity === 'extreme'
-                      ? styles.alertExtreme
-                      : alert.severity === 'high'
-                      ? styles.alertHigh
-                      : styles.alertMedium,
-                    isExpanded && styles.alertCardExpanded
-                  ]}
-                  onPress={() => toggleCardExpand(index)}
-                  activeOpacity={0.8}
-                >
-                  <View style={styles.alertHeader}>
-                    <Ionicons 
-                      name={
-                        isInfo
-                          ? 'information-circle'
-                          : alert.type === 'ice'
-                          ? 'snow'
-                          : alert.type === 'rain'
-                          ? 'rainy'
-                          : alert.type === 'wind'
-                          ? 'cloudy'
-                          : 'warning'
-                      }
-                      size={28}
-                      color={isInfo ? '#bfdbfe' : '#fff'}
-                    />
-                    <View style={styles.alertInfo}>
-                      {alert.location_name && (
-                        <Text style={styles.alertLocation}>📍 {alert.location_name}</Text>
-                      )}
-                      <Text style={styles.alertMessage}>{eventTitle}</Text>
-                      {headline ? (
-                        <Text style={styles.alertSubhead}>{headline}</Text>
+            {sortedAlerts.length > 0 ? (
+              sortedAlerts.map((alert: HazardAlert, index: number) => {
+                const props = alert.properties || {};
+                const eventTitle = alert.message || alert.event || props.event || alert.headline || 'Weather Alert';
+                const subtitle = alert.recommendation || alert.driver_action || props.headline || '';
+                const detailText = pickAlertDetails(alert);
+                const severity = severityFromConditions(alert);
+                const precip = inferPrecip(alert);
+                const wind = inferWind(alert);
+                const visibility = inferVisibility(alert);
+                const roadName = alert.road_name || alert.location_name || 'Unknown road';
+                const spanMiles = alert.span_miles;
+                const driverAction = pickDriverAction(alert);
+
+                return (
+                  <View key={index} style={[styles.alertCard, styles.alertCardNew]}>
+                    <Text style={styles.alertTitle}>
+                      {severity.emoji} ALERT {index + 1} — {severity.label} ({roadName})
+                    </Text>
+                    <Text style={styles.alertCondition}>❄️ {eventTitle}</Text>
+                    {subtitle ? <Text style={styles.alertSubtitle}>{subtitle}</Text> : null}
+
+                    <View style={styles.conditionsBlock}>
+                      <Text style={styles.blockTitle}>Conditions</Text>
+                      {detailText ? <Text style={styles.detailLine}>{detailText}</Text> : null}
+                      {precip ? (
+                        <Text style={styles.metricLine}>
+                          {precip.intensity ? `${precip.label}: ${precip.intensity}` : precip.label}
+                        </Text>
                       ) : null}
-                      <Text style={styles.alertCountdown}>{alert.countdown_text}</Text>
+                      {wind ? (
+                        <Text style={styles.metricLine}>
+                          Wind: {wind.speed} mph{wind.gust ? ` (gusts ${wind.gust}+)` : ''}
+                        </Text>
+                      ) : null}
+                      {visibility ? <Text style={styles.metricLine}>Visibility: {visibility}</Text> : null}
                     </View>
-                    <Ionicons 
-                      name={isExpanded ? "chevron-up" : "chevron-down"} 
-                      size={20} 
-                      color="#fff" 
-                    />
+
+                    <View style={styles.actionBlock}>
+                      <Text style={styles.blockTitle}>✅ Driver Action</Text>
+                      <Text style={styles.actionText}>{driverAction}</Text>
+                    </View>
+
+                    <View style={styles.footerMeta}>
+                      <Text style={styles.metaLine}>📍 Location: {roadName}</Text>
+                      {typeof spanMiles === 'number' ? (
+                        <Text style={styles.metaLine}>🛣️ Affected Distance: {spanMiles.toFixed(1)} miles</Text>
+                      ) : null}
+                      <Text style={styles.metaLine}>⏱️ Time to Hazard: ~{alert.eta_minutes} min</Text>
+                    </View>
                   </View>
-                  
-                  {/* Expanded Alert Details */}
-                  {isExpanded && (
-                    <View style={styles.alertExpandedContent}>
-                      <View style={styles.alertFullDescription}>
-                        <Text style={styles.alertFullTitle}>What is happening</Text>
-                          <Text style={styles.alertFullText}>
-                            {detailText}
-                          </Text>
-                      </View>
-
-                      {areaDesc ? (
-                        <View style={styles.alertMetaRow}>
-                          <Ionicons name="map" size={16} color="#a1a1aa" />
-                          <Text style={styles.alertMetaText}>Affected areas: {areaDesc}</Text>
-                        </View>
-                      ) : null}
-
-                      {roadName ? (
-                        <View style={styles.alertMetaRow}>
-                          <Ionicons name="navigate" size={16} color="#a1a1aa" />
-                          <Text style={styles.alertMetaText}>Road: {roadName}{spanMiles ? ` • ~${spanMiles.toFixed(1)} mi` : ''}</Text>
-                        </View>
-                      ) : null}
-
-                      {alertLevel ? (
-                        <View style={styles.alertMetaRow}>
-                          <Ionicons name="alert" size={16} color="#a1a1aa" />
-                          <Text style={styles.alertMetaText}>Type: {alertLevel}</Text>
-                        </View>
-                      ) : null}
-
-                      {formatTimeRange(onset as string | undefined, expires as string | undefined) && (
-                        <View style={styles.alertMetaRow}>
-                          <Ionicons name="time" size={16} color="#a1a1aa" />
-                          <Text style={styles.alertMetaText}>
-                            Valid {formatTimeRange(onset as string | undefined, expires as string | undefined)}
-                          </Text>
-                        </View>
-                      )}
-                      
-                      {(instruction || driverAction) && (
-                        <View style={styles.alertInstructionBox}>
-                          <Text style={styles.alertInstructionTitle}>📋 What To Do</Text>
-                          <Text style={styles.alertInstructionText}>{instruction || driverAction}</Text>
-                        </View>
-                      )}
-                      
-                      <View style={styles.alertAction}>
-                        <Ionicons name="checkmark-circle" size={16} color="#22c55e" />
-                        <Text style={styles.alertRec}>{alert.recommendation}</Text>
-                      </View>
-                    </View>
-                  )}
-                  
-                    {!isExpanded && (
-                      <>
-                        <View style={styles.alertBriefRow}>
-                          {areaDesc ? (
-                            <Text style={styles.alertBriefText}>Areas: {areaDesc}</Text>
-                          ) : null}
-                          {roadName ? (
-                            <Text style={styles.alertBriefText}>Road: {roadName}{spanMiles ? ` (~${spanMiles.toFixed(1)} mi)` : ''}</Text>
-                          ) : null}
-                          {alertLevel ? (
-                            <Text style={styles.alertBriefText}>{alertLevel}</Text>
-                          ) : null}
-                          {formatTimeRange(onset as string | undefined, expires as string | undefined) && (
-                            <Text style={styles.alertBriefText}>
-                              Valid {formatTimeRange(onset as string | undefined, expires as string | undefined)}
-                            </Text>
-                          )}
-                        </View>
-                        {detailText ? (
-                          <Text style={styles.alertSnippet} numberOfLines={2}>
-                            {detailText}
-                          </Text>
-                        ) : null}
-                        <View style={styles.alertAction}>
-                          <Ionicons name="checkmark-circle" size={16} color="#22c55e" />
-                          <Text style={styles.alertRec}>{alert.recommendation}</Text>
-                        </View>
-                        <View style={styles.alertMeta}>
-                          <Text style={styles.alertDistance}>{Math.round(alert.distance_miles)} mi from start</Text>
-                          <Text style={styles.alertEta}>ETA: {alert.eta_minutes} min</Text>
-                        </View>
-                      </>
-                    )}
-                  
-                  {isExpanded && (
+                );
+              })
+            ) : (
+              <View style={styles.noAlerts}>
+                <Ionicons name="checkmark-circle" size={64} color="#22c55e" />
+                <Text style={styles.noAlertsTitle}>All Clear!</Text>
+                <Text style={styles.noAlertsText}>No significant hazards on your route</Text>
+              </View>
+            )}
+          </View>
                     <View style={styles.alertMeta}>
                       <Text style={styles.alertDistance}>{Math.round(alert.distance_miles)} mi from start</Text>
                       <Text style={styles.alertEta}>ETA: {alert.eta_minutes} min</Text>
@@ -308,16 +230,20 @@ export default function WeatherAlertsScreen() {
           
             {routeData.trucker_warnings && routeData.trucker_warnings.length > 0 ? (
               routeData.trucker_warnings.map((warning: string, index: number) => {
-                const isBridgeExpanded = expandedCards.has(index + 1000);
-                
+                const isBridgeExpanded = expandedBridge.has(index);
+
+                const toggle = () => {
+                  const next = new Set(expandedBridge);
+                  if (next.has(index)) next.delete(index);
+                  else next.add(index);
+                  setExpandedBridge(next);
+                };
+
                 return (
-                  <TouchableOpacity 
+                  <TouchableOpacity
                     key={index}
-                    style={[
-                      styles.bridgeAlertCard,
-                      isBridgeExpanded && styles.bridgeAlertCardExpanded
-                    ]}
-                    onPress={() => toggleCardExpand(index + 1000)}
+                    style={[styles.bridgeAlertCard, isBridgeExpanded && styles.bridgeAlertCardExpanded]}
+                    onPress={toggle}
                     activeOpacity={0.9}
                   >
                     <View style={styles.bridgeAlertHeader}>
@@ -328,13 +254,13 @@ export default function WeatherAlertsScreen() {
                         <Text style={styles.bridgeAlertTitle}>Low Clearance Bridge</Text>
                         <Text style={styles.bridgeAlertSubtitle}>Bridge #{index + 1}</Text>
                       </View>
-                      <Ionicons 
-                        name={isBridgeExpanded ? "chevron-up" : "chevron-down"} 
-                        size={20} 
-                        color="#eab308" 
+                      <Ionicons
+                        name={isBridgeExpanded ? 'chevron-up' : 'chevron-down'}
+                        size={20}
+                        color="#eab308"
                       />
                     </View>
-                    
+
                     {isBridgeExpanded && (
                       <View style={styles.bridgeAlertDetails}>
                         <Text style={styles.bridgeAlertWarningText}>{warning}</Text>
@@ -440,145 +366,77 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   alertCard: {
-    backgroundColor: '#27272a',
-    borderRadius: 12,
+    backgroundColor: '#0f172a',
+    borderRadius: 14,
     padding: 16,
     marginBottom: 12,
-    borderLeftWidth: 4,
+    borderWidth: 1,
+    borderColor: '#1f2937',
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
   },
-  alertInfoCard: {
-    borderLeftColor: '#38bdf8',
-    backgroundColor: '#0f172a',
+  alertCardNew: {
+    gap: 10,
   },
-  alertExtreme: {
-    borderLeftColor: '#dc2626',
-  },
-  alertHigh: {
-    borderLeftColor: '#f97316',
-  },
-  alertMedium: {
-    borderLeftColor: '#eab308',
-  },
-  alertCardExpanded: {
-    backgroundColor: '#2d2d30',
-  },
-  alertHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-    marginBottom: 12,
-  },
-  alertInfo: {
-    flex: 1,
-  },
-  alertCountdown: {
-    fontSize: 12,
-    color: '#9ca3af',
-    marginTop: 2,
-  },
-  alertMessage: {
+  alertTitle: {
+    color: '#fecaca',
+    fontWeight: '800',
     fontSize: 15,
-    fontWeight: '600',
-    color: '#fff',
-    marginBottom: 4,
+    letterSpacing: 0.2,
   },
-  alertSubhead: {
+  alertCondition: {
+    color: '#e2e8f0',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  alertSubtitle: {
+    color: '#cbd5e1',
     fontSize: 13,
-    color: '#e5e7eb',
-    marginBottom: 4,
   },
-  alertLocation: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#60a5fa',
-    marginBottom: 6,
-  },
-  alertExpandedContent: {
-    marginTop: 8,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#3f3f46',
-  },
-  alertFullDescription: {
-    marginBottom: 12,
-  },
-  alertFullTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#e5e7eb',
-    marginBottom: 6,
-  },
-  alertFullText: {
-    fontSize: 14,
-    color: '#d1d5db',
-    lineHeight: 20,
-  },
-  alertInstructionBox: {
-    backgroundColor: '#3f3f46',
-    borderRadius: 8,
+  conditionsBlock: {
+    backgroundColor: '#111827',
+    borderRadius: 10,
     padding: 12,
-    marginBottom: 12,
+    gap: 6,
+    borderWidth: 1,
+    borderColor: '#1f2937',
   },
-  alertMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-    marginBottom: 8,
-  },
-  alertMetaText: {
-    color: '#d4d4d8',
-    fontSize: 12,
-    flex: 1,
-    lineHeight: 18,
-  },
-  alertInstructionTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#fbbf24',
-    marginBottom: 6,
-  },
-  alertInstructionText: {
+  blockTitle: {
+    color: '#a5b4fc',
+    fontWeight: '700',
     fontSize: 13,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  detailLine: {
     color: '#e5e7eb',
+    fontSize: 13,
     lineHeight: 18,
   },
-  alertAction: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
+  metricLine: {
+    color: '#cbd5e1',
+    fontSize: 13,
   },
-  alertRec: {
-    fontSize: 14,
-    color: '#22c55e',
-    flex: 1,
+  actionBlock: {
+    backgroundColor: '#0b1727',
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#1d4ed8',
   },
-  alertMeta: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  actionText: {
+    color: '#e0f2fe',
+    fontSize: 13,
+    lineHeight: 18,
   },
-  alertBriefRow: {
-    flexDirection: 'column',
+  footerMeta: {
     gap: 4,
-    marginBottom: 8,
   },
-  alertBriefText: {
-    color: '#e5e7eb',
-    fontSize: 12,
-  },
-  alertSnippet: {
-    color: '#fff',
+  metaLine: {
+    color: '#cbd5e1',
     fontSize: 13,
-    lineHeight: 20,
-    marginBottom: 8,
-  },
-  alertDistance: {
-    fontSize: 13,
-    color: '#9ca3af',
-  },
-  alertEta: {
-    fontSize: 13,
-    color: '#9ca3af',
   },
   noAlerts: {
     alignItems: 'center',
