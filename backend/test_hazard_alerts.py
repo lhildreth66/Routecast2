@@ -66,6 +66,7 @@ def test_span_computation_and_clamp():
     assert alert.hazard_id, "Hazard ID should be populated"
     assert alert.rationale, "Rationale should be populated"
     assert alert.end_mile and alert.end_mile >= alert.distance_miles
+    assert alert.hazard_schema_version == 1
 
 
 def test_merge_adjacent_hazards():
@@ -97,6 +98,7 @@ def test_merge_adjacent_hazards():
     assert rain_alerts[0].span_miles and rain_alerts[0].span_miles >= 9.5
     assert rain_alerts[0].hazard_id, "Hazard ID should exist for merged alert"
     assert rain_alerts[0].end_mile and rain_alerts[0].end_mile >= rain_alerts[0].distance_miles
+    assert rain_alerts[0].hazard_schema_version == 1
 
 
 def test_road_name_fallback():
@@ -162,6 +164,7 @@ def test_schema_expectations():
     assert a.road_name is not None
     assert a.rationale
     assert a.end_mile is not None
+    assert a.hazard_schema_version == 1
 
 
 def test_hazard_id_determinism():

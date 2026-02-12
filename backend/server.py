@@ -115,6 +115,11 @@ HAZARD_CONFIG = {
     "log_detail": int(_env_float("HAZARD_LOG_DETAIL", 0)),
 }
 
+HAZARD_SCHEMA_VERSION = 1
+
+# Log hazard config once at startup for ops visibility
+logger.info("hazard_config_resolved", extra={"hazard_config": HAZARD_CONFIG, "schema_version": HAZARD_SCHEMA_VERSION})
+
 # Log Mapbox token presence without exposing the secret
 if MAPBOX_ACCESS_TOKEN:
     logger.info("Mapbox token configured")
@@ -302,6 +307,7 @@ class HazardAlert(BaseModel):
     driver_action: Optional[str] = None
     rationale: Optional[str] = None  # why this alert fired
     hazard_id: Optional[str] = None  # stable deterministic id for client diffing
+    hazard_schema_version: int = HAZARD_SCHEMA_VERSION
 
 class RestStop(BaseModel):
     name: str
@@ -1873,6 +1879,7 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
         if not alert.rationale:
             alert.rationale = "generated hazard"
         alert.hazard_id = compute_hazard_id(alert)
+        alert.hazard_schema_version = HAZARD_SCHEMA_VERSION
 
     # Cap total alerts per route (env-driven)
     max_alerts = max(1, cfg.get("max_alerts", 10))
