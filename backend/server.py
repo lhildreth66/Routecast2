@@ -273,6 +273,7 @@ class RouteRequest(BaseModel):
     destination: str
     departure_time: Optional[str] = None  # ISO format datetime
     stops: Optional[List[StopPoint]] = []
+    waypoints: Optional[List[Dict[str, Any]]] = None  # optional raw waypoints
     push_token: Optional[str] = None
     vehicle_type: Optional[str] = None  # car, suv, truck, semi, rv, motorcycle, trailer
     mode: Optional[str] = None  # standard, boondocker, truck
@@ -931,6 +932,10 @@ def calculate_eta(distance_miles: float, avg_speed_mph: float = 55) -> int:
 def extract_waypoints_from_route(encoded_polyline: str, interval_miles: float = RESAMPLE_MILES, departure_time: Optional[datetime] = None) -> List[Waypoint]:
     """Extract waypoints along route at specified intervals with ETAs."""
     try:
+        if not encoded_polyline:
+            logger.warning("extract_waypoints_from_route called with empty geometry")
+            return []
+
         coords = polyline.decode(encoded_polyline, 6)
         if not coords:
             return []
@@ -2724,6 +2729,14 @@ async def get_route_weather(request: RouteRequest):
         "trucker_mode": request.trucker_mode,
     })
 
+    payload_flags = {
+        "has_waypoints": request.waypoints is not None,
+        "has_route_waypoints": bool(getattr(request, "route_waypoints", None)),
+        "has_stops": bool(request.stops),
+        "has_push_token": bool(request.push_token),
+    }
+    logger.info("route_weather_payload_keys", extra=payload_flags)
+
     route_id = str(uuid.uuid4())
 
     # Normalize vehicle and routing options
@@ -2771,6 +2784,29 @@ async def get_route_weather(request: RouteRequest):
             coords = parse_lat_lng(stop.location) or await geocode_location(stop.location)
             if coords:
                 stop_coords.append(coords)
+
+    # Incorporate optional raw waypoints/route_waypoints into stop list if provided
+    raw_waypoints = list(request.waypoints or [])
+    route_waypoints = getattr(request, "route_waypoints", None) or []
+    for wp in route_waypoints:
+        try:
+            lat = getattr(wp, "latitude", None) or getattr(wp, "lat", None)
+            lon = getattr(wp, "longitude", None) or getattr(wp, "lon", None)
+            if lat is not None and lon is not None:
+                raw_waypoints.append({"lat": float(lat), "lng": float(lon)})
+        except Exception:
+            continue
+    for wp in raw_waypoints:
+        if not isinstance(wp, dict):
+            continue
+        lat = wp.get("lat") or wp.get("latitude")
+        lon = wp.get("lng") or wp.get("lon") or wp.get("longitude")
+        if lat is None or lon is None:
+            continue
+        try:
+            stop_coords.append({"lat": float(lat), "lng": float(lon)})
+        except Exception:
+            continue
     
     # Get route from Mapbox
     route_data = await get_mapbox_route(origin_coords, dest_coords, stop_coords if stop_coords else None, routing_options or None)
@@ -2781,13 +2817,29 @@ async def get_route_weather(request: RouteRequest):
             detail=f"No drivable route found between {request.origin} and {request.destination}. These locations may not be connected by roads (e.g., Nome, Alaska is only accessible by air). Try different locations."
         )
     
-    route_geometry = route_data['geometry']
+    route_geometry = route_data.get('geometry')
+    if not route_geometry:
+        raise HTTPException(status_code=400, detail="Route geometry missing from directions response")
     total_duration = int(route_data.get('duration', 0))
     
     # Extract waypoints along route
     waypoints = extract_waypoints_from_route(route_geometry, interval_miles=RESAMPLE_MILES, departure_time=departure_time)
     if not waypoints:
-        raise HTTPException(status_code=500, detail="Could not extract waypoints from route")
+        logger.warning("Route waypoints empty, falling back to origin/destination only", extra={"route_id": route_id})
+        dep_time = departure_time or datetime.now()
+        def _co(coord, key):
+            return coord.get(key) or coord.get(key[:3])
+        o_lat = _co(origin_coords, "lat")
+        o_lon = origin_coords.get("lng") or origin_coords.get("lon") or origin_coords.get("longitude")
+        d_lat = _co(dest_coords, "lat")
+        d_lon = dest_coords.get("lng") or dest_coords.get("lon") or dest_coords.get("longitude")
+        distance = haversine_distance(o_lat, o_lon, d_lat, d_lon) if None not in (o_lat, o_lon, d_lat, d_lon) else 0.0
+        eta_mins = calculate_eta(distance)
+        arrival = dep_time + timedelta(minutes=eta_mins)
+        waypoints = [
+            Waypoint(lat=o_lat or 0.0, lon=o_lon or 0.0, name="Start", distance_from_start=0.0, eta_minutes=0, arrival_time=dep_time.isoformat()),
+            Waypoint(lat=d_lat or 0.0, lon=d_lon or 0.0, name="Destination", distance_from_start=round(distance, 1), eta_minutes=eta_mins, arrival_time=arrival.isoformat()),
+        ]
     
     # Get weather for each waypoint (with concurrent requests)
     waypoints_weather = []

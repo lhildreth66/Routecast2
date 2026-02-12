@@ -8,6 +8,8 @@ from backend.server import (
     derive_road_condition,
     build_condition_segments,
     get_turn_by_turn_directions,
+    get_route_weather,
+    RouteRequest,
     TurnByTurnStep,
     Waypoint,
     WaypointWeather,
@@ -402,6 +404,59 @@ async def test_low_resolution_routes_resample_and_generate_segments(monkeypatch)
     assert all(seg.span_miles > 0 for seg in road_segments), "Segments should have span miles"
     assert all(seg.eta_end_min >= seg.eta_start_min for seg in road_segments), "ETA ranges should be non-decreasing"
     assert any(seg.road_name == "AK-1" for seg in road_segments), "Road segments should keep road name"
+
+
+@pytest.mark.asyncio
+async def test_route_weather_handles_missing_waypoints(monkeypatch):
+    encoded = polyline.encode([(0.0, 0.0), (0.0, 1.0)], precision=6)
+    called = {"count": 0}
+
+    async def fake_route(origin, dest, waypoints=None, options=None):
+        called["count"] += 1
+        called["origin"] = origin
+        called["dest"] = dest
+        return {"geometry": encoded, "duration": 3600, "distance": 160934.4, "legs": [{"distance": 160934.4}]}
+
+    async def fake_weather(lat, lon):
+        return WeatherData(
+            temperature=30,
+            temperature_unit="F",
+            wind_speed="5 mph",
+            wind_direction="N",
+            conditions="Clear",
+            icon="",
+            humidity=50,
+            is_daytime=True,
+            sunrise=None,
+            sunset=None,
+            hourly_forecast=[],
+        )
+
+    async def fake_alerts(lat, lon):
+        return []
+
+    async def fake_reverse(lat, lon):
+        return None
+
+    async def fake_turn_by_turn(origin, dest, waypoints_weather):
+        return []
+
+    async def fake_rest(route_geometry, waypoints_weather):
+        return []
+
+    monkeypatch.setattr("backend.server.get_mapbox_route", fake_route)
+    monkeypatch.setattr("backend.server.get_noaa_weather", fake_weather)
+    monkeypatch.setattr("backend.server.get_noaa_alerts", fake_alerts)
+    monkeypatch.setattr("backend.server.reverse_geocode", fake_reverse)
+    monkeypatch.setattr("backend.server.get_turn_by_turn_directions", fake_turn_by_turn)
+    monkeypatch.setattr("backend.server.find_rest_stops", fake_rest)
+
+    req = RouteRequest(origin="0,0", destination="0,1", departure_time=None, stops=None, waypoints=None)
+    resp = await get_route_weather(req)
+
+    assert called["count"] == 1, "Mapbox route should be called with origin/destination"
+    assert resp.waypoints, "Waypoints should be synthesized when missing"
+    assert resp.total_distance_miles is not None
 
 
 def test_mapbox_route_empty_steps_distance_used():
