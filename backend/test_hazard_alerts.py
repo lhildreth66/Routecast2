@@ -94,6 +94,7 @@ def test_merge_adjacent_hazards():
     rain_alerts = [a for a in alerts if a.type == "rain"]
     assert len(rain_alerts) == 1, "Adjacent rain hazards should merge"
     assert rain_alerts[0].span_miles and rain_alerts[0].span_miles >= 9.5
+    assert rain_alerts[0].hazard_id, "Hazard ID should exist for merged alert"
 
 
 def test_road_name_fallback():
@@ -123,3 +124,38 @@ def test_road_name_fallback():
     ice_alerts = [a for a in alerts if a.type == "ice"]
     assert ice_alerts, "Expected ice alert from freezing temp"
     assert ice_alerts[0].road_name == "Unnamed road"
+
+
+def test_schema_expectations():
+    waypoints = [make_wp(0), make_wp(5, temp=31, conditions="rain"), make_wp(10, temp=31, conditions="rain")]
+    steps = [
+        TurnByTurnStep(
+            instruction="Continue",
+            distance_miles=20,
+            duration_minutes=20,
+            road_name="I-5",
+            maneuver="straight",
+            road_condition=None,
+            weather_at_step=None,
+            temperature=None,
+            has_alert=False,
+            start_distance_miles=0,
+            end_distance_miles=20,
+        )
+    ]
+    alerts = generate_hazard_alerts(
+        waypoints,
+        datetime.datetime.utcnow(),
+        steps,
+        total_route_miles=30,
+        route_id="test-schema",
+    )
+    assert alerts, "Expected at least one hazard alert"
+    a = alerts[0]
+    assert a.hazard_id
+    assert a.type
+    assert a.alert_level
+    assert a.distance_miles is not None
+    assert a.span_miles is None or a.span_miles >= 0
+    assert a.road_name is not None
+    assert a.rationale

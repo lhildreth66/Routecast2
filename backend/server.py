@@ -112,6 +112,7 @@ HAZARD_CONFIG = {
     "merge_gap_miles": _env_float("HAZARD_MERGE_GAP_MILES", 5.0),
     "default_span_miles": _env_float("HAZARD_DEFAULT_SPAN_MILES", 5.0),
     "max_alerts": int(_env_float("MAX_ALERTS_PER_ROUTE", 10)),
+    "log_detail": int(_env_float("HAZARD_LOG_DETAIL", 0)),
 }
 
 # Log Mapbox token presence without exposing the secret
@@ -1477,12 +1478,17 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
             parts.append(f"{k}={v}")
         return ", ".join(parts)
 
+    def normalize_label(label: Optional[str]) -> str:
+        if not label:
+            return "unnamed road"
+        return " ".join(label.strip().lower().split())
+
     def compute_hazard_id(alert: HazardAlert) -> str:
-        start = round(alert.distance_miles or 0.0, 2)
-        span = round(alert.span_miles or cfg["default_span_miles"], 2)
-        road = alert.road_name or "road"
-        level = alert.alert_level or alert.severity or ""
-        raw = f"{alert.type}|{level}|{road}|{start}|{span}"
+        start = round(alert.distance_miles or 0.0, 1)
+        span = round(alert.span_miles or cfg["default_span_miles"], 1)
+        road = normalize_label(alert.road_name)
+        level = (alert.alert_level or alert.severity or "").lower()
+        raw = f"{alert.type.lower()}|{level}|{road}|{start}|{span}"
         return hashlib.sha1(raw.encode("utf-8")).hexdigest()[:16]
 
     def extract_road_and_span(text: Optional[str]) -> tuple[Optional[str], Optional[float]]:
@@ -1851,7 +1857,7 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
     
     # Sort by severity (most critical first), then by distance (earlier), then by span descending
     severity_order = {"extreme": 0, "high": 1, "medium": 2, "low": 3}
-    unique_alerts.sort(key=lambda x: (severity_order.get(x.severity, 3), x.distance_miles or 0, -(x.span_miles or 0)))
+    unique_alerts.sort(key=lambda x: (severity_order.get(x.severity, 3), round(x.distance_miles or 0, 1), -(x.span_miles or 0)))
 
     # Apply deterministic hazard IDs and rationale if missing
     for alert in unique_alerts:
@@ -1877,19 +1883,20 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
                 "max_alerts": max_alerts,
             },
         )
-    for alert in limited_alerts:
-        logger.debug(
-            "hazard_alert_detail",
-            extra={
-                "route_id": route_id,
-                "type": alert.type,
-                "level": alert.alert_level,
-                "road": alert.road_name,
-                "start_miles": alert.distance_miles,
-                "span_miles": alert.span_miles,
-                "hazard_id": alert.hazard_id,
-            },
-        )
+    if cfg.get("log_detail", 0) > 0:
+        for alert in limited_alerts:
+            logger.debug(
+                "hazard_alert_detail",
+                extra={
+                    "route_id": route_id,
+                    "type": alert.type,
+                    "level": alert.alert_level,
+                    "road": alert.road_name,
+                    "start_miles": alert.distance_miles,
+                    "span_miles": alert.span_miles,
+                    "hazard_id": alert.hazard_id,
+                },
+            )
     
     return limited_alerts
 
