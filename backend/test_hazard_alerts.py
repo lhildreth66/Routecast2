@@ -65,6 +65,7 @@ def test_span_computation_and_clamp():
     assert alert.span_miles and 19.5 <= alert.span_miles <= 20.5
     assert alert.hazard_id, "Hazard ID should be populated"
     assert alert.rationale, "Rationale should be populated"
+    assert alert.end_mile and alert.end_mile >= alert.distance_miles
 
 
 def test_merge_adjacent_hazards():
@@ -95,6 +96,7 @@ def test_merge_adjacent_hazards():
     assert len(rain_alerts) == 1, "Adjacent rain hazards should merge"
     assert rain_alerts[0].span_miles and rain_alerts[0].span_miles >= 9.5
     assert rain_alerts[0].hazard_id, "Hazard ID should exist for merged alert"
+    assert rain_alerts[0].end_mile and rain_alerts[0].end_mile >= rain_alerts[0].distance_miles
 
 
 def test_road_name_fallback():
@@ -159,3 +161,40 @@ def test_schema_expectations():
     assert a.span_miles is None or a.span_miles >= 0
     assert a.road_name is not None
     assert a.rationale
+    assert a.end_mile is not None
+
+
+def test_hazard_id_determinism():
+    waypoints = [make_wp(0), make_wp(5, temp=31, conditions="rain"), make_wp(10, temp=31, conditions="rain")]
+    steps = [
+        TurnByTurnStep(
+            instruction="Continue",
+            distance_miles=20,
+            duration_minutes=20,
+            road_name=" I-5  ",
+            maneuver="straight",
+            road_condition=None,
+            weather_at_step=None,
+            temperature=None,
+            has_alert=False,
+            start_distance_miles=0,
+            end_distance_miles=20,
+        )
+    ]
+    alerts1 = generate_hazard_alerts(
+        waypoints,
+        datetime.datetime.utcnow(),
+        steps,
+        total_route_miles=30,
+        route_id="test-hash-1",
+    )
+    alerts2 = generate_hazard_alerts(
+        waypoints,
+        datetime.datetime.utcnow(),
+        steps,
+        total_route_miles=30,
+        route_id="test-hash-2",
+    )
+    ids1 = {a.hazard_id for a in alerts1}
+    ids2 = {a.hazard_id for a in alerts2}
+    assert ids1 == ids2, "Hazard IDs should be deterministic across runs"

@@ -297,6 +297,7 @@ class HazardAlert(BaseModel):
     properties: Optional[Dict[str, Any]] = None
     road_name: Optional[str] = None
     span_miles: Optional[float] = None
+    end_mile: Optional[float] = None
     alert_level: Optional[str] = None  # Watch | Warning | Advisory | Statement | Unknown
     driver_action: Optional[str] = None
     rationale: Optional[str] = None  # why this alert fired
@@ -1859,8 +1860,16 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
     severity_order = {"extreme": 0, "high": 1, "medium": 2, "low": 3}
     unique_alerts.sort(key=lambda x: (severity_order.get(x.severity, 3), round(x.distance_miles or 0, 1), -(x.span_miles or 0)))
 
-    # Apply deterministic hazard IDs and rationale if missing
+    # Apply deterministic hazard IDs and rationale if missing; compute end_mile and sanitize
     for alert in unique_alerts:
+        alert.distance_miles = round(max(0.0, alert.distance_miles or 0.0), 1)
+        span_used = alert.span_miles if alert.span_miles is not None else cfg["default_span_miles"]
+        span_used = sanitize_span(span_used) or 0.0
+        alert.span_miles = span_used
+        end_mile = alert.distance_miles + span_used
+        if total_route_miles is not None:
+            end_mile = min(end_mile, max(0.0, total_route_miles))
+        alert.end_mile = round(end_mile, 1)
         if not alert.rationale:
             alert.rationale = "generated hazard"
         alert.hazard_id = compute_hazard_id(alert)
