@@ -5,6 +5,7 @@ import pytest
 from backend.server import (
     analyze_route_conditions,
     derive_road_condition,
+    get_turn_by_turn_directions,
     TurnByTurnStep,
     Waypoint,
     WaypointWeather,
@@ -249,6 +250,83 @@ def test_coverage_gaps_marked_out_of_coverage():
 
     rc = derive_road_condition(None, [])
     assert rc.condition == "out_of_coverage"
+
+
+@pytest.mark.asyncio
+async def test_mapbox_steps_return_real_road_names(monkeypatch):
+    # Mock Mapbox Directions response with steps populated
+    sample_route = {
+        "routes": [
+            {
+                "distance": 16093.44,  # 10 miles in meters
+                "legs": [
+                    {
+                        "steps": [
+                            {
+                                "distance": 8046.72,
+                                "duration": 600,
+                                "name": "I-80 E",
+                                "ref": "I-80",
+                                "destinations": "Chicago",
+                                "maneuver": {"instruction": "Head east", "type": "depart"},
+                            },
+                            {
+                                "distance": 8046.72,
+                                "duration": 700,
+                                "name": "US-20",
+                                "ref": "US-20",
+                                "destinations": "Dubuque",
+                                "maneuver": {"instruction": "Continue onto US-20", "type": "turn"},
+                            },
+                        ]
+                    }
+                ],
+            }
+        ],
+        "code": "Ok",
+    }
+
+    class FakeResp:
+        status_code = 200
+        text = "ok"
+
+        def json(self):
+            return sample_route
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, params=None):
+            return FakeResp()
+
+    # Patch token and httpx client
+    monkeypatch.setattr("backend.server.MAPBOX_ACCESS_TOKEN", "test-token")
+    monkeypatch.setattr("backend.server.httpx.AsyncClient", FakeClient)
+
+    waypoints = [make_wp(0), make_wp(5), make_wp(10)]
+    steps = await get_turn_by_turn_directions((0, 0), (1, 1), waypoints)
+
+    assert steps, "Expected steps from mocked Mapbox response"
+    assert steps[0].road_name not in {"Route", "Unnamed road"}
+
+    alerts = generate_hazard_alerts(
+        waypoints,
+        datetime.datetime.utcnow(),
+        steps,
+        total_route_miles=10,
+        route_id="mapbox-steps",
+    )
+
+    assert alerts, "Hazards should generate with real road names"
+    assert alerts[0].road_name not in {"Route", "Unnamed road"}
+    assert alerts[0].driver_action
 
 
 def test_mapbox_route_empty_steps_distance_used():

@@ -150,7 +150,13 @@ class MapboxDirectionsProvider(DirectionsProvider):
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 url = f"https://api.mapbox.com/directions/v5/mapbox/driving/{coords_str}"
-                params = {"access_token": MAPBOX_ACCESS_TOKEN, "geometries": "polyline", "overview": "full"}
+                params = {
+                    "access_token": MAPBOX_ACCESS_TOKEN,
+                    "geometries": "polyline",
+                    "overview": "full",
+                    "steps": "true",
+                    "annotations": "distance,duration",
+                }
                 if options:
                     exclude = options.get("exclude")
                     if exclude:
@@ -170,10 +176,20 @@ class MapboxDirectionsProvider(DirectionsProvider):
                     return None
                 if data.get("routes"):
                     route = data["routes"][0]
+                    legs = route.get("legs", []) or []
+                    steps_count = sum(len(l.get("steps", []) or []) for l in legs)
+                    route_distance = route.get("distance", 0)
+                    logger.info(
+                        "MAPBOX steps_count=%s legs=%s route_distance_m=%s",
+                        steps_count,
+                        len(legs),
+                        route_distance,
+                    )
                     return {
                         "geometry": route.get("geometry"),
                         "duration": route.get("duration", 0) / 60,
-                        "distance": route.get("distance", 0) / 1609.34,
+                        "distance": route_distance,  # meters (per Mapbox)
+                        "legs": legs,
                     }
         except Exception as exc:
             logger.error("Mapbox directions failed coords=%s: %s", coords_str[:120], exc)

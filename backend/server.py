@@ -1494,11 +1494,14 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
             return "Watch"
         return "Unknown"
 
-    def driver_advice(h_type: str, severity: str) -> str:
+    def driver_advice(h_type: str, severity: str, *, include_bridges: bool = False) -> str:
         h_type = (h_type or "").lower()
         sev = (severity or "").lower()
         if h_type in {"ice", "snow"}:
-            return "Reduce speed, use chains if required, watch bridges/overpasses for black ice."
+            base = "Reduce speed, use chains if required"
+            if include_bridges:
+                base += ", watch bridges/overpasses for black ice"
+            return base + "."
         if h_type == "rain":
             return "Increase following distance; consider waiting at next truck stop if heavy downpour."
         if h_type == "wind":
@@ -1508,6 +1511,31 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
         if sev in {"extreme", "high"}:
             return "Reduce speed and prepare to stop if conditions worsen."
         return "Drive cautiously and allow extra stopping distance."
+
+    def parse_wind(wind_str: Optional[str]) -> int:
+        if not wind_str:
+            return 0
+        digits = "".join(ch for ch in wind_str if ch.isdigit())
+        try:
+            return int(digits) if digits else 0
+        except Exception:
+            return 0
+
+    def precip_label(conditions: str) -> str:
+        c = conditions.lower()
+        if "freezing rain" in c or "freezing drizzle" in c:
+            return "freezing rain"
+        if "sleet" in c:
+            return "sleet"
+        if "snow" in c or "blizzard" in c:
+            return "snow"
+        if "storm" in c or "thunder" in c:
+            return "thunderstorm"
+        if "drizzle" in c:
+            return "drizzle"
+        if "rain" in c:
+            return "rain"
+        return conditions or "precipitation"
 
     def build_rationale(**kwargs) -> str:
         parts = []
@@ -1595,8 +1623,9 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
         distance = wp.waypoint.distance_from_start or 0
         eta_mins = wp.waypoint.eta_minutes or int(distance / 55 * 60)
         location_name = wp.waypoint.name or f"Mile {int(distance)}"
-        road_name_from_steps = road_for_distance(distance) or wp.waypoint.name or "Route"
+        road_name_from_steps = road_for_distance(distance) or wp.waypoint.name
         conditions_detail = build_conditions_detail(wp)
+        wind_speed = parse_wind(wp.weather.wind_speed)
 
         # Include any active NWS alerts with full detail fields
         for nws in wp.alerts:
@@ -1657,12 +1686,6 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
             alerts.append(alert_obj)
         
         # Wind hazards
-        wind_str = wp.weather.wind_speed or "0 mph"
-        try:
-            wind_speed = int(''.join(filter(str.isdigit, wind_str.split()[0])))
-        except:
-            wind_speed = 0
-            
         if wind_speed >= cfg["wind_medium_mph"]:
             if wind_speed >= cfg["wind_extreme_mph"]:
                 severity = "extreme"
@@ -1699,13 +1722,13 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
             span = hazard_span_miles(idx, is_slippery_wp)
             alert_level = level_for_severity("high")
             driver_action = driver_advice("rain", "high")
-            rationale = build_rationale(conditions=conditions, span_miles=span or cfg["default_span_miles"])
+            rationale = build_rationale(conditions=conditions, span_miles=span or cfg["default_span_miles"], wind_mph=wind_speed)
             alert_obj = HazardAlert(
                 type="rain",
                 severity="high",
                 distance_miles=distance,
                 eta_minutes=eta_mins,
-                message="Heavy rain expected",
+                message=f"Heavy rain expected (wind {wind_speed} mph)" if wind_speed else "Heavy rain expected",
                 recommendation="Reduce speed, increase following distance to 4+ seconds; consider waiting at next truck stop",
                 countdown_text=f"Heavy rain in {eta_mins} minutes at mile {int(distance)}",
                 location_name=location_name,
@@ -1748,20 +1771,27 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
         if "snow" in conditions:
             span = hazard_span_miles(idx, is_snow_wp)
             alert_level = level_for_severity("high")
-            driver_action = driver_advice("snow", "high")
-            rationale = build_rationale(conditions=conditions, temp_f=wp.weather.temperature, span_miles=span or cfg["default_span_miles"])
+            whiteout = wind_speed >= 35
+            driver_action = driver_advice("snow", "high", include_bridges=(wp.weather.temperature or 999) <= 34)
+            rationale = build_rationale(conditions=conditions, temp_f=wp.weather.temperature, wind_mph=wind_speed, span_miles=span or cfg["default_span_miles"])
+            message = "Whiteout risk: blowing snow" if whiteout else "Snow expected"
+            if wp.weather.temperature is not None:
+                message += f" ({wp.weather.temperature}°F"
+                if wind_speed:
+                    message += f", wind {wind_speed} mph"
+                message += ")"
             alert_obj = HazardAlert(
-                type="snow",
-                severity="high",
+                type="whiteout" if whiteout else "snow",
+                severity="extreme" if whiteout else "high",
                 distance_miles=distance,
                 eta_minutes=eta_mins,
-                message="Snow conditions expected",
-                recommendation="Reduce speed by 50%, chains may be required; plan for reduced traction",
-                countdown_text=f"Snow conditions in {eta_mins} minutes",
+                message=message,
+                recommendation="Visibility may drop to near zero; slow sharply or pause travel" if whiteout else "Reduce speed by 50%, chains may be required; plan for reduced traction",
+                countdown_text=f"Snow in {eta_mins} minutes" if not whiteout else f"Whiteout risk in {eta_mins} minutes",
                 location_name=location_name,
                 road_name=road_name_from_steps,
                 span_miles=span,
-                alert_level=alert_level,
+                alert_level=alert_level if not whiteout else "Warning",
                 driver_action=driver_action,
                 description=conditions_detail or None,
                 full_description=conditions_detail or None,
@@ -1775,16 +1805,20 @@ def generate_hazard_alerts(waypoints_weather: List[WaypointWeather], departure_t
         if temp <= cfg["ice_temp_f"]:
             span = hazard_span_miles(idx, is_ice_wp)
             alert_level = level_for_severity("high")
-            driver_action = driver_advice("ice", "high")
-            rationale = build_rationale(temp_f=temp, threshold=cfg["ice_temp_f"], span_miles=span or cfg["default_span_miles"])
+            include_bridges = True if any(k in conditions for k in ["rain", "snow", "drizzle", "sleet", "freezing"]) else False
+            driver_action = driver_advice("ice", "high", include_bridges=include_bridges)
+            rationale = build_rationale(temp_f=temp, threshold=cfg["ice_temp_f"], span_miles=span or cfg["default_span_miles"], wind_mph=wind_speed)
+            message = f"Ice risk: {temp}°F"
+            if wind_speed:
+                message += f", wind {wind_speed} mph"
             alert_obj = HazardAlert(
                 type="ice",
                 severity="high",
                 distance_miles=distance,
                 eta_minutes=eta_mins,
-                message=f"Freezing temperature ({temp}°F) - ice risk",
-                recommendation="Reduce speed; black ice likely on bridges/overpasses; chains may be required",
-                countdown_text=f"Ice risk zone in {eta_mins} minutes",
+                message=message,
+                recommendation="Reduce speed; black ice likely on bridges/overpasses" if include_bridges else "Reduce speed; traction reduced",
+                countdown_text=f"Ice risk in {eta_mins} minutes",
                 location_name=location_name,
                 road_name=road_name_from_steps,
                 span_miles=span,
@@ -2311,6 +2345,13 @@ async def get_turn_by_turn_directions(origin_coords: tuple, dest_coords: tuple, 
             
             route = data['routes'][0]
             legs = route.get('legs', [])
+            steps_count = sum(len(leg.get('steps', []) or []) for leg in legs)
+            logger.info(
+                "MAPBOX_TBT steps_count=%s legs=%s route_distance_m=%s",
+                steps_count,
+                len(legs),
+                route.get('distance'),
+            )
             
             cumulative_distance = 0.0
             
