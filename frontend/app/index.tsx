@@ -1430,7 +1430,7 @@ export default function HomeScreen() {
                 <View style={styles.alertsActions}>
                   <TouchableOpacity
                     style={styles.notificationButton}
-                    onPress={() => router.push('/notifications')}
+                    onPress={() => router.push('/notifications' as any)}
                     accessibilityRole="button"
                     accessibilityLabel="Open notification history"
                   >

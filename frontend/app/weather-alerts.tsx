@@ -205,22 +205,6 @@ export default function WeatherAlertsScreen() {
               </View>
             )}
           </View>
-                    <View style={styles.alertMeta}>
-                      <Text style={styles.alertDistance}>{Math.round(alert.distance_miles)} mi from start</Text>
-                      <Text style={styles.alertEta}>ETA: {alert.eta_minutes} min</Text>
-                    </View>
-                  )}
-                </TouchableOpacity>
-              );
-            })
-          ) : (
-            <View style={styles.noAlerts}>
-              <Ionicons name="checkmark-circle" size={64} color="#22c55e" />
-              <Text style={styles.noAlertsTitle}>All Clear!</Text>
-              <Text style={styles.noAlertsText}>No significant hazards on your route</Text>
-            </View>
-          )}
-        </View>
 
         {/* Bridge Alerts Section - Only show if enabled */}
         {bridgeAlertsEnabled && (
@@ -284,6 +268,8 @@ export default function WeatherAlertsScreen() {
             )}
           </View>
         )}
+
+        </View>
 
         <View style={styles.bottomPadding} />
       </ScrollView>

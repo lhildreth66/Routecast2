@@ -143,11 +143,11 @@ interface WaypointWeather {
   };
   weather: WeatherData | null;
   alerts: WeatherAlert[];
-}
   road_name?: string;
   span_miles?: number;
   alert_level?: string;
   driver_action?: string;
+}
 
 interface SafetyScore {
   overall_score: number;

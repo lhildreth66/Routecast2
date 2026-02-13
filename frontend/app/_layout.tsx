@@ -65,7 +65,7 @@ export default function RootLayout() {
       // Small delay helps when app is cold-started and navigation not ready yet
       setTimeout(() => {
         try {
-          router.push('/notifications');
+          router.push('/notifications' as any);
         } catch (err) {
           console.log('[notifications] navigation failed', err);
         }
@@ -80,7 +80,7 @@ export default function RootLayout() {
         void addNotificationToHistory(last.notification);
         setTimeout(() => {
           try {
-            router.push('/notifications');
+            router.push('/notifications' as any);
           } catch (err) {
             console.log('[notifications] navigation failed (launch)', err);
           }
