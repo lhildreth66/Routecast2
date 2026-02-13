@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 import re
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Tuple
 import uuid
 import math
 import hashlib
@@ -37,11 +37,10 @@ from notifications import NotificationService, ExpoPushClient, router as notific
 from notifications.smart_delay import SmartDelayOptimizer
 from common.features import SMART_DELAY_ALERTS
 from radar_alerts import radar_router  # Weather radar & alerts integration
-import debug_json_tripwire  # noqa: F401  # TEMP: logs context on JSON decode errors
 
 # Google Gemini for chat
 try:
-    import google.generativeai as genai
+    from google import genai
     CHAT_AVAILABLE = True
 except ImportError:
     CHAT_AVAILABLE = False
@@ -95,6 +94,7 @@ GOOGLE_PLACES_API_KEY = os.environ.get("GOOGLE_PLACES_API_KEY", "")
 BUILD_SHA = os.environ.get("RENDER_GIT_COMMIT") or os.environ.get("BUILD_SHA") or "unknown"
 BUILD_TIME = os.environ.get("BUILD_TIME") or datetime.utcnow().isoformat()
 ALERT_DEBUG = bool(int(os.environ.get("ALERT_DEBUG", "0") or 0))
+DEBUG_MODE = os.environ.get("DEBUG", "0").lower() in {"1", "true", "yes", "on"}
 
 
 def _env_float(key: str, default: float) -> float:
@@ -186,8 +186,8 @@ def get_notification_service() -> NotificationService:
     return _notification_service_instance
 
 
-def get_gemini_model() -> "genai.GenerativeModel":
-    """Construct a Gemini GenerativeModel using the required API key.
+def get_gemini_model() -> Tuple["genai.Client", str]:
+    """Return a Gemini model client and model name using google.genai.
 
     Raises HTTP 500 if the SDK or key is missing.
     """
@@ -195,19 +195,14 @@ def get_gemini_model() -> "genai.GenerativeModel":
         logger.error("Gemini SDK not installed")
         raise HTTPException(status_code=500, detail="Gemini SDK not installed")
 
-    try:
-        api_key = os.environ["GEMINI_API_KEY"]
-    except KeyError:
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
         logger.error("GEMINI_API_KEY is not set")
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY is not set")
 
-    genai.configure(
-        api_key=api_key,
-        client_options={"api_endpoint": "https://generativelanguage.googleapis.com"},
-        api_version="v1",
-    )
+    client = genai.Client(api_key=api_key)
     model_name = os.environ.get("GEMINI_MODEL", GEMINI_MODEL)
-    return genai.GenerativeModel(model_name)
+    return client, model_name
 
 # ==================== Models ====================
 
@@ -2999,11 +2994,11 @@ Provide a 2-3 sentence summary focusing on:
 3. Key recommendations for the driver
 
 Be concise and practical."""
-    model = get_gemini_model()
+    client, model_name = get_gemini_model()
     loop = asyncio.get_event_loop()
     response_obj = await loop.run_in_executor(
         None,
-        lambda: model.generate_content(prompt)
+        lambda: client.models.generate_content(model=model_name, contents=prompt),
     )
     return getattr(response_obj, "text", None) or None
 
@@ -4256,7 +4251,8 @@ async def _fetch_shade_from_osm(client: httpx.AsyncClient, lat: float, lon: floa
         resp = await client.post(overpass_url, data={"data": overpass_query}, timeout=15.0)
         
         if resp.status_code != 200:
-            return 0.2  # Low shade default
+            logger.warning("Overpass shade lookup failed status=%s", resp.status_code)
+            raise HTTPException(status_code=503, detail="Shade lookup temporarily unavailable. Please try again.")
         
         data = resp.json()
         elements = data.get('elements', [])
@@ -4269,7 +4265,7 @@ async def _fetch_shade_from_osm(client: httpx.AsyncClient, lat: float, lon: floa
             return 0.2
     except Exception as e:
         logger.warning(f"Error fetching shade data: {e}")
-        return 0.3  # Default moderate
+        raise HTTPException(status_code=503, detail="Shade lookup failed. Please try again.")
 
 
 async def _fetch_access_score(client: httpx.AsyncClient, lat: float, lon: float) -> float:
@@ -4291,7 +4287,8 @@ async def _fetch_access_score(client: httpx.AsyncClient, lat: float, lon: float)
         resp = await client.post(overpass_url, data={"data": overpass_query}, timeout=15.0)
         
         if resp.status_code != 200:
-            return 0.5  # Medium access default
+            logger.warning("Overpass access lookup failed status=%s", resp.status_code)
+            raise HTTPException(status_code=503, detail="Road access lookup temporarily unavailable. Please try again.")
         
         data = resp.json()
         elements = data.get('elements', [])
@@ -4322,7 +4319,7 @@ async def _fetch_access_score(client: httpx.AsyncClient, lat: float, lon: float)
         return best_score
     except Exception as e:
         logger.warning(f"Error fetching access score: {e}")
-        return 0.5  # Default
+        raise HTTPException(status_code=503, detail="Road access lookup failed. Please try again.")
 
 
 async def _fetch_signal_score(lat: float, lon: float) -> float:
@@ -4826,7 +4823,9 @@ async def search_free_camping(request: FreeCampingRequest):
                     continue
             
             if osm_data is None:
-                raise last_error or Exception("All Overpass instances failed")
+                detail = "Camping search unavailable right now. Please try again shortly."
+                logger.warning("Free camping - all Overpass instances failed: %s", last_error)
+                raise HTTPException(status_code=503, detail=detail)
         
         spots = []
         
@@ -6980,16 +6979,20 @@ async def get_truck_alerts(request: TruckAlertRequest):
 
 
 # Add CORS middleware first, before including router
+local_origins = [
+    "http://localhost:8081",
+    "http://localhost:19006",
+    "http://localhost:3000",
+    "http://127.0.0.1:8081",
+    "http://127.0.0.1:19006",
+    "http://127.0.0.1:3000",
+]
+
+cors_allow_origins = local_origins if DEBUG_MODE else []
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:8081",
-        "http://localhost:19006",
-        "http://localhost:3000",
-        "http://127.0.0.1:8081",
-        "http://127.0.0.1:19006",
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=cors_allow_origins,
     allow_origin_regex=r"^https:\/\/.*\.app\.github\.dev$",
     allow_credentials=False,
     allow_methods=["*"],
@@ -7017,10 +7020,9 @@ async def startup_db_client():
         logger.warning("[startup] MongoDB init failed: %s", exc)
 
     if CHAT_AVAILABLE and genai is not None:
-        model_name = os.environ.get("GEMINI_MODEL", GEMINI_MODEL)
         try:
-            get_gemini_model()
-            logger.info("[startup] gemini configured model=%s", model_name)
+            _, configured_model = get_gemini_model()
+            logger.info("[startup] gemini configured model=%s", configured_model)
         except Exception as exc:
             logger.warning("[startup] gemini not ready: %s", exc)
     else:
