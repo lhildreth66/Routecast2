@@ -80,7 +80,7 @@ const filterRecentAlerts = (
 
   return alerts
     .map((alert) => ({ alert, timestamp: parseAlertTimestamp(alert) }))
-    .filter(({ timestamp }) => timestamp !== null && timestamp >= cutoff)
+    .filter(({ timestamp }) => timestamp === null || timestamp >= cutoff)
     .sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
     .slice(0, limit)
     .map(({ alert }) => alert);

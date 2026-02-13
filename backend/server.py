@@ -200,8 +200,10 @@ def get_gemini_model() -> Tuple["genai.Client", str]:
         logger.error("GEMINI_API_KEY is not set")
         raise HTTPException(status_code=500, detail="GEMINI_API_KEY is not set")
 
-    client = genai.Client(api_key=api_key)
+    client = genai.Client(api_key=api_key, api_version="v1")
     model_name = os.environ.get("GEMINI_MODEL", GEMINI_MODEL)
+    if not model_name.startswith("models/"):
+        model_name = f"models/{model_name}"
     return client, model_name
 
 # ==================== Models ====================
