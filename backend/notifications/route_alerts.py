@@ -410,6 +410,23 @@ class CriticalRouteAlertWorker:
         self.fetcher = fetcher or self._fetch_alerts
         self.now = now_fn
         self.cap_per_hour = int(os.environ.get("ROUTE_ALERTS_CAP_PER_HOUR", "2"))
+        self.resend_ttl_minutes = int(os.environ.get("ROUTE_ALERTS_RESEND_TTL_MIN", "15"))
+        self._recent_alert_cache: Dict[str, Dict[str, Any]] = {}
+
+    def _recent_cache_key(
+        self, monitor_id: str, route_signature: str, route_id: str, alert_id: str, band: str
+    ) -> str:
+        return f"{monitor_id}:{route_signature}:{route_id}:{alert_id}:{band}"
+
+    def _skip_for_recent(self, monitor_id: str, route_signature: str, route_id: str, alert_id: str, band: str) -> bool:
+        now = self.now()
+        expired = [key for key, entry in self._recent_alert_cache.items() if entry.get("expires_at") and entry["expires_at"] <= now]
+        for key in expired:
+            self._recent_alert_cache.pop(key, None)
+
+        key = self._recent_cache_key(monitor_id, route_signature, route_id, alert_id, band)
+        entry = self._recent_alert_cache.get(key)
+        return bool(entry and entry.get("expires_at") and entry["expires_at"] > now)
 
     def run_once(self) -> Dict[str, Any]:
         monitors = self.service.get_active_monitors()
@@ -653,7 +670,8 @@ class CriticalRouteAlertWorker:
                     token,
                     payload["title"],
                     payload["collapsed_body"],
-                    payload.get("data"),
+                    expanded_body=payload.get("expanded_body"),
+                    data=payload.get("data"),
                 )
             except TypeError:
                 return self.service.push_gateway.send(token, payload["title"], payload["collapsed_body"])
@@ -699,6 +717,11 @@ class CriticalRouteAlertWorker:
                     stats["skipped_distance"] += 1
                     continue
 
+                if self._skip_for_recent(monitor_id, route_signature, route_id, alert_id, band):
+                    stats["skipped"] += 1
+                    stats["skipped_dedupe"] += 1
+                    continue
+
                 if band == "within_15" and self._has_sent(route_signature, route_id, alert_id, "within_5", monitor_id=monitor_id):
                     stats["skipped"] += 1
                     stats["skipped_dedupe"] += 1
@@ -727,6 +750,10 @@ class CriticalRouteAlertWorker:
                 )
 
                 if self._send_notification(token, payload):
+                    cache_key = self._recent_cache_key(monitor_id, route_signature, route_id, alert_id, band)
+                    self._recent_alert_cache[cache_key] = {
+                        "expires_at": self.now() + timedelta(minutes=self.resend_ttl_minutes),
+                    }
                     self.service.record_sent(
                         monitor_id,
                         route_signature,
@@ -744,6 +771,15 @@ class CriticalRouteAlertWorker:
                     stats["skipped_push"] += 1
 
         return stats
+
+    def _human_summary(self, event: str, onset: Optional[str], expires: Optional[str], where: str) -> str:
+        window = self._format_time_window(onset, expires)
+        parts = [event]
+        if window:
+            parts.append(window)
+        if where:
+            parts.append(where)
+        return " • ".join([p for p in parts if p])
 
     def _build_notification_payload(
         self,
@@ -773,9 +809,11 @@ class CriticalRouteAlertWorker:
         when_detail = sections.get("when") or self._format_time_window(onset, expires)
         where_detail = self._format_where(area_desc, alert.get("geometry"), sample_points, band)
 
+        summary = self._human_summary(event, onset, expires, where_detail)
+
         time_range = self._format_time_range(onset, expires)
         collapsed_parts = [p for p in [time_range, where_detail] if p]
-        collapsed_body = " · ".join(collapsed_parts) if collapsed_parts else headline
+        collapsed_body = summary or (" · ".join(collapsed_parts) if collapsed_parts else headline)
 
         expanded_lines = []
         if what:
@@ -801,6 +839,7 @@ class CriticalRouteAlertWorker:
             "where": where_detail,
             "when": when_detail,
             "impacts": impacts,
+            "longText": expanded_body,
         }
 
         return {
@@ -998,7 +1037,6 @@ class CriticalRouteAlertWorker:
             return {}
 
         max_workers_env = int(os.environ.get("ROUTE_ALERTS_MAX_WORKERS", "32"))
-        per_call_timeout = float(os.environ.get("ROUTE_ALERTS_POINT_TIMEOUT", "5.0"))
         max_workers = max(1, min(32, min(max_workers_env, len(unique_points))))
 
         results: Dict[str, List[Dict[str, Any]]] = {}
@@ -1008,7 +1046,7 @@ class CriticalRouteAlertWorker:
                 for key, (lat, lon) in unique_points.items()
             }
 
-            for future in concurrent.futures.as_completed(future_map, timeout=per_call_timeout):
+            for future in concurrent.futures.as_completed(future_map):
                 key = future_map[future]
                 try:
                     alerts = future.result()
@@ -1016,13 +1054,5 @@ class CriticalRouteAlertWorker:
                     logger.warning("[route-alerts] NWS fetch error for %s: %s", key, exc)
                     alerts = None
                 results[key] = list(alerts) if alerts else None
-
-            # Futures still pending after timeout
-            for future, key in future_map.items():
-                if future.done():
-                    continue
-                future.cancel()
-                logger.warning("[route-alerts] NWS fetch timed out for %s after %.1fs", key, per_call_timeout)
-                results[key] = None
 
         return results

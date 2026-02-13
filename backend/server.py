@@ -37,6 +37,7 @@ from notifications import NotificationService, ExpoPushClient, router as notific
 from notifications.smart_delay import SmartDelayOptimizer
 from common.features import SMART_DELAY_ALERTS
 from radar_alerts import radar_router  # Weather radar & alerts integration
+import debug_json_tripwire  # noqa: F401  # TEMP: logs context on JSON decode errors
 
 # Google Gemini for chat
 try:
