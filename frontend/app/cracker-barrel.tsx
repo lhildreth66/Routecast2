@@ -15,11 +15,30 @@ interface OvernightSpot {
   distance_miles: number;
   latitude: number;
   longitude: number;
+  osm_id?: number;
   address?: string;
   phone?: string;
   website?: string;
   hours?: string;
   notes?: string;
+}
+
+function normalizeName(name?: string) {
+  if (!name) return '';
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+function dedupeSpots(items: OvernightSpot[]) {
+  const seen = new Map<string, OvernightSpot>();
+  for (const spot of items) {
+    const nameKey = normalizeName(spot.name);
+    const coordKey = `${spot.latitude.toFixed(4)},${spot.longitude.toFixed(4)}`;
+    const key = spot.osm_id ? String(spot.osm_id) : `${nameKey}:${coordKey}`;
+    if (!seen.has(key)) {
+      seen.set(key, spot);
+    }
+  }
+  return Array.from(seen.values());
 }
 
 function groupSpots(items: OvernightSpot[]) {
@@ -99,14 +118,18 @@ export default function CrackerBarrelScreen() {
         radius_miles: parseInt(searchRadius, 10),
       });
       const data = resp.data || {};
-      const results = (data.spots || data.results || []) as OvernightSpot[];
+      const results = dedupeSpots((data.spots || data.results || []) as OvernightSpot[]);
       setSpots(results);
-      setOverpassUnavailable(data.source === 'overpass_unavailable');
 
-      if (results.length === 0 && data.source === 'overpass_unavailable') {
-        setError('');
-      } else if (results.length === 0) {
-        setError('No Cracker Barrel locations found nearby. Try increasing the search radius.');
+      const overpassDown = data.source === 'overpass_unavailable' || data.source === 'cached_fallback' || data.error === 'overpass_unavailable';
+      setOverpassUnavailable(overpassDown);
+
+      if (results.length === 0) {
+        if (overpassDown || data.error === 'overpass_unavailable') {
+          setError('Service temporarily unavailable. Please try again in a few minutes.');
+        } else {
+          setError('No Cracker Barrel locations found in this area. Try increasing the search radius.');
+        }
       }
     } catch (err: any) {
       console.error('Cracker Barrel search error:', err);

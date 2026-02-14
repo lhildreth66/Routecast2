@@ -8,10 +8,15 @@ import logging
 from pathlib import Path
 import re
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any, Tuple
+from typing import List, Optional, Dict, Any, Tuple, Callable, TypeVar
+
+T = TypeVar("T")
 import uuid
 import math
 import hashlib
+import time
+import json
+import contextlib
 from io import BytesIO
 from datetime import datetime, timedelta, timezone
 import httpx
@@ -61,6 +66,80 @@ mongo_url = os.environ.get("MONGODB_URI") or os.environ.get('MONGO_URL')
 db_name = os.environ.get('DB_NAME', 'routecast_test')
 client = None
 db = None
+
+# Timing and cache defaults
+TIMING_DEBUG = bool(int(os.environ.get("DEBUG_TIMINGS", "0") or 0))
+CACHE_TTL_SECONDS = int(os.environ.get("ROUTE_CACHE_TTL", "900"))
+
+# Simple in-memory caches with TTL (per-process)
+_geocode_cache: Dict[str, Dict[str, Any]] = {}
+_route_cache: Dict[str, Dict[str, Any]] = {}
+_route_context_cache: Dict[str, Dict[str, Any]] = {}
+
+
+def _cache_enabled() -> bool:
+    # Disable caches under pytest to avoid cross-test leakage
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return False
+    return os.environ.get("ROUTE_CACHE_ENABLED", "1").lower() not in {"0", "false", "no", "off"}
+
+
+def _cache_get(cache: Dict[str, Dict[str, Any]], key: str):
+    if not _cache_enabled():
+        return None
+    entry = cache.get(key)
+    if not entry:
+        return None
+    if entry.get("expires", 0) < time.time():
+        cache.pop(key, None)
+        return None
+    return entry.get("value")
+
+
+def _cache_set(cache: Dict[str, Dict[str, Any]], key: str, value: Any, ttl: int = CACHE_TTL_SECONDS):
+    if not _cache_enabled():
+        return
+    cache[key] = {"value": value, "expires": time.time() + ttl}
+
+
+async def cached_geocode(location: str) -> Optional[Dict[str, float]]:
+    key = location.strip().lower()
+    cached = _cache_get(_geocode_cache, key)
+    if cached:
+        return cached
+    result = await geocode_location(location)
+    if result:
+        _cache_set(_geocode_cache, key, result)
+    return result
+
+
+def _route_cache_key(origin: Dict, dest: Dict, stops: List[Dict], options: Dict[str, Any]) -> str:
+    payload = {
+        "origin": origin,
+        "dest": dest,
+        "stops": stops,
+        "options": options,
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+
+
+async def cached_route(origin_coords: Dict, dest_coords: Dict, stop_coords: List[Dict], routing_options: Dict[str, Any]) -> Optional[Dict]:
+    key = _route_cache_key(origin_coords, dest_coords, stop_coords or [], routing_options or {})
+    cached = _cache_get(_route_cache, key)
+    if cached:
+        return cached
+    result = await get_mapbox_route(origin_coords, dest_coords, stop_coords if stop_coords else None, routing_options or None)
+    if result:
+        _cache_set(_route_cache, key, result)
+    return result
+
+
+def cache_route_context(route_id: str, context: Dict[str, Any], ttl: int = CACHE_TTL_SECONDS):
+    _cache_set(_route_context_cache, route_id, context, ttl)
+
+
+def get_route_context(route_id: str) -> Optional[Dict[str, Any]]:
+    return _cache_get(_route_context_cache, route_id)
 
 # We'll connect on app startup instead of during module import
 async def connect_to_mongo():
@@ -450,6 +529,8 @@ class RouteWeatherResponse(BaseModel):
     reroute_reason: Optional[str] = None
     coverage_gaps_segments: int = 0
     coverage_gaps_miles: float = 0.0
+    hazard_status: str = "ready"
+    timings_ms: Optional[Dict[str, float]] = None
 
 class SavedRoute(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -458,6 +539,15 @@ class SavedRoute(BaseModel):
     stops: List[StopPoint] = []
     is_favorite: bool = False
     created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class HazardAlertsResponse(BaseModel):
+    route_id: str
+    hazard_alerts: List[HazardAlert]
+    road_conditions: List[ConditionSegment] = []
+    weather_conditions: List[ConditionSegment] = []
+    hazard_status: str = "ready"
+    timings_ms: Optional[Dict[str, float]] = None
 
 class FavoriteRouteRequest(BaseModel):
     origin: str
@@ -768,6 +858,7 @@ class OvernightSearchResponse(BaseModel):
     premium_message: Optional[str] = None
     ok: bool = True
     source: Optional[str] = None
+    error: Optional[str] = None
 
 # ----- Last Chance Supply Models -----
 class SupplyPoint(BaseModel):
@@ -783,6 +874,9 @@ class SupplyPoint(BaseModel):
     amenities: List[str]
     rating: float
     address: Optional[str] = None
+    formatted_address: Optional[str] = None
+    vicinity: Optional[str] = None
+    title: Optional[str] = None
     website: Optional[str] = None
 
 class LastChanceRequest(BaseModel):
@@ -3027,6 +3121,12 @@ async def health_check():
 @api_router.post("/route/weather", response_model=RouteWeatherResponse)
 async def get_route_weather(request: RouteRequest):
     """Get weather along a route from origin to destination."""
+    t0 = time.perf_counter()
+    timings: Dict[str, float] = {}
+
+    def mark(name: str):
+        timings[name] = round((time.perf_counter() - t0) * 1000.0, 2)
+
     logger.info("Route weather request received", extra={
         "origin": request.origin,
         "destination": request.destination,
@@ -3074,20 +3174,27 @@ async def get_route_weather(request: RouteRequest):
     else:
         departure_time = datetime.now()
     
-    # Resolve origin and destination (support direct lat,lng)
+    # Resolve origin and destination (support direct lat,lng) with caching
     origin_coords = parse_lat_lng(request.origin)
-    if origin_coords:
-        logger.info("Using direct coordinates for origin")
-    else:
-        origin_coords = await geocode_location(request.origin)
+    dest_coords = parse_lat_lng(request.destination)
+
+    async def resolve_origin():
+        if origin_coords:
+            logger.info("Using direct coordinates for origin")
+            return origin_coords
+        return await cached_geocode(request.origin)
+
+    async def resolve_dest():
+        if dest_coords:
+            logger.info("Using direct coordinates for destination")
+            return dest_coords
+        return await cached_geocode(request.destination)
+
+    origin_coords, dest_coords = await asyncio.gather(resolve_origin(), resolve_dest())
+    mark("geocode")
+
     if not origin_coords:
         raise HTTPException(status_code=400, detail=f"Could not geocode origin: {request.origin}")
-
-    dest_coords = parse_lat_lng(request.destination)
-    if dest_coords:
-        logger.info("Using direct coordinates for destination")
-    else:
-        dest_coords = await geocode_location(request.destination)
     if not dest_coords:
         raise HTTPException(status_code=400, detail=f"Could not geocode destination: {request.destination}")
     
@@ -3122,8 +3229,9 @@ async def get_route_weather(request: RouteRequest):
         except Exception:
             continue
     
-    # Get route from Mapbox
-    route_data = await get_mapbox_route(origin_coords, dest_coords, stop_coords if stop_coords else None, routing_options or None)
+    # Get route from Mapbox (cached)
+    route_data = await cached_route(origin_coords, dest_coords, stop_coords if stop_coords else None, routing_options or None)
+    mark("route_fetch")
     if not route_data:
         detail = f"No drivable route found between {request.origin} and {request.destination}."
         logger.warning("route_weather_no_route", extra={"detail": detail, "route_id": route_id})
@@ -3259,17 +3367,41 @@ async def get_route_weather(request: RouteRequest):
             alerts=alerts
         )
     
-    # Fetch weather concurrently
+    # Fetch weather concurrently (alerts deferred to follow-up)
     total_waypoints = len(waypoints)
-    tasks = [fetch_waypoint_weather(wp, i, total_waypoints, request.origin, request.destination) for i, wp in enumerate(waypoints)]
+
+    async def fetch_weather_only(wp: Waypoint, index: int, total: int, origin_name: str, dest_name: str) -> WaypointWeather:
+        weather = await get_noaa_weather(wp.lat, wp.lon)
+        location_name = await reverse_geocode(wp.lat, wp.lon)
+        if index == 0:
+            display_name = f"Start - {origin_name}"
+        elif index == total - 1:
+            display_name = f"End - {dest_name}"
+        else:
+            display_name = location_name or wp.name
+
+        updated_wp = Waypoint(
+            lat=wp.lat,
+            lon=wp.lon,
+            name=display_name,
+            distance_from_start=wp.distance_from_start,
+            eta_minutes=wp.eta_minutes,
+            arrival_time=wp.arrival_time,
+        )
+
+        return WaypointWeather(
+            waypoint=updated_wp,
+            weather=weather,
+            alerts=[],
+        )
+
+    tasks = [fetch_weather_only(wp, i, total_waypoints, request.origin, request.destination) for i, wp in enumerate(waypoints)]
     waypoints_weather = await asyncio.gather(*tasks)
+    mark("weather_fetch")
 
     hazard_waypoints = extract_waypoints_from_route(route_geometry, interval_miles=10.0, departure_time=departure_time)
     if not hazard_waypoints:
         hazard_waypoints = list(waypoints)
-    hazard_total_waypoints = len(hazard_waypoints)
-    hazard_tasks = [fetch_waypoint_weather(wp, i, hazard_total_waypoints, request.origin, request.destination) for i, wp in enumerate(hazard_waypoints)]
-    hazard_waypoints_weather = await asyncio.gather(*hazard_tasks)
 
     # Persist active route monitor for alerts if push token provided and DB available
     if db is not None and request.push_token:
@@ -3344,19 +3476,22 @@ async def get_route_weather(request: RouteRequest):
             extra={"route_id": route_id},
         )
 
-    # NEW: Generate hazard alerts with countdown using route context
-    hazard_alerts = generate_hazard_alerts(
-        list(hazard_waypoints_weather),
-        departure_time,
-        total_route_miles=total_distance,
-        total_route_minutes=total_duration_minutes,
-        route_id=route_id,
-    )
+    # Hazard alerts deferred to follow-up endpoint to avoid blocking
+    hazard_alerts: List[HazardAlert] = []
+    road_conditions: List[ConditionSegment] = []
+    weather_conditions: List[ConditionSegment] = []
 
-    await hydrate_alert_roads_from_geometry(hazard_alerts, geometry_index)
-
-    road_conditions = build_condition_segments(hazard_alerts, category="road")
-    weather_conditions = build_condition_segments(hazard_alerts, category="weather")
+    # Cache context for single follow-up hazard fetch
+    cache_route_context(route_id, {
+        "hazard_waypoints": [wp.model_dump() for wp in hazard_waypoints],
+        "departure_time": departure_time.isoformat(),
+        "total_distance_miles": total_distance,
+        "total_duration_minutes": total_duration_minutes,
+        "route_geometry": route_geometry,
+        "origin": request.origin,
+        "destination": request.destination,
+    })
+    mark("context_cached")
 
     # NEW: Find rest stops along the route
     rest_stops = await find_rest_stops(route_geometry, list(waypoints_weather))
@@ -3404,8 +3539,14 @@ async def get_route_weather(request: RouteRequest):
         reroute_reason=reroute_reason,
         coverage_gaps_segments=coverage_gaps_segments,
         coverage_gaps_miles=coverage_gap_miles,
+        hazard_status="pending",
+        timings_ms=timings if TIMING_DEBUG else None,
     )
     
+    mark("total")
+    if TIMING_DEBUG:
+        logger.info("route_weather_timings", extra={"route_id": route_id, "timings_ms": timings})
+
     # Save to database when configured
     try:
         if db is None:
@@ -3421,6 +3562,72 @@ async def get_route_weather(request: RouteRequest):
         logger.error(f"Error saving route: {e}", exc_info=True)
     
     return response
+
+
+@api_router.get("/route/weather/alerts/{route_id}", response_model=HazardAlertsResponse)
+async def get_route_weather_alerts(route_id: str):
+    """Compute hazard alerts in a single follow-up call using cached context."""
+    ctx = get_route_context(route_id)
+    if not ctx:
+        raise HTTPException(status_code=404, detail="Route context expired or missing")
+
+    t0 = time.perf_counter()
+    timings: Dict[str, float] = {}
+
+    def mark(name: str):
+        timings[name] = round((time.perf_counter() - t0) * 1000.0, 2)
+
+    hazard_waypoints_data = ctx.get("hazard_waypoints", [])
+    if not hazard_waypoints_data:
+        raise HTTPException(status_code=400, detail="No hazard waypoints available")
+
+    try:
+        departure_time = datetime.fromisoformat(ctx.get("departure_time"))
+    except Exception:
+        departure_time = datetime.utcnow()
+
+    total_distance = ctx.get("total_distance_miles", 0.0)
+    total_duration_minutes = ctx.get("total_duration_minutes", 0)
+    route_geometry = ctx.get("route_geometry", "")
+    geometry_index = build_geometry_mile_index(route_geometry) if route_geometry else {}
+
+    hazard_total_waypoints = len(hazard_waypoints_data)
+
+    async def fetch_hazard_wp(wp_dict: Dict[str, Any], index: int, total: int) -> WaypointWeather:
+        wp = Waypoint(**wp_dict)
+        weather = await get_noaa_weather(wp.lat, wp.lon)
+        alerts = await get_noaa_alerts(wp.lat, wp.lon)
+        return WaypointWeather(waypoint=wp, weather=weather, alerts=alerts)
+
+    hazard_tasks = [fetch_hazard_wp(wp, i, hazard_total_waypoints) for i, wp in enumerate(hazard_waypoints_data)]
+    hazard_waypoints_weather = await asyncio.gather(*hazard_tasks)
+    mark("alerts_fetch")
+
+    hazard_alerts = generate_hazard_alerts(
+        list(hazard_waypoints_weather),
+        departure_time,
+        total_route_miles=total_distance,
+        total_route_minutes=total_duration_minutes,
+        route_id=route_id,
+    )
+
+    await hydrate_alert_roads_from_geometry(hazard_alerts, geometry_index)
+    road_conditions = build_condition_segments(hazard_alerts, category="road")
+    weather_conditions = build_condition_segments(hazard_alerts, category="weather")
+    mark("hazard_build")
+
+    if TIMING_DEBUG:
+        logger.info("route_weather_alerts_timings", extra={"route_id": route_id, "timings_ms": timings})
+
+    return HazardAlertsResponse(
+        route_id=route_id,
+        hazard_alerts=hazard_alerts,
+        road_conditions=road_conditions,
+        weather_conditions=weather_conditions,
+        hazard_status="ready",
+        timings_ms=timings if TIMING_DEBUG else None,
+    )
+
 
 @api_router.get("/routes/history", response_model=List[SavedRoute])
 async def get_route_history():
@@ -4716,9 +4923,9 @@ async def check_notification(request: CheckNotificationRequest):
 # ==================== Free Camping Finder Endpoint ====================
 
 def _dedupe_camping_spots(spots: List[CampingSpot], precision: int = 3) -> List[CampingSpot]:
-    """Deduplicate clustered camping spots using a rounded lat/lon bucket.
+    """Deduplicate camping spots using stable place keys.
 
-    Tie-breakers (in order): higher rating, known cell coverage over unknown, then shorter distance.
+    Prefers higher rating/known coverage, then closer distance.
     """
 
     def _coverage_score(value: Optional[str]) -> int:
@@ -4730,55 +4937,30 @@ def _dedupe_camping_spots(spots: List[CampingSpot], precision: int = 3) -> List[
     def _score(spot: CampingSpot) -> tuple:
         rating = spot.rating or 0
         coverage = _coverage_score(spot.cell_coverage)
-        distance = spot.distance_miles
-        return (rating, coverage, -distance)
+        return (rating, coverage)
 
-    buckets: Dict[Any, CampingSpot] = {}
-    replaced_debug: List[str] = []
+    def _key_fn(spot: CampingSpot) -> Optional[str]:
+        if spot.latitude is not None and spot.longitude is not None:
+            return f"coord:{round(spot.latitude, precision)}:{round(spot.longitude, precision)}"
+        return _stable_place_key(spot.name, spot.latitude, spot.longitude, source_id=spot.source_id, precision=precision)
 
-    def _stable_tiebreak(candidate: CampingSpot, current: CampingSpot) -> bool:
-        """Return True if candidate should replace current when primary scores tie."""
-        cand_id = candidate.source_id or ""
-        curr_id = current.source_id or ""
+    def _prefer(candidate: CampingSpot, current: CampingSpot) -> bool:
+        cand_score = _score(candidate)
+        curr_score = _score(current)
+        if cand_score != curr_score:
+            return cand_score > curr_score
+        if candidate.distance_miles != current.distance_miles:
+            return candidate.distance_miles < current.distance_miles
+        cand_id = (candidate.source_id or "")
+        curr_id = (current.source_id or "")
         if cand_id and curr_id and cand_id != curr_id:
             return cand_id < curr_id
         cand_coord = f"{candidate.latitude:.6f},{candidate.longitude:.6f}"
         curr_coord = f"{current.latitude:.6f},{current.longitude:.6f}"
-        if cand_coord != curr_coord:
-            return cand_coord < curr_coord
-        return False  # keep first-seen if everything matches
+        return cand_coord < curr_coord
 
-    for spot in spots:
-        key = (round(spot.latitude, precision), round(spot.longitude, precision))
-        existing = buckets.get(key)
-        if existing is None:
-            buckets[key] = spot
-            continue
-
-        existing_score = _score(existing)
-        candidate_score = _score(spot)
-
-        if candidate_score > existing_score:
-            buckets[key] = spot
-            replaced_debug.append(f"bucket={key} reason=score")
-            continue
-
-        if candidate_score == existing_score and spot.distance_miles == existing.distance_miles:
-            if _stable_tiebreak(spot, existing):
-                buckets[key] = spot
-                replaced_debug.append(f"bucket={key} reason=stable_tiebreak")
-                continue
-
-    if logger.isEnabledFor(logging.DEBUG):
-        logger.debug(
-            "[camping] dedupe buckets=%d original=%d deduped=%d replacements=%s",
-            len(buckets),
-            len(spots),
-            len(buckets.values()),
-            replaced_debug,
-        )
-
-    return sorted(buckets.values(), key=lambda x: x.distance_miles)
+    deduped = _dedupe_items(spots, _key_fn, _prefer)
+    return sorted(deduped, key=lambda x: x.distance_miles)
 
 @api_router.post("/free-camping/search", response_model=FreeCampingResponse)
 async def search_free_camping(request: FreeCampingRequest):
@@ -5133,6 +5315,8 @@ async def search_dump_stations(request: DumpStationRequest):
             if tags.get("addr:postcode"):
                 address_parts.append(tags.get("addr:postcode"))
             address = ", ".join(address_parts) if address_parts else None
+            formatted_address = address
+            vicinity = tags.get("addr:city") or None
             
             # Rating (default)
             rating = 3.5
@@ -5251,6 +5435,64 @@ def _normalize_for_dedupe(name: Optional[str]) -> Optional[str]:
     return normalized or None
 
 
+def _stable_place_key(
+    name: Optional[str],
+    latitude: Optional[float],
+    longitude: Optional[float],
+    *,
+    place_id: Optional[Any] = None,
+    source_id: Optional[Any] = None,
+    precision: int = 4,
+) -> Optional[str]:
+    """Compute a stable dedupe key for places.
+
+    Priority:
+    1) explicit id/place_id/source_id
+    2) normalized name + rounded coords
+    3) coords only
+    4) normalized name only
+    """
+
+    if place_id is not None:
+        return str(place_id)
+    if source_id is not None:
+        return str(source_id)
+
+    norm = _normalize_for_dedupe(name)
+    coord = None
+    if latitude is not None and longitude is not None:
+        coord = f"{round(latitude, precision):.{precision}f},{round(longitude, precision):.{precision}f}"
+
+    if norm and coord:
+        return f"{norm}:{coord}"
+    if coord:
+        return f"coord:{coord}"
+    if norm:
+        return f"name:{norm}"
+    return None
+
+
+def _dedupe_places(items: List[T], key_fn: Callable[[T], Optional[str]], prefer_fn: Callable[[T, T], bool]) -> List[T]:
+    return _dedupe_items(items, key_fn, prefer_fn)
+
+
+T = TypeVar("T")
+
+
+def _dedupe_items(
+    items: List[T],
+    key_fn: Callable[[T], Optional[str]],
+    prefer_fn: Callable[[T, T], bool],
+) -> List[T]:
+    deduped: Dict[str, T] = {}
+    for item in items:
+        key = key_fn(item) or f"anon-{len(deduped)}"
+        existing = deduped.get(key)
+        if existing is None or prefer_fn(item, existing):
+            deduped[key] = item
+    return list(deduped.values())
+
+
 def _haversine_meters(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     # Basic haversine for short distances; adequate for ~200 m merge window
     radius_m = 6371000.0
@@ -5328,11 +5570,7 @@ def _build_stop(element: Dict[str, Any], request: OvernightSearchRequest, catego
 
 
 def _dedupe_and_limit(stops: List[OvernightStop], limit: int = 25) -> List[OvernightStop]:
-    seen: Dict[Any, OvernightStop] = {}
-    replaced_debug: List[str] = []
-
     def _score(stop: OvernightStop) -> int:
-        # Prefer named items with addresses and contact info when deduping
         score = 0
         if stop.name and stop.name.lower() not in GENERIC_PLACEHOLDERS:
             score += 2
@@ -5342,90 +5580,110 @@ def _dedupe_and_limit(stops: List[OvernightStop], limit: int = 25) -> List[Overn
             score += 1
         return score
 
-    # First pass: grid bucket to collapse extremely close points (~100 m)
-    for stop in stops:
-        key = (round(stop.latitude, 3), round(stop.longitude, 3))
-        existing = seen.get(key)
-        if existing:
-            current_score = _score(existing)
-            candidate_score = _score(stop)
-            if candidate_score > current_score:
-                seen[key] = stop
-                replaced_debug.append(f"bucket={key} reason=score")
-                continue
-            if candidate_score == current_score:
-                if stop.distance_miles < existing.distance_miles:
-                    seen[key] = stop
-                    replaced_debug.append(f"bucket={key} reason=distance")
-                    continue
-                if stop.distance_miles == existing.distance_miles:
-                    existing_id = existing.osm_id or 0
-                    candidate_id = stop.osm_id or 0
-                    if candidate_id and existing_id and candidate_id != existing_id:
-                        if candidate_id < existing_id:
-                            seen[key] = stop
-                            replaced_debug.append(f"bucket={key} reason=osm_id")
-                            continue
-                    existing_coord = f"{existing.latitude:.6f},{existing.longitude:.6f}"
-                    candidate_coord = f"{stop.latitude:.6f},{stop.longitude:.6f}"
-                    if candidate_coord < existing_coord:
-                        seen[key] = stop
-                        replaced_debug.append(f"bucket={key} reason=coord")
-            continue
-        seen[key] = stop
-
-    unique = sorted(seen.values(), key=lambda x: x.distance_miles)
-
-    # Second pass: merge by normalized name within ~200 m
-    merged: List[OvernightStop] = []
-
-    def _is_better(candidate: OvernightStop, current: OvernightStop) -> bool:
-        candidate_score = _score(candidate)
-        current_score = _score(current)
-        if candidate_score != current_score:
-            return candidate_score > current_score
-        # Tie-breaker: prefer more descriptive/longer names
-        cand_len = len(candidate.name or "")
-        curr_len = len(current.name or "")
-        if cand_len != curr_len:
-            return cand_len > curr_len
-        return False
-
-    for stop in unique:
-        norm_name = _normalize_for_dedupe(stop.name)
-        if not norm_name:
-            merged.append(stop)
-            continue
-
-        replaced = False
-        for idx, existing in enumerate(merged):
-            existing_norm = _normalize_for_dedupe(existing.name)
-            if existing_norm != norm_name:
-                continue
-
-            if _haversine_meters(stop.latitude, stop.longitude, existing.latitude, existing.longitude) <= 200.0:
-                if _is_better(stop, existing):
-                    merged[idx] = stop
-                replaced = True
-                break
-
-        if not replaced:
-            merged.append(stop)
-
-    if logger.isEnabledFor(logging.DEBUG):
-        logger.debug(
-            "[overnight] dedupe buckets=%d original=%d deduped=%d replacements=%s",
-            len(seen),
-            len(stops),
-            len(unique),
-            replaced_debug,
+    def _key_fn(stop: OvernightStop) -> Optional[str]:
+        return _stable_place_key(
+            stop.name,
+            stop.latitude,
+            stop.longitude,
+            place_id=stop.osm_id,
+            precision=4,
         )
 
-    return merged[:limit]
+    def _prefer(candidate: OvernightStop, current: OvernightStop) -> bool:
+        cand_score = _score(candidate)
+        curr_score = _score(current)
+        if cand_score != curr_score:
+            return cand_score > curr_score
+        if candidate.distance_miles != current.distance_miles:
+            return candidate.distance_miles < current.distance_miles
+        cand_len = len(candidate.name or "")
+        curr_len = len(current.name or "")
+        return cand_len > curr_len
+
+    deduped = _dedupe_items(stops, _key_fn, _prefer)
+    deduped_sorted = sorted(deduped, key=lambda x: x.distance_miles)
+    return deduped_sorted[:limit]
 
 
 def _empty_overpass_response(source: str = "overpass_unavailable") -> OvernightSearchResponse:
-    return OvernightSearchResponse(spots=[], is_premium_locked=False, ok=True, source=source)
+    return OvernightSearchResponse(spots=[], is_premium_locked=False, ok=True, source=source, error="overpass_unavailable")
+
+
+async def _fetch_overpass_first_success(
+    overpass_query: str,
+    label: str,
+    urls: List[str],
+    *,
+    overall_timeout: float = 10.0,
+    per_timeout: float = 3.5,
+    request_id: str = "",
+) -> Dict[str, Any]:
+    """Race multiple Overpass instances and return first successful payload.
+
+    Logs per-instance failures with elapsed time and request id. Cancels pending
+    tasks once a winner is found or overall timeout expires.
+    """
+
+    started = time.time()
+    request_id = request_id or uuid.uuid4().hex[:8]
+    errors: List[str] = []
+
+    async def fetch(url: str):
+        t0 = time.time()
+        try:
+            timeout = httpx.Timeout(per_timeout, connect=min(per_timeout / 2, 2.0))
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                resp = await client.post(url, data=overpass_query)
+            resp.raise_for_status()
+            elapsed_ms = int((time.time() - t0) * 1000)
+            logger.info("[%s][%s] overpass success url=%s elapsed_ms=%d", label, request_id, url, elapsed_ms)
+            return {"url": url, "data": resp.json(), "elapsed_ms": elapsed_ms}
+        except Exception as exc:  # noqa: BLE001
+            elapsed_ms = int((time.time() - t0) * 1000)
+            msg = f"[{label}][{request_id}] overpass failed url={url} elapsed_ms={elapsed_ms} err={exc}"
+            errors.append(msg)
+            logger.warning(msg)
+            raise
+
+    tasks = [asyncio.create_task(fetch(url)) for url in urls]
+    pending: set = set(tasks)
+    winner_data = None
+
+    try:
+        done, pending = await asyncio.wait(tasks, timeout=overall_timeout, return_when=asyncio.FIRST_COMPLETED)
+        if not done:
+            raise asyncio.TimeoutError(f"{label} overpass timeout after {overall_timeout}s")
+
+        winner_data = None
+        last_exc: Optional[BaseException] = None
+        for task in done:
+            if task.cancelled():
+                continue
+            exc = task.exception()
+            if exc is None:
+                winner_data = task.result()
+                break
+            last_exc = exc
+
+        if winner_data is None:
+            raise last_exc or Exception("All Overpass instances failed")
+
+        total_ms = int((time.time() - started) * 1000)
+        logger.info(
+            "[%s][%s] overpass selected url=%s total_ms=%d",
+            label,
+            request_id,
+            winner_data.get("url"),
+            total_ms,
+        )
+        return winner_data["data"]
+    finally:
+        for task in pending:
+            task.cancel()
+            with contextlib.suppress(Exception):
+                await task
+        if errors and winner_data is None:
+            logger.warning("[%s][%s] overpass all failed: %s", label, request_id, "; ".join(errors))
 
 
 async def _search_walmart_google_places(request: OvernightSearchRequest) -> List[OvernightStop]:
@@ -5594,12 +5852,22 @@ async def search_walmart(request: OvernightSearchRequest):
 
 # ==================== Cracker Barrel Overnight ====================
 
+_last_cracker_barrel_cache: Dict[str, Any] = {"ts": 0.0, "spots": []}
+
 @api_router.post("/cracker-barrel/search", response_model=OvernightSearchResponse)
 async def search_cracker_barrel(request: OvernightSearchRequest):
+    request_id = uuid.uuid4().hex[:8]
+    started = time.time()
+    overpass_urls = [
+        "https://overpass-api.de/api/interpreter",
+        "https://lz4.overpass-api.de/api/interpreter",
+        "https://z.overpass-api.de/api/interpreter",
+    ]
+
     try:
         radius_meters = int(request.radius_miles * 1609.34)
         overpass_query = f"""
-        [out:json][timeout:25];
+        [out:json][timeout:10];
         (
                     node["amenity"="restaurant"]["name"~"Cracker Barrel",i](around:{radius_meters},{request.latitude},{request.longitude});
                     way["amenity"="restaurant"]["name"~"Cracker Barrel",i](around:{radius_meters},{request.latitude},{request.longitude});
@@ -5611,7 +5879,14 @@ async def search_cracker_barrel(request: OvernightSearchRequest):
         out skel qt;
         """
 
-        osm_data = await _fetch_overpass_data(overpass_query, "Cracker Barrel")
+        osm_data = await _fetch_overpass_first_success(
+            overpass_query,
+            "CrackerBarrel",
+            overpass_urls,
+            overall_timeout=9.0,
+            per_timeout=3.5,
+            request_id=request_id,
+        )
 
         stops: List[OvernightStop] = []
         for element in osm_data.get("elements", []):
@@ -5624,16 +5899,42 @@ async def search_cracker_barrel(request: OvernightSearchRequest):
             if stop:
                 stops.append(stop)
 
-        stops.sort(key=lambda x: x.distance_miles)
+        deduped = _dedupe_and_limit(stops)
+        globals()["_last_cracker_barrel_cache"] = {"ts": time.time(), "spots": deduped}
+
+        elapsed_ms = int((time.time() - started) * 1000)
+        logger.info("[CrackerBarrel][%s] returning %d stops elapsed_ms=%d", request_id, len(deduped), elapsed_ms)
+
         return OvernightSearchResponse(
-            spots=_dedupe_and_limit(stops),
+            spots=deduped,
             is_premium_locked=False,
             ok=True,
             source="overpass",
         )
     except Exception as exc:  # noqa: BLE001
-        logger.warning("Cracker Barrel search using Overpass failed: %s", exc)
-        return _empty_overpass_response()
+        elapsed_ms = int((time.time() - started) * 1000)
+        logger.warning("[CrackerBarrel][%s] overpass unavailable after %dms: %s", request_id, elapsed_ms, exc)
+        cache = globals().get("_last_cracker_barrel_cache", {})
+        now = time.time()
+        cached_spots = cache.get("spots") or []
+        cached_ts = cache.get("ts", 0)
+        if cached_spots and now - cached_ts < 3600:
+            logger.info("[CrackerBarrel][%s] using cached fallback %d spots", request_id, len(cached_spots))
+            return OvernightSearchResponse(
+                spots=cached_spots,
+                is_premium_locked=False,
+                ok=True,
+                source="cached_fallback",
+                error="overpass_unavailable",
+            )
+
+        return OvernightSearchResponse(
+            spots=[],
+            is_premium_locked=False,
+            ok=True,
+            source="overpass_unavailable",
+            error="overpass_unavailable",
+        )
 
 
 # ==================== Boondockers Overnight (alias to free/low-cost camping) ====================
@@ -5860,7 +6161,8 @@ async def search_last_chance_supplies(request: LastChanceRequest):
             rating = 3.8
             
             supplies.append(SupplyPoint(
-                name=name,
+                name=name or "Store",
+                title=name or None,
                 type=supply_type,
                 subtype=subtype,
                 distance_miles=round(distance_miles, 1),
@@ -5872,13 +6174,18 @@ async def search_last_chance_supplies(request: LastChanceRequest):
                 amenities=amenities,
                 rating=rating,
                 address=address,
+                formatted_address=formatted_address,
+                vicinity=vicinity,
                 website=website
             ))
         
-        # Sort by distance
+        # Dedupe, sort, limit
+        supplies = _dedupe_places(
+            supplies,
+            lambda s: _stable_place_key(s.name, s.latitude, s.longitude, place_id=None, source_id=None, precision=4),
+            lambda cand, curr: cand.distance_miles < curr.distance_miles,
+        )
         supplies.sort(key=lambda x: x.distance_miles)
-        
-        # Limit to 30 results
         supplies = supplies[:30]
         
         logger.info(f"Last chance supply search completed: found {len(supplies)} locations from OSM within {request.radius_miles} miles")
@@ -6240,6 +6547,12 @@ async def search_truck_stops(request: TruckStopRequest):
                 hours=hours,
             ))
         
+        stops = _dedupe_items(
+            stops,
+            lambda s: _stable_place_key(s.name, s.latitude, s.longitude, precision=4),
+            lambda cand, curr: cand.distance_miles < curr.distance_miles,
+        )
+
         stops.sort(key=lambda x: x.distance_miles)
         stops = stops[:30]
         
@@ -6374,6 +6687,12 @@ async def search_truck_parking(request: TruckParkingRequest):
                 fee=fee,
             ))
         
+        spots = _dedupe_items(
+            spots,
+            lambda s: _stable_place_key(s.name, s.latitude, s.longitude, precision=4),
+            lambda cand, curr: cand.distance_miles < curr.distance_miles,
+        )
+
         spots.sort(key=lambda x: x.distance_miles)
         spots = spots[:20]
         
@@ -6487,6 +6806,12 @@ async def search_truck_services(request: TruckServiceRequest):
                 hours=tags.get('opening_hours'),
             ))
         
+        services = _dedupe_items(
+            services,
+            lambda s: _stable_place_key(s.name, s.latitude, s.longitude, precision=4),
+            lambda cand, curr: cand.distance_miles < curr.distance_miles,
+        )
+
         services.sort(key=lambda x: x.distance_miles)
         services = services[:15]
         
@@ -6571,6 +6896,12 @@ async def search_weigh_stations(request: WeighStationRequest):
                 phone=tags.get('phone'),
             ))
         
+        stations = _dedupe_items(
+            stations,
+            lambda s: _stable_place_key(s.name, s.latitude, s.longitude, precision=4),
+            lambda cand, curr: cand.distance_miles < curr.distance_miles,
+        )
+
         stations.sort(key=lambda x: x.distance_miles)
         stations = stations[:10]
         

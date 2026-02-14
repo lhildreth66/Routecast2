@@ -20,6 +20,10 @@ interface SupplyPoint {
   phone: string;
   amenities: string[];
   rating: number;
+  title?: string;
+  formatted_address?: string;
+  vicinity?: string;
+  poi?: { name?: string };
   address?: string;
   website?: string;
 }
@@ -257,10 +261,12 @@ export default function LastChanceScreen() {
             
             {filteredSupplies.map((supply, index) => {
               const isExpanded = expandedSupplies.has(index);
+              const displayName = supply.name ?? supply.title ?? supply.poi?.name ?? 'Store';
+              const subtitle = supply.vicinity ?? supply.formatted_address ?? supply.address ?? '';
               
               return (
                 <TouchableOpacity
-                  key={`${supply.name}-${supply.latitude}-${supply.longitude}-${index}`}
+                  key={`${displayName}-${supply.latitude}-${supply.longitude}-${index}`}
                   style={[styles.supplyCard, isExpanded && styles.supplyCardExpanded]}
                   onPress={() => toggleSupplyExpand(index)}
                   activeOpacity={0.8}
@@ -270,13 +276,18 @@ export default function LastChanceScreen() {
                       <Ionicons name={getTypeIcon(supply.type) as any} size={24} color="#fff" />
                     </View>
                     <View style={styles.supplyHeaderMiddle}>
-                      <Text style={styles.supplyName}>{supply.name}</Text>
+                      <Text style={styles.supplyName}>{displayName}</Text>
                       <View style={styles.supplyTypeRow}>
                         <View style={[styles.supplyTypeBadge, { backgroundColor: getTypeColor(supply.type) + '33' }]}>
                           <Text style={[styles.supplyTypeBadgeText, { color: getTypeColor(supply.type) }]}>
                             {supply.subtype}
                           </Text>
                         </View>
+                        {subtitle ? (
+                          <Text style={[styles.quickInfoText, { marginLeft: 8 }]} numberOfLines={1}>
+                            {subtitle}
+                          </Text>
+                        ) : null}
                       </View>
                     </View>
                     <Ionicons 

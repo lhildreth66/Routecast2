@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -213,6 +213,10 @@ interface RouteData {
   reroute_reason: string | null;
   trucker_warnings: string[];
   ai_summary: string | null;
+  hazard_status?: string;
+  road_conditions?: any[];
+  weather_conditions?: any[];
+  timings_ms?: Record<string, number>;
 }
 
 const sampleRoutePoints = (waypoints: WaypointWeather[], intervalMiles = 8) => {
@@ -504,6 +508,8 @@ export default function RouteScreen() {
   const params = useLocalSearchParams();
   const [routeData, setRouteData] = useState<RouteData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [hazardLoading, setHazardLoading] = useState(false);
+  const [perfMetrics, setPerfMetrics] = useState<any | null>(null);
   const [activeTab, setActiveTab] = useState<'conditions' | 'directions' | 'alerts'>('conditions');
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [pushToken, setPushToken] = useState<string | null>(null);
@@ -531,9 +537,40 @@ export default function RouteScreen() {
     }
     setExpandedCards(newExpanded);
   };
+
+  const fetchHazardsOnce = useCallback(async () => {
+    if (!routeData || routeData.hazard_status !== 'pending' || hazardLoading) return;
+    setHazardLoading(true);
+    try {
+      const resp = await axios.get(buildUrl(`route/weather/alerts/${routeData.id}`));
+      const data = resp.data || {};
+      setRouteData((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          hazard_alerts: filterRecentAlerts(data.hazard_alerts || [], 2 * 60 * 60 * 1000, 10),
+          road_conditions: data.road_conditions || prev.road_conditions,
+          weather_conditions: data.weather_conditions || prev.weather_conditions,
+          hazard_status: data.hazard_status || 'ready',
+        };
+      });
+    } catch (err) {
+      console.warn('[route] hazard fetch failed', err);
+    } finally {
+      setHazardLoading(false);
+    }
+  }, [routeData, hazardLoading]);
   
 
   useEffect(() => {
+    const perfParam = Array.isArray(params.perf) ? params.perf[0] : (params.perf as string | undefined);
+    if (perfParam) {
+        try {
+            setPerfMetrics(JSON.parse(perfParam));
+        } catch (e) {
+            console.warn('Error parsing perf metrics:', e);
+        }
+    }
     if (params.routeData) {
       try {
         const data = JSON.parse(params.routeData as string);
@@ -547,7 +584,7 @@ export default function RouteScreen() {
       }
     }
     setLoading(false);
-  }, [params.routeData]);
+  }, [params.routeData, params.perf]);
 
   useEffect(() => {
     const clearStaleAlertsCache = async () => {
@@ -564,6 +601,30 @@ export default function RouteScreen() {
 
     clearStaleAlertsCache();
   }, []);
+
+  useEffect(() => {
+    if (!routeData) return;
+    const renderTs = Date.now();
+    if (perfMetrics) {
+      const { submit, request, response } = perfMetrics;
+      console.log('[perf][route] results rendered', {
+        submit,
+        request,
+        response,
+        render: renderTs,
+        ms_submit_to_render: submit ? renderTs - submit : undefined,
+        ms_response_to_render: response ? renderTs - response : undefined,
+      });
+    } else {
+      console.log('[perf][route] results rendered', { render: renderTs });
+    }
+  }, [routeData, perfMetrics]);
+
+  useEffect(() => {
+    if (routeData?.hazard_status === 'pending') {
+      fetchHazardsOnce();
+    }
+  }, [routeData?.hazard_status, fetchHazardsOnce]);
 
   useEffect(() => {
     if (requestedTab === 'alerts') {
@@ -1243,6 +1304,12 @@ export default function RouteScreen() {
                   </TouchableOpacity>
                 );
               })
+            ) : routeData?.hazard_status === 'pending' || hazardLoading ? (
+              <View style={styles.noAlerts}>
+                <ActivityIndicator size="small" color="#eab308" />
+                <Text style={styles.noAlertsTitle}>Loading alerts…</Text>
+                <Text style={styles.noAlertsText}>Fetching NWS hazards for this route</Text>
+              </View>
             ) : (
               <View style={styles.noAlerts}>
                 <Ionicons name="checkmark-circle" size={64} color="#22c55e" />

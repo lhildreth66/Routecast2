@@ -1,4 +1,4 @@
-import React, { useState, useEffect, forwardRef, useCallback } from 'react';
+import React, { useState, useEffect, forwardRef, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -90,6 +90,7 @@ export default function HomeScreen() {
   const [origin, setOrigin] = useState('');
   const [destination, setDestination] = useState('');
   const [loading, setLoading] = useState(false);
+  const perfRef = useRef<{ submit?: number; request?: number; response?: number }>({});
   const [error, setError] = useState('');
   const [alertsEnabled, setAlertsEnabled] = useState(false);
   const [recentRoutes, setRecentRoutes] = useState<SavedRoute[]>([]);
@@ -559,6 +560,7 @@ export default function HomeScreen() {
 
     Keyboard.dismiss();
     setLoading(true);
+    perfRef.current.submit = Date.now();
     setError('');
 
     let requestData: any;
@@ -600,6 +602,7 @@ export default function HomeScreen() {
         requestData.departure_time = departureTime.toISOString();
       }
 
+      perfRef.current.request = Date.now();
       console.log('[route-request]', {
         endpoint: buildUrl('route/weather'),
         mode: resolvedMode,
@@ -607,16 +610,23 @@ export default function HomeScreen() {
         trucker_mode: truckerMode,
         truckProfile,
         boondockerPrefs,
+        perf: { submit: perfRef.current.submit, request: perfRef.current.request },
       });
 
       const response = await axios.post(buildUrl('route/weather'), requestData);
+      perfRef.current.response = Date.now();
+      console.log('[route-response]', {
+        endpoint: buildUrl('route/weather'),
+        ms_total: perfRef.current.response - (perfRef.current.submit || perfRef.current.response),
+        ms_to_response: perfRef.current.response - (perfRef.current.request || perfRef.current.response),
+      });
 
       // Cache the route for offline
       await AsyncStorage.setItem('lastRoute', JSON.stringify(response.data));
 
       router.push({
         pathname: '/route',
-        params: { routeData: JSON.stringify(response.data) },
+        params: { routeData: JSON.stringify(response.data), perf: JSON.stringify(perfRef.current) },
       });
     } catch (err: any) {
       const status = err?.response?.status;
@@ -1504,6 +1514,22 @@ export default function HomeScreen() {
                 </View>
               ) : null}
 
+              {loading && (
+                <View style={styles.skeletonContainer}>
+                  <View style={styles.skeletonRow}>
+                    <View style={styles.skeletonBadge} />
+                    <View style={styles.skeletonLineLong} />
+                  </View>
+                  <View style={styles.skeletonRow}>
+                    <View style={styles.skeletonBadge} />
+                    <View style={styles.skeletonLineShort} />
+                  </View>
+                  <View style={styles.skeletonRow}>
+                    <View style={styles.skeletonLineLong} />
+                  </View>
+                </View>
+              )}
+
               {/* Check Route Button */}
               <TouchableOpacity
                 style={[styles.button, loading && styles.buttonDisabled]}
@@ -2164,6 +2190,36 @@ const styles = StyleSheet.create({
     color: '#ef4444',
     fontSize: 13,
     flex: 1,
+  },
+  skeletonContainer: {
+    backgroundColor: '#1f2937',
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 10,
+    gap: 8,
+  },
+  skeletonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  skeletonBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 8,
+    backgroundColor: '#334155',
+  },
+  skeletonLineLong: {
+    flex: 1,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#334155',
+  },
+  skeletonLineShort: {
+    width: 120,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#334155',
   },
   button: {
     backgroundColor: '#eab308',
