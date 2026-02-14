@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
@@ -252,12 +253,31 @@ class NOAAWeatherProvider(WeatherProvider):
 
 class NOAAAlertsProvider(AlertsProvider):
     async def get_alerts(self, lat: float, lon: float) -> List[Dict[str, Any]]:
+        started = time.perf_counter()
+        status_code: Optional[int] = None
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
                 url = f"https://api.weather.gov/alerts?point={lat:.4f},{lon:.4f}"
                 response = await client.get(url, headers=NOAA_HEADERS)
+                status_code = response.status_code
+                elapsed_ms = round((time.perf_counter() - started) * 1000.0, 2)
+                logger.info(
+                    "nws_alerts_fetch",
+                    extra={
+                        "lat": round(lat, 4),
+                        "lon": round(lon, 4),
+                        "status": status_code,
+                        "elapsed_ms": elapsed_ms,
+                    },
+                )
+
                 if response.status_code != 200:
+                    logger.warning(
+                        "nws_alerts_http_error",
+                        extra={"lat": round(lat, 4), "lon": round(lon, 4), "status": status_code},
+                    )
                     return []
+
                 data = response.json()
                 alerts: List[Dict[str, Any]] = []
                 for feature in data.get("features", []):
@@ -277,7 +297,18 @@ class NOAAAlertsProvider(AlertsProvider):
                         }
                     )
                 return alerts
-        except Exception:
+        except Exception as exc:  # noqa: BLE001
+            elapsed_ms = round((time.perf_counter() - started) * 1000.0, 2)
+            logger.warning(
+                "nws_alerts_fetch_failed",
+                extra={
+                    "lat": round(lat, 4),
+                    "lon": round(lon, 4),
+                    "status": status_code,
+                    "elapsed_ms": elapsed_ms,
+                    "error": str(exc),
+                },
+            )
             return []
 
 

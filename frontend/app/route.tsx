@@ -508,7 +508,9 @@ export default function RouteScreen() {
   const params = useLocalSearchParams();
   const [routeData, setRouteData] = useState<RouteData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [hazardLoading, setHazardLoading] = useState(false);
+  const [alerts, setAlerts] = useState<HazardAlert[]>([]);
+  const [alertsStatus, setAlertsStatus] = useState<'idle' | 'pending' | 'ready' | 'error'>('idle');
+  const [alertsError, setAlertsError] = useState<string | null>(null);
   const [perfMetrics, setPerfMetrics] = useState<any | null>(null);
   const [activeTab, setActiveTab] = useState<'conditions' | 'directions' | 'alerts'>('conditions');
   const [isSpeaking, setIsSpeaking] = useState(false);
@@ -517,8 +519,8 @@ export default function RouteScreen() {
   const alertIdParam = Array.isArray(params.alertId) ? params.alertId[0] : (params.alertId as string | undefined);
   const requestedTab = Array.isArray(params.tab) ? params.tab[0] : (params.tab as string | undefined);
   const filteredAlerts = useMemo(
-    () => filterRecentAlerts(routeData?.hazard_alerts || []),
-    [routeData?.hazard_alerts]
+    () => filterRecentAlerts(alerts),
+    [alerts]
   );
   
   // Radar map state
@@ -538,28 +540,42 @@ export default function RouteScreen() {
     setExpandedCards(newExpanded);
   };
 
-  const fetchHazardsOnce = useCallback(async () => {
-    if (!routeData || routeData.hazard_status !== 'pending' || hazardLoading) return;
-    setHazardLoading(true);
-    try {
-      const resp = await axios.get(buildUrl(`route/weather/alerts/${routeData.id}`));
-      const data = resp.data || {};
-      setRouteData((prev) => {
-        if (!prev) return prev;
-        return {
-          ...prev,
-          hazard_alerts: filterRecentAlerts(data.hazard_alerts || [], 2 * 60 * 60 * 1000, 10),
-          road_conditions: data.road_conditions || prev.road_conditions,
-          weather_conditions: data.weather_conditions || prev.weather_conditions,
-          hazard_status: data.hazard_status || 'ready',
-        };
-      });
-    } catch (err) {
-      console.warn('[route] hazard fetch failed', err);
-    } finally {
-      setHazardLoading(false);
-    }
-  }, [routeData, hazardLoading]);
+  const fetchAlertsForRoute = useCallback(
+    async (routeId?: string) => {
+      if (!routeId) return;
+      setAlertsStatus('pending');
+      setAlertsError(null);
+      try {
+        const resp = await axios.get(buildUrl(`route/weather/alerts/${routeId}`));
+        const data = resp.data || {};
+        const status = (data.status || data.hazard_status || 'ready') as 'pending' | 'ready' | 'error';
+        const hydratedAlerts = filterRecentAlerts(data.alerts || data.hazard_alerts || [], 2 * 60 * 60 * 1000, 10);
+
+        setAlerts(hydratedAlerts);
+        setAlertsStatus(status);
+        if (data.error) {
+          setAlertsError(typeof data.error === 'string' ? data.error : 'Alerts unavailable');
+        }
+
+        setRouteData((prev) => {
+          if (!prev || prev.id !== routeId) return prev;
+          return {
+            ...prev,
+            hazard_alerts: hydratedAlerts,
+            hazard_status: status,
+            road_conditions: data.road_conditions || prev.road_conditions,
+            weather_conditions: data.weather_conditions || prev.weather_conditions,
+          };
+        });
+      } catch (err) {
+        console.warn('[route] alerts fetch failed', err);
+        setAlerts([]);
+        setAlertsStatus('error');
+        setAlertsError('Unable to load alerts');
+      }
+    },
+    [setRouteData]
+  );
   
 
   useEffect(() => {
@@ -579,6 +595,8 @@ export default function RouteScreen() {
           hazard_alerts: filterRecentAlerts(data?.hazard_alerts || [], 2 * 60 * 60 * 1000, 10),
         };
         setRouteData(sanitized);
+        setAlerts(sanitized.hazard_alerts || []);
+        setAlertsStatus((sanitized.hazard_status as 'pending' | 'ready' | 'error') || 'pending');
       } catch (e) {
         console.error('Error parsing route data:', e);
       }
@@ -621,10 +639,16 @@ export default function RouteScreen() {
   }, [routeData, perfMetrics]);
 
   useEffect(() => {
-    if (routeData?.hazard_status === 'pending') {
-      fetchHazardsOnce();
+    if (routeData?.id) {
+      fetchAlertsForRoute(routeData.id);
     }
-  }, [routeData?.hazard_status, fetchHazardsOnce]);
+  }, [routeData?.id, fetchAlertsForRoute]);
+
+  useEffect(() => {
+    if (activeTab === 'alerts' && alertsStatus === 'idle' && routeData?.id) {
+      fetchAlertsForRoute(routeData.id);
+    }
+  }, [activeTab, alertsStatus, routeData?.id, fetchAlertsForRoute]);
 
   useEffect(() => {
     if (requestedTab === 'alerts') {
@@ -1304,17 +1328,23 @@ export default function RouteScreen() {
                   </TouchableOpacity>
                 );
               })
-            ) : routeData?.hazard_status === 'pending' || hazardLoading ? (
+            ) : alertsStatus === 'pending' ? (
               <View style={styles.noAlerts}>
                 <ActivityIndicator size="small" color="#eab308" />
                 <Text style={styles.noAlertsTitle}>Loading alerts…</Text>
-                <Text style={styles.noAlertsText}>Fetching NWS hazards for this route</Text>
+                <Text style={styles.noAlertsText}>Fetching NWS alerts for this route</Text>
+              </View>
+            ) : alertsStatus === 'error' ? (
+              <View style={styles.noAlerts}>
+                <Ionicons name="alert-circle" size={48} color="#f97316" />
+                <Text style={styles.noAlertsTitle}>Alerts unavailable</Text>
+                <Text style={styles.noAlertsText}>{alertsError || 'Unable to load alerts right now'}</Text>
               </View>
             ) : (
               <View style={styles.noAlerts}>
                 <Ionicons name="checkmark-circle" size={64} color="#22c55e" />
                 <Text style={styles.noAlertsTitle}>All Clear!</Text>
-                <Text style={styles.noAlertsText}>No significant hazards on your route</Text>
+                <Text style={styles.noAlertsText}>No active alerts for this route</Text>
               </View>
             )}
           </View>

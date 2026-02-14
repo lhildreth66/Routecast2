@@ -544,9 +544,12 @@ class SavedRoute(BaseModel):
 class HazardAlertsResponse(BaseModel):
     route_id: str
     hazard_alerts: List[HazardAlert]
+    alerts: List[HazardAlert] = []
     road_conditions: List[ConditionSegment] = []
     weather_conditions: List[ConditionSegment] = []
     hazard_status: str = "ready"
+    status: str = "ready"
+    error: Optional[str] = None
     timings_ms: Optional[Dict[str, float]] = None
 
 class FavoriteRouteRequest(BaseModel):
@@ -3566,10 +3569,20 @@ async def get_route_weather(request: RouteRequest):
 
 @api_router.get("/route/weather/alerts/{route_id}", response_model=HazardAlertsResponse)
 async def get_route_weather_alerts(route_id: str):
-    """Compute hazard alerts in a single follow-up call using cached context."""
+    """Compute hazard/NWS alerts in a single follow-up call using cached context."""
     ctx = get_route_context(route_id)
     if not ctx:
-        raise HTTPException(status_code=404, detail="Route context expired or missing")
+        logger.warning("route_alerts_context_missing", extra={"route_id": route_id})
+        return HazardAlertsResponse(
+            route_id=route_id,
+            hazard_alerts=[],
+            alerts=[],
+            road_conditions=[],
+            weather_conditions=[],
+            hazard_status="error",
+            status="error",
+            error="Route context expired or missing",
+        )
 
     t0 = time.perf_counter()
     timings: Dict[str, float] = {}
@@ -3579,7 +3592,17 @@ async def get_route_weather_alerts(route_id: str):
 
     hazard_waypoints_data = ctx.get("hazard_waypoints", [])
     if not hazard_waypoints_data:
-        raise HTTPException(status_code=400, detail="No hazard waypoints available")
+        logger.warning("route_alerts_missing_waypoints", extra={"route_id": route_id})
+        return HazardAlertsResponse(
+            route_id=route_id,
+            hazard_alerts=[],
+            alerts=[],
+            road_conditions=[],
+            weather_conditions=[],
+            hazard_status="error",
+            status="error",
+            error="No hazard waypoints available",
+        )
 
     try:
         departure_time = datetime.fromisoformat(ctx.get("departure_time"))
@@ -3599,34 +3622,70 @@ async def get_route_weather_alerts(route_id: str):
         alerts = await get_noaa_alerts(wp.lat, wp.lon)
         return WaypointWeather(waypoint=wp, weather=weather, alerts=alerts)
 
-    hazard_tasks = [fetch_hazard_wp(wp, i, hazard_total_waypoints) for i, wp in enumerate(hazard_waypoints_data)]
-    hazard_waypoints_weather = await asyncio.gather(*hazard_tasks)
-    mark("alerts_fetch")
+    try:
+        logger.info(
+            "route_alerts_fetch_start",
+            extra={"route_id": route_id, "waypoints": hazard_total_waypoints},
+        )
+        hazard_tasks = [fetch_hazard_wp(wp, i, hazard_total_waypoints) for i, wp in enumerate(hazard_waypoints_data)]
+        hazard_waypoints_weather = await asyncio.gather(*hazard_tasks)
+        mark("alerts_fetch")
 
-    hazard_alerts = generate_hazard_alerts(
-        list(hazard_waypoints_weather),
-        departure_time,
-        total_route_miles=total_distance,
-        total_route_minutes=total_duration_minutes,
-        route_id=route_id,
-    )
+        hazard_alerts = generate_hazard_alerts(
+            list(hazard_waypoints_weather),
+            departure_time,
+            total_route_miles=total_distance,
+            total_route_minutes=total_duration_minutes,
+            route_id=route_id,
+        )
 
-    await hydrate_alert_roads_from_geometry(hazard_alerts, geometry_index)
-    road_conditions = build_condition_segments(hazard_alerts, category="road")
-    weather_conditions = build_condition_segments(hazard_alerts, category="weather")
-    mark("hazard_build")
+        await hydrate_alert_roads_from_geometry(hazard_alerts, geometry_index)
+        road_conditions = build_condition_segments(hazard_alerts, category="road")
+        weather_conditions = build_condition_segments(hazard_alerts, category="weather")
+        mark("hazard_build")
 
-    if TIMING_DEBUG:
-        logger.info("route_weather_alerts_timings", extra={"route_id": route_id, "timings_ms": timings})
+        status_value = "ready"
 
-    return HazardAlertsResponse(
-        route_id=route_id,
-        hazard_alerts=hazard_alerts,
-        road_conditions=road_conditions,
-        weather_conditions=weather_conditions,
-        hazard_status="ready",
-        timings_ms=timings if TIMING_DEBUG else None,
-    )
+        logger.info(
+            "route_alerts_ready",
+            extra={
+                "route_id": route_id,
+                "alerts_count": len(hazard_alerts),
+                "nws_requests": hazard_total_waypoints,
+                "ms_fetch": timings.get("alerts_fetch"),
+                "ms_total": timings.get("hazard_build"),
+            },
+        )
+
+        if TIMING_DEBUG:
+            logger.info(
+                "route_weather_alerts_timings",
+                extra={"route_id": route_id, "timings_ms": timings},
+            )
+
+        return HazardAlertsResponse(
+            route_id=route_id,
+            hazard_alerts=hazard_alerts,
+            alerts=hazard_alerts,
+            road_conditions=road_conditions,
+            weather_conditions=weather_conditions,
+            hazard_status=status_value,
+            status=status_value,
+            timings_ms=timings if TIMING_DEBUG else None,
+        )
+    except Exception as exc:
+        logger.error("route_alerts_fetch_failed", exc_info=True, extra={"route_id": route_id})
+        return HazardAlertsResponse(
+            route_id=route_id,
+            hazard_alerts=[],
+            alerts=[],
+            road_conditions=[],
+            weather_conditions=[],
+            hazard_status="error",
+            status="error",
+            error=str(exc),
+            timings_ms=timings if TIMING_DEBUG else None,
+        )
 
 
 @api_router.get("/routes/history", response_model=List[SavedRoute])
