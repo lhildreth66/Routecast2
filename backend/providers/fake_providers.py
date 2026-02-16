@@ -112,6 +112,11 @@ class FakeAlertsProvider(AlertsProvider, _FixtureLoader):
                 return point.get("alerts", [])
         return []
 
+    async def get_alerts_area(self, area: str) -> List[Dict[str, Any]]:
+        # Demo mode: return all alerts tagged with the requested area code if present.
+        area_key = (area or "").upper()
+        return [a for a in self.data.get("area_alerts", []) if a.get("area") == area_key]
+
 
 class FakeElevationProvider(ElevationProvider, _FixtureLoader):
     def __init__(self) -> None:

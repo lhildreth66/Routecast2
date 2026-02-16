@@ -36,6 +36,9 @@ class AlertsProvider(Protocol):
     async def get_alerts(self, lat: float, lon: float) -> List[Dict[str, Any]]:
         ...
 
+    async def get_alerts_area(self, area: str) -> List[Dict[str, Any]]:
+        ...
+
 
 class ElevationProvider(Protocol):
     async def get_elevation(self, lat: float, lon: float) -> Optional[float]:

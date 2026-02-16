@@ -252,6 +252,57 @@ class NOAAWeatherProvider(WeatherProvider):
 
 
 class NOAAAlertsProvider(AlertsProvider):
+    async def get_alerts_area(self, area: str) -> List[Dict[str, Any]]:
+        started = time.perf_counter()
+        status_code: Optional[int] = None
+        area_code = (area or "").upper() or "AK"
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                url = f"https://api.weather.gov/alerts/active?area={area_code}"
+                response = await client.get(url, headers=NOAA_HEADERS)
+                status_code = response.status_code
+                elapsed_ms = round((time.perf_counter() - started) * 1000.0, 2)
+                logger.info(
+                    "nws_alerts_fetch",
+                    extra={
+                        "scope": f"area_{area_code}",
+                        "status": status_code,
+                        "elapsed_ms": elapsed_ms,
+                    },
+                )
+
+                if response.status_code != 200:
+                    logger.warning(
+                        "nws_alerts_http_error",
+                        extra={"scope": f"area_{area_code}", "status": status_code},
+                    )
+                    return []
+
+                data = response.json()
+                features = data.get("features", [])
+                logger.info(
+                    "nws_alerts_features",
+                    extra={
+                        "scope": f"area_{area_code}",
+                        "status": status_code,
+                        "features": len(features),
+                        "first_event": (features[0].get("properties", {}).get("event") if features else None),
+                    },
+                )
+                return features
+        except Exception as exc:  # noqa: BLE001
+            elapsed_ms = round((time.perf_counter() - started) * 1000.0, 2)
+            logger.warning(
+                "nws_alerts_fetch_failed",
+                extra={
+                    "scope": f"area_{area_code}",
+                    "status": status_code,
+                    "elapsed_ms": elapsed_ms,
+                    "error": str(exc),
+                },
+            )
+            return []
+
     async def get_alerts(self, lat: float, lon: float) -> List[Dict[str, Any]]:
         started = time.perf_counter()
         status_code: Optional[int] = None

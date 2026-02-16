@@ -1180,13 +1180,97 @@ async def get_noaa_weather(lat: float, lon: float) -> Optional[WeatherData]:
         return None
 
 
+def _normalize_noaa_alerts(raw_alerts: List[Dict[str, Any]]) -> List[WeatherAlert]:
+    alerts: List[WeatherAlert] = []
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(hours=12)
+
+    for alert in raw_alerts:
+        onset_str = alert.get('onset')
+        expires_str = alert.get('expires')
+        effective_str = alert.get('effective')
+        ends_str = alert.get('ends')
+        sent_str = alert.get('sent')
+        instruction = alert.get('instruction')
+        summary = alert.get('summary')
+        urgency = alert.get('urgency')
+        sent_dt = None
+        if sent_str:
+            try:
+                sent_dt = datetime.fromisoformat(sent_str.replace('Z', '+00:00')).astimezone(timezone.utc)
+            except Exception:
+                sent_dt = None
+        if not sent_dt or sent_dt < cutoff:
+            continue
+
+        is_active = True
+        try:
+            start_time = None
+            if onset_str:
+                start_time = datetime.fromisoformat(onset_str.replace('Z', '+00:00'))
+            elif effective_str:
+                start_time = datetime.fromisoformat(effective_str.replace('Z', '+00:00'))
+
+            end_time = None
+            if expires_str:
+                end_time = datetime.fromisoformat(expires_str.replace('Z', '+00:00'))
+            elif ends_str:
+                end_time = datetime.fromisoformat(ends_str.replace('Z', '+00:00'))
+
+            if start_time and end_time:
+                time_since_start = (now - start_time).total_seconds() / 3600
+                is_expired = now > end_time
+                is_active = time_since_start <= 12 and not is_expired
+        except Exception:
+            pass
+
+        if is_active and sent_dt >= cutoff:
+            alerts.append(
+                WeatherAlert(
+                    id=alert.get('id', str(uuid.uuid4())),
+                    headline=alert.get('headline', 'Weather Alert'),
+                    severity=alert.get('severity', 'Unknown'),
+                    event=alert.get('event', 'Weather Event'),
+                    description=alert.get('description', '')[:500],
+                    instruction=instruction,
+                    summary=summary,
+                    urgency=urgency,
+                    sent=sent_str,
+                    issued=effective_str or sent_str,
+                    areas=alert.get('areas'),
+                    onset=onset_str,
+                    expires=expires_str,
+                    effective=effective_str,
+                    ends=ends_str,
+                )
+            )
+
+    def _ts(a: WeatherAlert):
+        for candidate in [a.sent, a.issued, a.effective, a.onset, a.expires]:
+            if candidate:
+                try:
+                    return datetime.fromisoformat(candidate.replace('Z', '+00:00'))
+                except Exception:
+                    continue
+        return datetime.min
+
+    deduped: List[WeatherAlert] = []
+    seen = set()
+    for alert in alerts:
+        key = ((alert.id or '').lower(), (alert.event or '').lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(alert)
+
+    deduped.sort(key=_ts, reverse=True)
+    return deduped[:10]
+
+
 async def get_noaa_alerts(lat: float, lon: float) -> List[WeatherAlert]:
     """Get alerts using active provider (NOAA in prod, fixtures in demo)."""
     try:
         raw_alerts = await get_providers().alerts.get_alerts(lat, lon)
-        alerts: List[WeatherAlert] = []
-        now = datetime.now(timezone.utc)
-        cutoff = now - timedelta(hours=12)
 
         if ALERT_DEBUG:
             logger.info(
@@ -1198,89 +1282,21 @@ async def get_noaa_alerts(lat: float, lon: float) -> List[WeatherAlert]:
                 },
             )
 
-        for alert in raw_alerts:
-            # Parse timestamps to filter active alerts
-            onset_str = alert.get('onset')
-            expires_str = alert.get('expires')
-            effective_str = alert.get('effective')
-            ends_str = alert.get('ends')
-            sent_str = alert.get('sent')
-            instruction = alert.get('instruction')
-            summary = alert.get('summary')
-            urgency = alert.get('urgency')
-            sent_dt = None
-            if sent_str:
-                try:
-                    sent_dt = datetime.fromisoformat(sent_str.replace('Z', '+00:00')).astimezone(timezone.utc)
-                except Exception:
-                    sent_dt = None
-            # Drop alerts without a sent timestamp or significantly stale
-            if not sent_dt:
-                continue
-            if sent_dt < cutoff:
-                continue
-            
-            # Determine if alert is currently active
-            is_active = True
-            try:
-                # Use onset or effective as start time
-                start_time = None
-                if onset_str:
-                    start_time = datetime.fromisoformat(onset_str.replace('Z', '+00:00'))
-                elif effective_str:
-                    start_time = datetime.fromisoformat(effective_str.replace('Z', '+00:00'))
-                
-                # Use expires or ends as end time
-                end_time = None
-                if expires_str:
-                    end_time = datetime.fromisoformat(expires_str.replace('Z', '+00:00'))
-                elif ends_str:
-                    end_time = datetime.fromisoformat(ends_str.replace('Z', '+00:00'))
-                
-                # Only include alerts that are active now or within next 12 hours
-                if start_time and end_time:
-                    # Filter to alerts starting within last 12 hours and not yet expired
-                    time_since_start = (now - start_time).total_seconds() / 3600  # hours
-                    is_expired = now > end_time
-                    is_active = time_since_start <= 12 and not is_expired
-            except:
-                # If timestamp parsing fails, include the alert
-                pass
-            
-            if is_active and sent_dt >= cutoff:
-                alerts.append(
-                    WeatherAlert(
-                        id=alert.get('id', str(uuid.uuid4())),
-                        headline=alert.get('headline', 'Weather Alert'),
-                        severity=alert.get('severity', 'Unknown'),
-                        event=alert.get('event', 'Weather Event'),
-                            description=alert.get('description', '')[:500],
-                            instruction=instruction,
-                            summary=summary,
-                            urgency=urgency,
-                            sent=sent_str,
-                            issued=effective_str or sent_str,
-                        areas=alert.get('areas'),
-                        onset=onset_str,
-                        expires=expires_str,
-                        effective=effective_str,
-                        ends=ends_str,
-                    )
-                )
-        # Sort newest first by sent/issued/effective and cap at 10
-        def _ts(a: WeatherAlert):
-            for candidate in [a.sent, a.issued, a.effective, a.onset, a.expires]:
-                if candidate:
-                    try:
-                        return datetime.fromisoformat(candidate.replace('Z', '+00:00'))
-                    except Exception:
-                        continue
-            return datetime.min
-
-        alerts.sort(key=_ts, reverse=True)
-        return alerts[:10]
+        return _normalize_noaa_alerts(raw_alerts)
     except Exception as e:
         logger.error(f"Alerts provider error for {lat},{lon}: {e}")
+        return []
+
+
+async def get_noaa_alerts_area(area: str) -> List[WeatherAlert]:
+    try:
+        provider = get_providers().alerts
+        if not hasattr(provider, "get_alerts_area"):
+            return []
+        raw_alerts = await provider.get_alerts_area(area)
+        return _normalize_noaa_alerts(raw_alerts)
+    except Exception as e:
+        logger.error(f"Alerts provider area error for {area}: {e}")
         return []
 
 def generate_packing_suggestions(waypoints_weather: List[WaypointWeather]) -> List[PackingSuggestion]:
@@ -3668,12 +3684,47 @@ async def get_route_weather_alerts(route_id: str):
                 "ms_total": timings.get("hazard_build"),
             },
         )
+        max_alert_points = int(os.environ.get("ROUTE_ALERTS_MAX_POINTS", 6))
+        max_alert_points = max(5, min(max_alert_points, 7))
 
-        if TIMING_DEBUG:
+        def downsample_waypoints(data: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
+            if len(data) <= limit:
+                return data
+            if limit <= 1:
+                return [data[0]]
+            # Evenly spaced indices including endpoints
+            step = (len(data) - 1) / float(limit - 1)
+            indices = sorted({round(step * i) for i in range(limit)})
+            return [data[i] for i in indices if 0 <= i < len(data)]
+
+        hazard_waypoints_data = downsample_waypoints(hazard_waypoints_data, max_alert_points)
+        hazard_total_waypoints = len(hazard_waypoints_data)
+
+        logger.info(
+            "route_alerts_sampling",
+            extra={"route_id": route_id, "waypoints": hazard_total_waypoints, "max_points": max_alert_points},
+        )
+
+        is_alaska_route = any(
+            (wp.get("lat") is not None and wp.get("lon") is not None and wp.get("lat") >= 50 and wp.get("lat") <= 72 and wp.get("lon") <= -130)
+            for wp in hazard_waypoints_data
+        )
+
+        alaska_alerts_cache: Optional[List[WeatherAlert]] = None
+        if is_alaska_route:
+            alaska_alerts_cache = await get_noaa_alerts_area("AK")
+            logger.info(
+                "route_alerts_alaska_area_cache",
+                extra={"route_id": route_id, "alerts": len(alaska_alerts_cache)},
+            )
+
             logger.info(
                 "route_weather_alerts_timings",
                 extra={"route_id": route_id, "timings_ms": timings},
-            )
+            if alaska_alerts_cache is not None:
+                alerts = alaska_alerts_cache
+            else:
+                alerts = await get_noaa_alerts(wp.lat, wp.lon)
 
         return HazardAlertsResponse(
             route_id=route_id,
