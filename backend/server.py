@@ -1180,97 +1180,13 @@ async def get_noaa_weather(lat: float, lon: float) -> Optional[WeatherData]:
         return None
 
 
-def _normalize_noaa_alerts(raw_alerts: List[Dict[str, Any]]) -> List[WeatherAlert]:
-    alerts: List[WeatherAlert] = []
-    now = datetime.now(timezone.utc)
-    cutoff = now - timedelta(hours=12)
-
-    for alert in raw_alerts:
-        onset_str = alert.get('onset')
-        expires_str = alert.get('expires')
-        effective_str = alert.get('effective')
-        ends_str = alert.get('ends')
-        sent_str = alert.get('sent')
-        instruction = alert.get('instruction')
-        summary = alert.get('summary')
-        urgency = alert.get('urgency')
-        sent_dt = None
-        if sent_str:
-            try:
-                sent_dt = datetime.fromisoformat(sent_str.replace('Z', '+00:00')).astimezone(timezone.utc)
-            except Exception:
-                sent_dt = None
-        if not sent_dt or sent_dt < cutoff:
-            continue
-
-        is_active = True
-        try:
-            start_time = None
-            if onset_str:
-                start_time = datetime.fromisoformat(onset_str.replace('Z', '+00:00'))
-            elif effective_str:
-                start_time = datetime.fromisoformat(effective_str.replace('Z', '+00:00'))
-
-            end_time = None
-            if expires_str:
-                end_time = datetime.fromisoformat(expires_str.replace('Z', '+00:00'))
-            elif ends_str:
-                end_time = datetime.fromisoformat(ends_str.replace('Z', '+00:00'))
-
-            if start_time and end_time:
-                time_since_start = (now - start_time).total_seconds() / 3600
-                is_expired = now > end_time
-                is_active = time_since_start <= 12 and not is_expired
-        except Exception:
-            pass
-
-        if is_active and sent_dt >= cutoff:
-            alerts.append(
-                WeatherAlert(
-                    id=alert.get('id', str(uuid.uuid4())),
-                    headline=alert.get('headline', 'Weather Alert'),
-                    severity=alert.get('severity', 'Unknown'),
-                    event=alert.get('event', 'Weather Event'),
-                    description=alert.get('description', '')[:500],
-                    instruction=instruction,
-                    summary=summary,
-                    urgency=urgency,
-                    sent=sent_str,
-                    issued=effective_str or sent_str,
-                    areas=alert.get('areas'),
-                    onset=onset_str,
-                    expires=expires_str,
-                    effective=effective_str,
-                    ends=ends_str,
-                )
-            )
-
-    def _ts(a: WeatherAlert):
-        for candidate in [a.sent, a.issued, a.effective, a.onset, a.expires]:
-            if candidate:
-                try:
-                    return datetime.fromisoformat(candidate.replace('Z', '+00:00'))
-                except Exception:
-                    continue
-        return datetime.min
-
-    deduped: List[WeatherAlert] = []
-    seen = set()
-    for alert in alerts:
-        key = ((alert.id or '').lower(), (alert.event or '').lower())
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(alert)
-
-    deduped.sort(key=_ts, reverse=True)
-    return deduped[:10]
-
-
 async def get_noaa_alerts(lat: float, lon: float) -> List[WeatherAlert]:
     """Get alerts using active provider (NOAA in prod, fixtures in demo)."""
     try:
         raw_alerts = await get_providers().alerts.get_alerts(lat, lon)
+        alerts: List[WeatherAlert] = []
+        now = datetime.now(timezone.utc)
+        cutoff = now - timedelta(hours=12)
 
         if ALERT_DEBUG:
             logger.info(
@@ -1282,21 +1198,89 @@ async def get_noaa_alerts(lat: float, lon: float) -> List[WeatherAlert]:
                 },
             )
 
-        return _normalize_noaa_alerts(raw_alerts)
+        for alert in raw_alerts:
+            # Parse timestamps to filter active alerts
+            onset_str = alert.get('onset')
+            expires_str = alert.get('expires')
+            effective_str = alert.get('effective')
+            ends_str = alert.get('ends')
+            sent_str = alert.get('sent')
+            instruction = alert.get('instruction')
+            summary = alert.get('summary')
+            urgency = alert.get('urgency')
+            sent_dt = None
+            if sent_str:
+                try:
+                    sent_dt = datetime.fromisoformat(sent_str.replace('Z', '+00:00')).astimezone(timezone.utc)
+                except Exception:
+                    sent_dt = None
+            # Drop alerts without a sent timestamp or significantly stale
+            if not sent_dt:
+                continue
+            if sent_dt < cutoff:
+                continue
+            
+            # Determine if alert is currently active
+            is_active = True
+            try:
+                # Use onset or effective as start time
+                start_time = None
+                if onset_str:
+                    start_time = datetime.fromisoformat(onset_str.replace('Z', '+00:00'))
+                elif effective_str:
+                    start_time = datetime.fromisoformat(effective_str.replace('Z', '+00:00'))
+                
+                # Use expires or ends as end time
+                end_time = None
+                if expires_str:
+                    end_time = datetime.fromisoformat(expires_str.replace('Z', '+00:00'))
+                elif ends_str:
+                    end_time = datetime.fromisoformat(ends_str.replace('Z', '+00:00'))
+                
+                # Only include alerts that are active now or within next 12 hours
+                if start_time and end_time:
+                    # Filter to alerts starting within last 12 hours and not yet expired
+                    time_since_start = (now - start_time).total_seconds() / 3600  # hours
+                    is_expired = now > end_time
+                    is_active = time_since_start <= 12 and not is_expired
+            except:
+                # If timestamp parsing fails, include the alert
+                pass
+            
+            if is_active and sent_dt >= cutoff:
+                alerts.append(
+                    WeatherAlert(
+                        id=alert.get('id', str(uuid.uuid4())),
+                        headline=alert.get('headline', 'Weather Alert'),
+                        severity=alert.get('severity', 'Unknown'),
+                        event=alert.get('event', 'Weather Event'),
+                            description=alert.get('description', '')[:500],
+                            instruction=instruction,
+                            summary=summary,
+                            urgency=urgency,
+                            sent=sent_str,
+                            issued=effective_str or sent_str,
+                        areas=alert.get('areas'),
+                        onset=onset_str,
+                        expires=expires_str,
+                        effective=effective_str,
+                        ends=ends_str,
+                    )
+                )
+        # Sort newest first by sent/issued/effective and cap at 10
+        def _ts(a: WeatherAlert):
+            for candidate in [a.sent, a.issued, a.effective, a.onset, a.expires]:
+                if candidate:
+                    try:
+                        return datetime.fromisoformat(candidate.replace('Z', '+00:00'))
+                    except Exception:
+                        continue
+            return datetime.min
+
+        alerts.sort(key=_ts, reverse=True)
+        return alerts[:10]
     except Exception as e:
         logger.error(f"Alerts provider error for {lat},{lon}: {e}")
-        return []
-
-
-async def get_noaa_alerts_area(area: str) -> List[WeatherAlert]:
-    try:
-        provider = get_providers().alerts
-        if not hasattr(provider, "get_alerts_area"):
-            return []
-        raw_alerts = await provider.get_alerts_area(area)
-        return _normalize_noaa_alerts(raw_alerts)
-    except Exception as e:
-        logger.error(f"Alerts provider area error for {area}: {e}")
         return []
 
 def generate_packing_suggestions(waypoints_weather: List[WaypointWeather]) -> List[PackingSuggestion]:
@@ -3642,43 +3626,12 @@ async def get_route_weather_alerts(route_id: str):
     route_geometry = ctx.get("route_geometry", "")
     geometry_index = build_geometry_mile_index(route_geometry) if route_geometry else {}
 
-    max_alert_points = int(os.environ.get("ROUTE_ALERTS_MAX_POINTS", 6))
-    max_alert_points = max(5, min(max_alert_points, 7))
-
-    def downsample_waypoints(data: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
-        if len(data) <= limit:
-            return data
-        if limit <= 1:
-            return [data[0]]
-        step = (len(data) - 1) / float(limit - 1)
-        indices = sorted({round(step * i) for i in range(limit)})
-        return [data[i] for i in indices if 0 <= i < len(data)]
-
-    hazard_waypoints_data = downsample_waypoints(hazard_waypoints_data, max_alert_points)
     hazard_total_waypoints = len(hazard_waypoints_data)
-
-    logger.info(
-        "route_alerts_sampling",
-        extra={"route_id": route_id, "waypoints": hazard_total_waypoints, "max_points": max_alert_points},
-    )
-
-    is_alaska_route = any(
-        (wp.get("lat") is not None and wp.get("lon") is not None and wp.get("lat") >= 50 and wp.get("lat") <= 72 and wp.get("lon") <= -130)
-        for wp in hazard_waypoints_data
-    )
-
-    alaska_alerts_cache: Optional[List[WeatherAlert]] = None
-    if is_alaska_route:
-        alaska_alerts_cache = await get_noaa_alerts_area("AK")
-        logger.info(
-            "route_alerts_alaska_area_cache",
-            extra={"route_id": route_id, "alerts": len(alaska_alerts_cache)},
-        )
 
     async def fetch_hazard_wp(wp_dict: Dict[str, Any], index: int, total: int) -> WaypointWeather:
         wp = Waypoint(**wp_dict)
         weather = await get_noaa_weather(wp.lat, wp.lon)
-        alerts = alaska_alerts_cache if alaska_alerts_cache is not None else await get_noaa_alerts(wp.lat, wp.lon)
+        alerts = await get_noaa_alerts(wp.lat, wp.lon)
         return WaypointWeather(waypoint=wp, weather=weather, alerts=alerts)
 
     try:
@@ -3747,6 +3700,48 @@ async def get_route_weather_alerts(route_id: str):
         )
 
 
+@api_router.get("/routes/history", response_model=List[SavedRoute])
+async def get_route_history():
+    """Get recent route history."""
+    if db is None:
+        logger.warning("Database not available for route history")
+        return []
+    try:
+        routes = await db.routes.find().sort("created_at", -1).limit(10).to_list(10)
+        logger.info("Route history fetched: count=%s", len(routes))
+        return [SavedRoute(
+            id=str(r.get('_id', r.get('id'))),
+            origin=r['origin'],
+            destination=r['destination'],
+            stops=r.get('stops', []),
+            is_favorite=r.get('is_favorite', False),
+            created_at=r.get('created_at', datetime.utcnow())
+        ) for r in routes]
+    except Exception as e:
+        logger.error(f"Error fetching route history: {e}")
+        return []
+
+@api_router.get("/routes/favorites", response_model=List[SavedRoute])
+async def get_favorite_routes():
+    """Get favorite routes."""
+    if db is None:
+        logger.warning("Database not available for favorites")
+        return []
+    try:
+        routes = await db.favorites.find().sort("created_at", -1).limit(20).to_list(20)
+        logger.info("Favorites fetched: count=%s", len(routes))
+        return [SavedRoute(
+            id=r.get('id', str(r.get('_id'))),
+            origin=r['origin'],
+            destination=r['destination'],
+            stops=r.get('stops', []),
+            is_favorite=True,
+            created_at=r.get('created_at', datetime.utcnow())
+        ) for r in routes]
+    except Exception as e:
+        logger.error(f"Error fetching favorites: {e}")
+        return []
+
 @api_router.post("/routes/favorites")
 async def add_favorite_route(request: FavoriteRouteRequest):
     """Add a route to favorites."""
@@ -3761,21 +3756,14 @@ async def add_favorite_route(request: FavoriteRouteRequest):
             "stops": [s.model_dump() for s in (request.stops or [])],
             "name": request.name or f"{request.origin} to {request.destination}",
             "is_favorite": True,
-            "created_at": datetime.utcnow(),
+            "created_at": datetime.utcnow()
         }
         await db.favorites.insert_one(favorite)
-        logger.info(
-            "Favorite saved id=%s origin=%s destination=%s stops=%s",
-            favorite["id"],
-            favorite["origin"],
-            favorite["destination"],
-            len(favorite.get("stops", [])),
-        )
+        logger.info("Favorite saved id=%s origin=%s destination=%s stops=%s", favorite["id"], favorite["origin"], favorite["destination"], len(favorite.get("stops", [])))
         return {"success": True, "id": favorite["id"]}
     except Exception as e:
         logger.error(f"Error saving favorite: {e}")
         raise HTTPException(status_code=500, detail="Could not save favorite")
-
 
 @api_router.delete("/routes/favorites/{route_id}")
 async def remove_favorite_route(route_id: str):
@@ -3785,12 +3773,13 @@ async def remove_favorite_route(route_id: str):
         raise HTTPException(status_code=503, detail="Database not available. Favorites require database connection.")
     try:
         from bson import ObjectId
-
+        # Try custom id field first
         result = await db.favorites.delete_one({"id": route_id})
         if result.deleted_count == 0:
+            # Try with MongoDB ObjectId
             try:
                 result = await db.favorites.delete_one({"_id": ObjectId(route_id)})
-            except Exception:
+            except:
                 pass
         if result.deleted_count == 0:
             raise HTTPException(status_code=404, detail="Favorite not found")
@@ -3801,7 +3790,6 @@ async def remove_favorite_route(route_id: str):
     except Exception as e:
         logger.error(f"Error removing favorite: {e}")
         raise HTTPException(status_code=500, detail="Could not remove favorite")
-
 
 @api_router.get("/routes/{route_id}", response_model=RouteWeatherResponse)
 async def get_route_by_id(route_id: str):
@@ -3820,7 +3808,6 @@ async def get_route_by_id(route_id: str):
         logger.error(f"Error fetching route {route_id}: {e}")
         raise HTTPException(status_code=500, detail="Error fetching route")
 
-
 # Geocode endpoints under dedicated router
 @geocode_router.post("")
 async def geocode(location: str):
@@ -3831,7 +3818,6 @@ async def geocode(location: str):
         raise HTTPException(status_code=404, detail="Location not found")
     return coords
 
-
 @geocode_router.get("/autocomplete")
 async def autocomplete_location(query: str, limit: int = 5):
     """Get autocomplete suggestions for a location query using Mapbox."""
@@ -3839,48 +3825,46 @@ async def autocomplete_location(query: str, limit: int = 5):
         return []
 
     require_mapbox_token()
-
+    
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             url = f"https://api.mapbox.com/geocoding/v5/mapbox.places/{query}.json"
             params = {
-                "access_token": MAPBOX_ACCESS_TOKEN,
-                "autocomplete": "true",
-                "types": "place,locality,address,poi",
-                "country": "US,PR,VI,GU,AS",  # US + Puerto Rico + Virgin Islands + Guam + American Samoa
-                "limit": limit,
+                'access_token': MAPBOX_ACCESS_TOKEN,
+                'autocomplete': 'true',
+                'types': 'place,locality,address,poi',
+                'country': 'US,PR,VI,GU,AS',  # US + Puerto Rico + Virgin Islands + Guam + American Samoa
+                'limit': limit
             }
             response = await client.get(url, params=params)
             response.raise_for_status()
             data = response.json()
-
+            
             suggestions = []
-            for feature in data.get("features", []):
-                place_name = feature.get("place_name", "")
-                text = feature.get("text", "")
-
-                context = feature.get("context", [])
-                region = ""
+            for feature in data.get('features', []):
+                place_name = feature.get('place_name', '')
+                text = feature.get('text', '')
+                
+                # Extract components
+                context = feature.get('context', [])
+                region = ''
                 for ctx in context:
-                    if ctx.get("id", "").startswith("region"):
-                        region = ctx.get("short_code", "").replace("US-", "").replace("PR-", "PR").replace("VI-", "VI")
+                    if ctx.get('id', '').startswith('region'):
+                        region = ctx.get('short_code', '').replace('US-', '').replace('PR-', 'PR').replace('VI-', 'VI')
                         break
-
-                suggestions.append(
-                    {
-                        "place_name": place_name,
-                        "short_name": f"{text}, {region}" if region else text,
-                        "coordinates": feature.get("center", []),
-                    }
-                )
-
+                
+                suggestions.append({
+                    'place_name': place_name,
+                    'short_name': f"{text}, {region}" if region else text,
+                    'coordinates': feature.get('center', []),
+                })
+            
             return suggestions
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Autocomplete error for '{query}': {e}")
         raise HTTPException(status_code=500, detail="Autocomplete failed")
-
 
 # ==================== Billing ====================
 
