@@ -255,9 +255,11 @@ class NOAAAlertsProvider(AlertsProvider):
     async def get_alerts(self, lat: float, lon: float) -> List[Dict[str, Any]]:
         started = time.perf_counter()
         status_code: Optional[int] = None
+        fetch_scope = "point"
+        logger.info(f"nws_fetch_entered lat={lat} lon={lon}")
         try:
             async with httpx.AsyncClient(timeout=30.0) as client:
-                url = f"https://api.weather.gov/alerts?point={lat:.4f},{lon:.4f}"
+                url = f"https://api.weather.gov/alerts/active?point={lat:.4f},{lon:.4f}"
                 response = await client.get(url, headers=NOAA_HEADERS)
                 status_code = response.status_code
                 elapsed_ms = round((time.perf_counter() - started) * 1000.0, 2)
@@ -279,8 +281,57 @@ class NOAAAlertsProvider(AlertsProvider):
                     return []
 
                 data = response.json()
+                features = data.get("features", [])
+                logger.info(
+                    "nws_alerts_features",
+                    extra={
+                        "lat": round(lat, 4),
+                        "lon": round(lon, 4),
+                        "status": status_code,
+                        "scope": fetch_scope,
+                        "features": len(features),
+                        "first_event": (features[0].get("properties", {}).get("event") if features else None),
+                    },
+                )
+
+                # AK fallback: if point query returns no features and we are in Alaska lat/lon range, query by area=AK
+                if not features and lat >= 50 and lat <= 72 and lon <= -130:
+                    fetch_scope = "area_AK"
+                    url = "https://api.weather.gov/alerts/active?area=AK"
+                    response = await client.get(url, headers=NOAA_HEADERS)
+                    status_code = response.status_code
+                    elapsed_ms = round((time.perf_counter() - started) * 1000.0, 2)
+                    logger.info(
+                        "nws_alerts_fetch",
+                        extra={
+                            "lat": round(lat, 4),
+                            "lon": round(lon, 4),
+                            "status": status_code,
+                            "elapsed_ms": elapsed_ms,
+                            "scope": fetch_scope,
+                        },
+                    )
+                    if response.status_code != 200:
+                        logger.warning(
+                            "nws_alerts_http_error",
+                            extra={"lat": round(lat, 4), "lon": round(lon, 4), "status": status_code, "scope": fetch_scope},
+                        )
+                        return []
+                    data = response.json()
+                    features = data.get("features", [])
+                    logger.info(
+                        "nws_alerts_features",
+                        extra={
+                            "lat": round(lat, 4),
+                            "lon": round(lon, 4),
+                            "status": status_code,
+                            "scope": fetch_scope,
+                            "features": len(features),
+                            "first_event": (features[0].get("properties", {}).get("event") if features else None),
+                        },
+                    )
                 alerts: List[Dict[str, Any]] = []
-                for feature in data.get("features", []):
+                for feature in features:
                     props = feature.get("properties", {})
                     alerts.append(
                         {

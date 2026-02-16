@@ -1186,7 +1186,17 @@ async def get_noaa_alerts(lat: float, lon: float) -> List[WeatherAlert]:
         raw_alerts = await get_providers().alerts.get_alerts(lat, lon)
         alerts: List[WeatherAlert] = []
         now = datetime.now(timezone.utc)
-        cutoff = now - timedelta(hours=2)
+        cutoff = now - timedelta(hours=12)
+
+        if ALERT_DEBUG:
+            logger.info(
+                "noaa_alerts_raw",
+                extra={
+                    "lat": round(lat, 4),
+                    "lon": round(lon, 4),
+                    "raw_count": len(raw_alerts),
+                },
+            )
 
         for alert in raw_alerts:
             # Parse timestamps to filter active alerts
@@ -1204,10 +1214,10 @@ async def get_noaa_alerts(lat: float, lon: float) -> List[WeatherAlert]:
                     sent_dt = datetime.fromisoformat(sent_str.replace('Z', '+00:00')).astimezone(timezone.utc)
                 except Exception:
                     sent_dt = None
-            # Drop alerts without a sent timestamp or older than 2 hours
+            # Drop alerts without a sent timestamp or significantly stale
             if not sent_dt:
                 continue
-            if (now - sent_dt).total_seconds() > 7200:
+            if sent_dt < cutoff:
                 continue
             
             # Determine if alert is currently active
@@ -1227,12 +1237,12 @@ async def get_noaa_alerts(lat: float, lon: float) -> List[WeatherAlert]:
                 elif ends_str:
                     end_time = datetime.fromisoformat(ends_str.replace('Z', '+00:00'))
                 
-                # Only include alerts that are active NOW or within next 2 hours
+                # Only include alerts that are active now or within next 12 hours
                 if start_time and end_time:
-                    # Filter to alerts starting within last 2 hours and not yet expired
+                    # Filter to alerts starting within last 12 hours and not yet expired
                     time_since_start = (now - start_time).total_seconds() / 3600  # hours
                     is_expired = now > end_time
-                    is_active = time_since_start <= 2 and not is_expired
+                    is_active = time_since_start <= 12 and not is_expired
             except:
                 # If timestamp parsing fails, include the alert
                 pass
@@ -3561,6 +3571,7 @@ async def get_route_weather(request: RouteRequest):
                 route_doc['created_at'] = route_doc['created_at']
             await db.routes.insert_one(route_doc)
             logger.info(f"Saved route {response.id} to database")
+            logger.info(f"route_id_available_for_alerts route_id={route_id}")
     except Exception as e:
         logger.error(f"Error saving route: {e}", exc_info=True)
     
@@ -3570,6 +3581,7 @@ async def get_route_weather(request: RouteRequest):
 @api_router.get("/route/weather/alerts/{route_id}", response_model=HazardAlertsResponse)
 async def get_route_weather_alerts(route_id: str):
     """Compute hazard/NWS alerts in a single follow-up call using cached context."""
+    logger.info("route_alerts_request", extra={"route_id": route_id})
     ctx = get_route_context(route_id)
     if not ctx:
         logger.warning("route_alerts_context_missing", extra={"route_id": route_id})

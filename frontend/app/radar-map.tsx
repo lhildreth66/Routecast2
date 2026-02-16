@@ -65,7 +65,7 @@ export default function RadarMapScreen() {
         console.warn('[RadarMap] Location permission denied');
       }
 
-      // Fetch alerts from backend if available
+        // Fetch alerts from backend if available
       if (API_BASE) {
         try {
           console.log('[RadarMap] Fetching alerts from:', buildUrl('radar/alerts/map'));
@@ -322,6 +322,9 @@ export default function RadarMapScreen() {
               const response = await fetch(buildUrl('radar/tiles'));
               const data = await response.json();
               tileUrl = data.tile_url;
+              if (tileUrl) {
+                console.log('[map] RainViewer layer added (backend tile)', { timestamp: data.timestamp });
+              }
             } catch (backendErr) {
               console.warn('Backend radar unavailable, falling back to direct RainViewer');
             }
@@ -334,6 +337,7 @@ export default function RadarMapScreen() {
             if (rainData.radar && rainData.radar.past && rainData.radar.past.length > 0) {
               const latest = rainData.radar.past[rainData.radar.past.length - 1];
               tileUrl = 'https://tilecache.rainviewer.com' + latest.path + '/512/{z}/{x}/{y}/2/1_1.png';
+              console.log('[map] RainViewer layer added (direct)', { timestamp: latest.time, path: latest.path });
             }
           }
           

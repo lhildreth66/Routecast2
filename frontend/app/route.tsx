@@ -459,6 +459,7 @@ const generateRadarMapHtml = (centerLat: number, centerLon: number): string => {
           version: '1.3.0',
           opacity: 0.8
         }).addTo(map);
+        console.log('[map] NWS layer added (IEM WMS warnings_c)');
         
         var radarLayer = null;
         var showRadar = true;
@@ -474,6 +475,7 @@ const generateRadarMapHtml = (centerLat: number, centerLon: number): string => {
                 'https://tilecache.rainviewer.com' + latest.path + '/512/{z}/{x}/{y}/2/1_1.png',
                 { opacity: 0.5, zIndex: 50, tileSize: 512, zoomOffset: -1 }
               );
+              console.log('[map] RainViewer layer added', { timestamp: latest.time, path: latest.path });
               if (showRadar) radarLayer.addTo(map);
             }
           });
@@ -516,6 +518,7 @@ export default function RouteScreen() {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [pushToken, setPushToken] = useState<string | null>(null);
   const monitorStartedRef = useRef(false);
+  const alertsRequestedRef = useRef<Set<string>>(new Set());
   const alertIdParam = Array.isArray(params.alertId) ? params.alertId[0] : (params.alertId as string | undefined);
   const requestedTab = Array.isArray(params.tab) ? params.tab[0] : (params.tab as string | undefined);
   const filteredAlerts = useMemo(
@@ -546,10 +549,18 @@ export default function RouteScreen() {
       setAlertsStatus('pending');
       setAlertsError(null);
       try {
+        console.log('[alerts] calling route alerts endpoint', { routeId });
         const resp = await axios.get(buildUrl(`route/weather/alerts/${routeId}`));
         const data = resp.data || {};
         const status = (data.status || data.hazard_status || 'ready') as 'pending' | 'ready' | 'error';
         const hydratedAlerts = filterRecentAlerts(data.alerts || data.hazard_alerts || [], 2 * 60 * 60 * 1000, 10);
+
+        console.log('[alerts] fetched', {
+          routeId,
+          status,
+          rawCount: (data.alerts || data.hazard_alerts || []).length,
+          filteredCount: hydratedAlerts.length,
+        });
 
         setAlerts(hydratedAlerts);
         setAlertsStatus(status);
@@ -576,6 +587,17 @@ export default function RouteScreen() {
     },
     [setRouteData]
   );
+
+  const triggerAlertsFetch = useCallback(
+    (routeId?: string) => {
+      if (!routeId) return;
+      if (alertsRequestedRef.current.has(routeId)) return;
+      alertsRequestedRef.current.add(routeId);
+      console.log('[alerts] trigger fetch after route load', { routeId });
+      fetchAlertsForRoute(routeId);
+    },
+    [fetchAlertsForRoute]
+  );
   
 
   useEffect(() => {
@@ -594,15 +616,21 @@ export default function RouteScreen() {
           ...data,
           hazard_alerts: filterRecentAlerts(data?.hazard_alerts || [], 2 * 60 * 60 * 1000, 10),
         };
+        console.warn('[ALERTS DEBUG] routeId is:', sanitized?.id);
         setRouteData(sanitized);
         setAlerts(sanitized.hazard_alerts || []);
         setAlertsStatus((sanitized.hazard_status as 'pending' | 'ready' | 'error') || 'pending');
+
+        if (sanitized?.id) {
+          console.log('[alerts] scheduling initial fetch', { routeId: sanitized.id });
+          triggerAlertsFetch(sanitized.id);
+        }
       } catch (e) {
         console.error('Error parsing route data:', e);
       }
     }
     setLoading(false);
-  }, [params.routeData, params.perf]);
+  }, [params.routeData, params.perf, triggerAlertsFetch]);
 
   useEffect(() => {
     const clearStaleAlertsCache = async () => {
@@ -640,15 +668,15 @@ export default function RouteScreen() {
 
   useEffect(() => {
     if (routeData?.id) {
-      fetchAlertsForRoute(routeData.id);
+      triggerAlertsFetch(routeData.id);
     }
-  }, [routeData?.id, fetchAlertsForRoute]);
+  }, [routeData?.id, triggerAlertsFetch]);
 
   useEffect(() => {
     if (activeTab === 'alerts' && alertsStatus === 'idle' && routeData?.id) {
-      fetchAlertsForRoute(routeData.id);
+      triggerAlertsFetch(routeData.id);
     }
-  }, [activeTab, alertsStatus, routeData?.id, fetchAlertsForRoute]);
+  }, [activeTab, alertsStatus, routeData?.id, triggerAlertsFetch]);
 
   useEffect(() => {
     if (requestedTab === 'alerts') {
@@ -1186,6 +1214,10 @@ export default function RouteScreen() {
           <View style={styles.alertsTab}>
             <Text style={styles.sectionTitle}>⚠️ Weather Alerts Along Route</Text>
             <Text style={styles.sectionSubtitle}>Tap any alert to see full National Weather Service details</Text>
+            <Text style={styles.debugNotice}>
+              Alerts loaded: {filteredAlerts.length} • Status: {alertsStatus}
+              {alertsError ? ` • Error: ${alertsError}` : ''}
+            </Text>
             
             {filteredAlerts.length > 0 ? (
               filteredAlerts.map((alert, index) => {
@@ -2006,6 +2038,12 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     fontSize: 14,
     marginTop: 4,
+  },
+  debugNotice: {
+    color: '#a1a1aa',
+    fontSize: 12,
+    marginTop: 4,
+    marginBottom: 8,
   },
   bottomPadding: {
     height: 100,
