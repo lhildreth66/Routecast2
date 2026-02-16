@@ -3678,10 +3678,7 @@ async def get_route_weather_alerts(route_id: str):
     async def fetch_hazard_wp(wp_dict: Dict[str, Any], index: int, total: int) -> WaypointWeather:
         wp = Waypoint(**wp_dict)
         weather = await get_noaa_weather(wp.lat, wp.lon)
-        if alaska_alerts_cache is not None:
-            alerts = alaska_alerts_cache
-        else:
-            alerts = await get_noaa_alerts(wp.lat, wp.lon)
+        alerts = alaska_alerts_cache if alaska_alerts_cache is not None else await get_noaa_alerts(wp.lat, wp.lon)
         return WaypointWeather(waypoint=wp, weather=weather, alerts=alerts)
 
     try:
@@ -3718,51 +3715,41 @@ async def get_route_weather_alerts(route_id: str):
                 "ms_total": timings.get("hazard_build"),
             },
         )
-        max_alert_points = int(os.environ.get("ROUTE_ALERTS_MAX_POINTS", 6))
-        max_alert_points = max(5, min(max_alert_points, 7))
 
-        def downsample_waypoints(data: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
-            if len(data) <= limit:
-                return data
-            if limit <= 1:
-                return [data[0]]
-            # Evenly spaced indices including endpoints
-            step = (len(data) - 1) / float(limit - 1)
-            indices = sorted({round(step * i) for i in range(limit)})
-            return [data[i] for i in indices if 0 <= i < len(data)]
-
-        hazard_waypoints_data = downsample_waypoints(hazard_waypoints_data, max_alert_points)
-        hazard_total_waypoints = len(hazard_waypoints_data)
-
-        logger.info(
-            "route_alerts_sampling",
-            extra={"route_id": route_id, "waypoints": hazard_total_waypoints, "max_points": max_alert_points},
-        )
-
-        is_alaska_route = any(
-            (wp.get("lat") is not None and wp.get("lon") is not None and wp.get("lat") >= 50 and wp.get("lat") <= 72 and wp.get("lon") <= -130)
-            for wp in hazard_waypoints_data
-        )
-
-        alaska_alerts_cache: Optional[List[WeatherAlert]] = None
-        if is_alaska_route:
-            alaska_alerts_cache = await get_noaa_alerts_area("AK")
+        if TIMING_DEBUG:
             logger.info(
-                "route_alerts_alaska_area_cache",
-                extra={"route_id": route_id, "alerts": len(alaska_alerts_cache)},
+                "route_weather_alerts_timings",
+                extra={"route_id": route_id, "timings_ms": timings},
             )
 
-            logger.info(
-                logger.info(
-                    "route_alerts_ready",
-                    extra={
-                        "route_id": route_id,
-                        "alerts_count": len(hazard_alerts),
-                        "nws_requests": hazard_total_waypoints,
-                        "ms_fetch": timings.get("alerts_fetch"),
-                        "ms_total": timings.get("hazard_build"),
-                    },
-                )
+        return HazardAlertsResponse(
+            route_id=route_id,
+            hazard_alerts=hazard_alerts,
+            alerts=hazard_alerts,
+            road_conditions=road_conditions,
+            weather_conditions=weather_conditions,
+            hazard_status=status_value,
+            status=status_value,
+            timings_ms=timings if TIMING_DEBUG else None,
+        )
+    except Exception as exc:
+        logger.error("route_alerts_fetch_failed", exc_info=True, extra={"route_id": route_id})
+        return HazardAlertsResponse(
+            route_id=route_id,
+            hazard_alerts=[],
+            alerts=[],
+            road_conditions=[],
+            weather_conditions=[],
+            hazard_status="error",
+            status="error",
+            error=str(exc),
+            timings_ms=timings if TIMING_DEBUG else None,
+        )
+
+
+@api_router.post("/routes/favorites")
+async def add_favorite_route(request: FavoriteRouteRequest):
+    """Add a route to favorites."""
     if db is None:
         logger.warning("Database not available for favorites")
         raise HTTPException(status_code=503, detail="Database not available. Favorites require database connection.")
@@ -3774,14 +3761,21 @@ async def get_route_weather_alerts(route_id: str):
             "stops": [s.model_dump() for s in (request.stops or [])],
             "name": request.name or f"{request.origin} to {request.destination}",
             "is_favorite": True,
-            "created_at": datetime.utcnow()
+            "created_at": datetime.utcnow(),
         }
         await db.favorites.insert_one(favorite)
-        logger.info("Favorite saved id=%s origin=%s destination=%s stops=%s", favorite["id"], favorite["origin"], favorite["destination"], len(favorite.get("stops", [])))
+        logger.info(
+            "Favorite saved id=%s origin=%s destination=%s stops=%s",
+            favorite["id"],
+            favorite["origin"],
+            favorite["destination"],
+            len(favorite.get("stops", [])),
+        )
         return {"success": True, "id": favorite["id"]}
     except Exception as e:
         logger.error(f"Error saving favorite: {e}")
         raise HTTPException(status_code=500, detail="Could not save favorite")
+
 
 @api_router.delete("/routes/favorites/{route_id}")
 async def remove_favorite_route(route_id: str):
@@ -3791,13 +3785,12 @@ async def remove_favorite_route(route_id: str):
         raise HTTPException(status_code=503, detail="Database not available. Favorites require database connection.")
     try:
         from bson import ObjectId
-        # Try custom id field first
+
         result = await db.favorites.delete_one({"id": route_id})
         if result.deleted_count == 0:
-            # Try with MongoDB ObjectId
             try:
                 result = await db.favorites.delete_one({"_id": ObjectId(route_id)})
-            except:
+            except Exception:
                 pass
         if result.deleted_count == 0:
             raise HTTPException(status_code=404, detail="Favorite not found")
@@ -3808,6 +3801,7 @@ async def remove_favorite_route(route_id: str):
     except Exception as e:
         logger.error(f"Error removing favorite: {e}")
         raise HTTPException(status_code=500, detail="Could not remove favorite")
+
 
 @api_router.get("/routes/{route_id}", response_model=RouteWeatherResponse)
 async def get_route_by_id(route_id: str):
@@ -3826,6 +3820,7 @@ async def get_route_by_id(route_id: str):
         logger.error(f"Error fetching route {route_id}: {e}")
         raise HTTPException(status_code=500, detail="Error fetching route")
 
+
 # Geocode endpoints under dedicated router
 @geocode_router.post("")
 async def geocode(location: str):
@@ -3836,6 +3831,7 @@ async def geocode(location: str):
         raise HTTPException(status_code=404, detail="Location not found")
     return coords
 
+
 @geocode_router.get("/autocomplete")
 async def autocomplete_location(query: str, limit: int = 5):
     """Get autocomplete suggestions for a location query using Mapbox."""
@@ -3843,46 +3839,48 @@ async def autocomplete_location(query: str, limit: int = 5):
         return []
 
     require_mapbox_token()
-    
+
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             url = f"https://api.mapbox.com/geocoding/v5/mapbox.places/{query}.json"
             params = {
-                'access_token': MAPBOX_ACCESS_TOKEN,
-                'autocomplete': 'true',
-                'types': 'place,locality,address,poi',
-                'country': 'US,PR,VI,GU,AS',  # US + Puerto Rico + Virgin Islands + Guam + American Samoa
-                'limit': limit
+                "access_token": MAPBOX_ACCESS_TOKEN,
+                "autocomplete": "true",
+                "types": "place,locality,address,poi",
+                "country": "US,PR,VI,GU,AS",  # US + Puerto Rico + Virgin Islands + Guam + American Samoa
+                "limit": limit,
             }
             response = await client.get(url, params=params)
             response.raise_for_status()
             data = response.json()
-            
+
             suggestions = []
-            for feature in data.get('features', []):
-                place_name = feature.get('place_name', '')
-                text = feature.get('text', '')
-                
-                # Extract components
-                context = feature.get('context', [])
-                region = ''
+            for feature in data.get("features", []):
+                place_name = feature.get("place_name", "")
+                text = feature.get("text", "")
+
+                context = feature.get("context", [])
+                region = ""
                 for ctx in context:
-                    if ctx.get('id', '').startswith('region'):
-                        region = ctx.get('short_code', '').replace('US-', '').replace('PR-', 'PR').replace('VI-', 'VI')
+                    if ctx.get("id", "").startswith("region"):
+                        region = ctx.get("short_code", "").replace("US-", "").replace("PR-", "PR").replace("VI-", "VI")
                         break
-                
-                suggestions.append({
-                    'place_name': place_name,
-                    'short_name': f"{text}, {region}" if region else text,
-                    'coordinates': feature.get('center', []),
-                })
-            
+
+                suggestions.append(
+                    {
+                        "place_name": place_name,
+                        "short_name": f"{text}, {region}" if region else text,
+                        "coordinates": feature.get("center", []),
+                    }
+                )
+
             return suggestions
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Autocomplete error for '{query}': {e}")
         raise HTTPException(status_code=500, detail="Autocomplete failed")
+
 
 # ==================== Billing ====================
 
