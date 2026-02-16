@@ -3642,12 +3642,46 @@ async def get_route_weather_alerts(route_id: str):
     route_geometry = ctx.get("route_geometry", "")
     geometry_index = build_geometry_mile_index(route_geometry) if route_geometry else {}
 
+    max_alert_points = int(os.environ.get("ROUTE_ALERTS_MAX_POINTS", 6))
+    max_alert_points = max(5, min(max_alert_points, 7))
+
+    def downsample_waypoints(data: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
+        if len(data) <= limit:
+            return data
+        if limit <= 1:
+            return [data[0]]
+        step = (len(data) - 1) / float(limit - 1)
+        indices = sorted({round(step * i) for i in range(limit)})
+        return [data[i] for i in indices if 0 <= i < len(data)]
+
+    hazard_waypoints_data = downsample_waypoints(hazard_waypoints_data, max_alert_points)
     hazard_total_waypoints = len(hazard_waypoints_data)
+
+    logger.info(
+        "route_alerts_sampling",
+        extra={"route_id": route_id, "waypoints": hazard_total_waypoints, "max_points": max_alert_points},
+    )
+
+    is_alaska_route = any(
+        (wp.get("lat") is not None and wp.get("lon") is not None and wp.get("lat") >= 50 and wp.get("lat") <= 72 and wp.get("lon") <= -130)
+        for wp in hazard_waypoints_data
+    )
+
+    alaska_alerts_cache: Optional[List[WeatherAlert]] = None
+    if is_alaska_route:
+        alaska_alerts_cache = await get_noaa_alerts_area("AK")
+        logger.info(
+            "route_alerts_alaska_area_cache",
+            extra={"route_id": route_id, "alerts": len(alaska_alerts_cache)},
+        )
 
     async def fetch_hazard_wp(wp_dict: Dict[str, Any], index: int, total: int) -> WaypointWeather:
         wp = Waypoint(**wp_dict)
         weather = await get_noaa_weather(wp.lat, wp.lon)
-        alerts = await get_noaa_alerts(wp.lat, wp.lon)
+        if alaska_alerts_cache is not None:
+            alerts = alaska_alerts_cache
+        else:
+            alerts = await get_noaa_alerts(wp.lat, wp.lon)
         return WaypointWeather(waypoint=wp, weather=weather, alerts=alerts)
 
     try:
@@ -3719,83 +3753,16 @@ async def get_route_weather_alerts(route_id: str):
             )
 
             logger.info(
-                "route_weather_alerts_timings",
-                extra={"route_id": route_id, "timings_ms": timings},
-            if alaska_alerts_cache is not None:
-                alerts = alaska_alerts_cache
-            else:
-                alerts = await get_noaa_alerts(wp.lat, wp.lon)
-
-        return HazardAlertsResponse(
-            route_id=route_id,
-            hazard_alerts=hazard_alerts,
-            alerts=hazard_alerts,
-            road_conditions=road_conditions,
-            weather_conditions=weather_conditions,
-            hazard_status=status_value,
-            status=status_value,
-            timings_ms=timings if TIMING_DEBUG else None,
-        )
-    except Exception as exc:
-        logger.error("route_alerts_fetch_failed", exc_info=True, extra={"route_id": route_id})
-        return HazardAlertsResponse(
-            route_id=route_id,
-            hazard_alerts=[],
-            alerts=[],
-            road_conditions=[],
-            weather_conditions=[],
-            hazard_status="error",
-            status="error",
-            error=str(exc),
-            timings_ms=timings if TIMING_DEBUG else None,
-        )
-
-
-@api_router.get("/routes/history", response_model=List[SavedRoute])
-async def get_route_history():
-    """Get recent route history."""
-    if db is None:
-        logger.warning("Database not available for route history")
-        return []
-    try:
-        routes = await db.routes.find().sort("created_at", -1).limit(10).to_list(10)
-        logger.info("Route history fetched: count=%s", len(routes))
-        return [SavedRoute(
-            id=str(r.get('_id', r.get('id'))),
-            origin=r['origin'],
-            destination=r['destination'],
-            stops=r.get('stops', []),
-            is_favorite=r.get('is_favorite', False),
-            created_at=r.get('created_at', datetime.utcnow())
-        ) for r in routes]
-    except Exception as e:
-        logger.error(f"Error fetching route history: {e}")
-        return []
-
-@api_router.get("/routes/favorites", response_model=List[SavedRoute])
-async def get_favorite_routes():
-    """Get favorite routes."""
-    if db is None:
-        logger.warning("Database not available for favorites")
-        return []
-    try:
-        routes = await db.favorites.find().sort("created_at", -1).limit(20).to_list(20)
-        logger.info("Favorites fetched: count=%s", len(routes))
-        return [SavedRoute(
-            id=r.get('id', str(r.get('_id'))),
-            origin=r['origin'],
-            destination=r['destination'],
-            stops=r.get('stops', []),
-            is_favorite=True,
-            created_at=r.get('created_at', datetime.utcnow())
-        ) for r in routes]
-    except Exception as e:
-        logger.error(f"Error fetching favorites: {e}")
-        return []
-
-@api_router.post("/routes/favorites")
-async def add_favorite_route(request: FavoriteRouteRequest):
-    """Add a route to favorites."""
+                logger.info(
+                    "route_alerts_ready",
+                    extra={
+                        "route_id": route_id,
+                        "alerts_count": len(hazard_alerts),
+                        "nws_requests": hazard_total_waypoints,
+                        "ms_fetch": timings.get("alerts_fetch"),
+                        "ms_total": timings.get("hazard_build"),
+                    },
+                )
     if db is None:
         logger.warning("Database not available for favorites")
         raise HTTPException(status_code=503, detail="Database not available. Favorites require database connection.")

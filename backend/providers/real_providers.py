@@ -289,7 +289,28 @@ class NOAAAlertsProvider(AlertsProvider):
                         "first_event": (features[0].get("properties", {}).get("event") if features else None),
                     },
                 )
-                return features
+                alerts: List[Dict[str, Any]] = []
+                for feature in features:
+                    props = feature.get("properties", {})
+                    alerts.append(
+                        {
+                            "id": props.get("id", str(uuid.uuid4())),
+                            "headline": props.get("headline", "Weather Alert"),
+                            "severity": props.get("severity", "Unknown"),
+                            "event": props.get("event", "Weather Event"),
+                            "description": props.get("description", "")[:500],
+                            "areas": props.get("areaDesc"),
+                            "onset": props.get("onset"),
+                            "expires": props.get("expires"),
+                            "effective": props.get("effective"),
+                            "ends": props.get("ends"),
+                            "sent": props.get("sent"),
+                            "instruction": props.get("instruction"),
+                            "summary": props.get("headline"),
+                            "urgency": props.get("urgency"),
+                        }
+                    )
+                return alerts
         except Exception as exc:  # noqa: BLE001
             elapsed_ms = round((time.perf_counter() - started) * 1000.0, 2)
             logger.warning(
