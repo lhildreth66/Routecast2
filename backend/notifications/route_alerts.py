@@ -15,6 +15,7 @@ import logging
 import math
 import os
 import uuid
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
@@ -629,6 +630,8 @@ class CriticalRouteAlertWorker:
         self.cooldown_minutes = int(os.environ.get("ROUTE_ALERTS_COOLDOWN_MIN", "60"))
         self._current_run_id: Optional[str] = None
         self._recent_alert_cache: Dict[str, Dict[str, Any]] = {}
+        self._nws_cache_ttl = int(os.environ.get("ROUTE_ALERTS_NWS_CACHE_TTL", "600"))
+        self._nws_cache: Dict[str, Dict[str, Any]] = {}
 
     def _recent_cache_key(
         self, monitor_id: str, route_signature: str, route_id: str, alert_id: str, band: str
@@ -709,7 +712,8 @@ class CriticalRouteAlertWorker:
                     continue
                 key = self._point_cache_key(lat, lon)
                 if key not in unique_points:
-                    unique_points[key] = (lat, lon)
+                    bucketed_lat, bucketed_lon = self._bucket_point(lat, lon)
+                    unique_points[key] = (bucketed_lat, bucketed_lon)
 
         alerts_cache = self._fetch_alerts_concurrent(unique_points)
         summary["nws_calls"] += len(unique_points)
@@ -801,18 +805,9 @@ class CriticalRouteAlertWorker:
         explicit_points = monitor.get("points") or monitor.get("coords")
 
         sample_points_count = len(sample_points)
-        first_three = sample_points[:3]
-        last_three = sample_points[-3:] if sample_points_count >= 3 else sample_points
-        sample_span_miles = _span_miles(sample_points)
         route_span_miles = _span_miles(route_points)
         coverage_ratio = None
-        if route_span_miles > 0:
-            coverage_ratio = sample_span_miles / route_span_miles if route_span_miles else None
-        span_flagged = (
-            coverage_ratio is not None
-            and route_span_miles >= 5.0
-            and coverage_ratio < 0.5
-        )
+        span_flagged = False
         expires_at_raw = monitor.get("expires_at") or monitor.get("expires") or monitor.get("expiresAt")
         if isinstance(expires_at_raw, str):
             try:
@@ -842,36 +837,6 @@ class CriticalRouteAlertWorker:
         token_alt_prefix = (push_token_alt or "")[:18]
 
         bbox = _compute_bbox(sample_points) or _compute_bbox(route_points) or _compute_bbox(explicit_points or [])
-
-        logger.info(
-            "[route-alerts] monitor inspect id=%s expires=%s active=%s has_polyline=%s sample_points=%d first3=%s last3=%s span_mi=%.2f route_span_mi=%.2f coverage=%s bbox=%s push_token_prefix=%s alt_token_prefix=%s legs=%s explicit_points=%s",
-            monitor_id,
-            expires_at,
-            monitor.get("active"),
-            has_polyline,
-            sample_points_count,
-            first_three,
-            last_three,
-            sample_span_miles,
-            route_span_miles,
-            f"{coverage_ratio:.2f}" if coverage_ratio is not None else "n/a",
-            bbox,
-            token_prefix,
-            token_alt_prefix,
-            bool(legs_val),
-            bool(explicit_points),
-        )
-
-        if span_flagged:
-            logger.warning(
-                "WARNING [route-alerts] sample points clustered near start id=%s coverage=%.2f sample_span_mi=%.2f route_span_mi=%.2f first3=%s last3=%s",
-                monitor_id,
-                coverage_ratio,
-                sample_span_miles,
-                route_span_miles,
-                first_three,
-                last_three,
-            )
 
         resample_needed = sample_points_count < 3
 
@@ -920,6 +885,66 @@ class CriticalRouteAlertWorker:
                         logger.warning("[route-alerts] failed to persist decoded points for %s: %s", monitor_id, exc)
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("[route-alerts] failed to sample decoded polyline for %s: %s", monitor_id, exc)
+
+            def _adaptive_sample(points: List[Dict[str, float]], route_span: float) -> List[Dict[str, float]]:
+                if not points:
+                    return points
+                base_points = 10
+                extra_points = min(6, max(0, int(route_span // 100)))
+                target_points = max(base_points + extra_points, 10)
+                target_points = min(target_points, 16)
+                if len(points) <= target_points:
+                    return points
+                if target_points <= 2:
+                    return [points[0], points[-1]]
+                step = (len(points) - 1) / float(target_points - 1)
+                idxs = sorted({round(step * i) for i in range(target_points)})
+                idxs[0] = 0
+                idxs[-1] = len(points) - 1
+                return [points[i] for i in idxs if 0 <= i < len(points)]
+
+            sample_points = _adaptive_sample(sample_points, route_span_miles)
+            sample_points_count = len(sample_points)
+            first_three = sample_points[:3]
+            last_three = sample_points[-3:] if sample_points_count >= 3 else sample_points
+            sample_span_miles = _span_miles(sample_points)
+            if route_span_miles > 0:
+                coverage_ratio = sample_span_miles / route_span_miles if route_span_miles else None
+                span_flagged = (
+                    coverage_ratio is not None
+                    and route_span_miles >= 5.0
+                    and coverage_ratio < 0.5
+                )
+
+            logger.info(
+                "[route-alerts] monitor inspect id=%s expires=%s active=%s has_polyline=%s sample_points=%d first3=%s last3=%s span_mi=%.2f route_span_mi=%.2f coverage=%s bbox=%s push_token_prefix=%s alt_token_prefix=%s legs=%s explicit_points=%s",
+                monitor_id,
+                expires_at,
+                monitor.get("active"),
+                has_polyline,
+                sample_points_count,
+                first_three,
+                last_three,
+                sample_span_miles,
+                route_span_miles,
+                f"{coverage_ratio:.2f}" if coverage_ratio is not None else "n/a",
+                bbox,
+                token_prefix,
+                token_alt_prefix,
+                bool(legs_val),
+                bool(explicit_points),
+            )
+
+            if span_flagged:
+                logger.warning(
+                    "WARNING [route-alerts] sample points clustered near start id=%s coverage=%.2f sample_span_mi=%.2f route_span_mi=%.2f first3=%s last3=%s",
+                    monitor_id,
+                    coverage_ratio,
+                    sample_span_miles,
+                    route_span_miles,
+                    first_three,
+                    last_three,
+                )
 
         if sample_points_count == 0:
             logger.warning(
@@ -1066,6 +1091,7 @@ class CriticalRouteAlertWorker:
             return stats
 
         per_point_alerts: List[Dict[str, Any]] = []
+        last_points_diagnostics: List[Dict[str, Any]] = []
         union_alerts: Dict[str, Dict[str, Optional[str]]] = {}
         non_tornado_budget = max(
             0,
@@ -1182,6 +1208,25 @@ class CriticalRouteAlertWorker:
                 }
             )
 
+        # Last six point diagnostics near far end
+        last_indices = list(range(max(0, len(sample_points) - 6), len(sample_points)))
+        for idx in last_indices:
+            point = sample_points[idx]
+            lat = point.get("lat")
+            lon = point.get("lon")
+            if lat is None or lon is None:
+                continue
+            url = f"https://api.weather.gov/alerts/active?point={lat},{lon}"
+            key = self._point_cache_key(lat, lon)
+            alerts = alerts_cache.get(key)
+            last_points_diagnostics.append(
+                {
+                    "index": idx,
+                    "url": url,
+                    "features_count": len(alerts) if alerts else 0,
+                }
+            )
+
         sorted_union_ids = sorted(union_alerts.keys())
         logger.info(
             "[route-alerts] union report",
@@ -1190,6 +1235,7 @@ class CriticalRouteAlertWorker:
                 "monitor_id": monitor_id,
                 "route_id": route_id,
                 "points": len(sample_points),
+                "last_points": last_points_diagnostics,
                 "union_alert_ids": sorted_union_ids,
                 "union_alerts": [
                     {
@@ -1200,6 +1246,25 @@ class CriticalRouteAlertWorker:
                     for alert_id in sorted_union_ids
                 ],
                 "per_point_alerts": per_point_alerts,
+            },
+        )
+
+        logger.info(
+            "[route-alerts] union summary",
+            extra={
+                "run_id": run_label,
+                "monitor_id": monitor_id,
+                "route_id": route_id,
+                "raw_union_count": stats["alerts_seen"],
+                "dedup_count": len(union_alerts),
+                "returned_cards": [
+                    {
+                        "id": item.get("alert_id"),
+                        "event": item.get("event"),
+                    }
+                    for item in eligible_alerts
+                ],
+                "returned_count": len(eligible_alerts),
             },
         )
 
@@ -1304,6 +1369,16 @@ class CriticalRouteAlertWorker:
                     "monitor_id": monitor_id,
                     "route_id": route_id,
                     "selected_alert_ids": sorted(set(sent_alert_ids)),
+                    "raw_union_count": stats["alerts_seen"],
+                    "dedup_count": len(union_alerts),
+                    "returned_cards": [
+                        {
+                            "id": item.get("alert_id"),
+                            "event": item.get("event"),
+                        }
+                        for item in eligible_alerts
+                    ],
+                    "returned_count": len(eligible_alerts),
                     "sent_count": len(sent_alert_ids),
                 },
             )
@@ -1554,18 +1629,41 @@ class CriticalRouteAlertWorker:
             logger.warning("NWS fetch failed for point %.3f,%.3f: %s", lat, lon, exc)
             return None
 
-    def _point_cache_key(self, lat: float, lon: float, precision: int = 1) -> str:
-        rounded_lat = round(lat, precision)
-        rounded_lon = round(lon, precision)
-        fmt = f"{{:.{precision}f}}"
-        return f"{fmt.format(rounded_lat)},{fmt.format(rounded_lon)}"
+    def _bucket_coord(self, value: float, grid: float = 0.25) -> float:
+        return round(value / grid) * grid
+
+    def _bucket_point(self, lat: float, lon: float) -> Tuple[float, float]:
+        return self._bucket_coord(lat), self._bucket_coord(lon)
+
+    def _point_cache_key(self, lat: float, lon: float) -> str:
+        b_lat, b_lon = self._bucket_point(lat, lon)
+        return f"{b_lat:.2f},{b_lon:.2f}"
+
+    def _cache_get(self, key: str):
+        entry = self._nws_cache.get(key)
+        if not entry:
+            return None
+        if entry.get("expires", 0) < time.time():
+            self._nws_cache.pop(key, None)
+            return None
+        return entry.get("value")
+
+    def _cache_set(self, key: str, value: Any) -> None:
+        self._nws_cache[key] = {"value": value, "expires": time.time() + self._nws_cache_ttl}
 
     def _safe_fetch_alerts(self, lat: float, lon: float) -> Optional[List[Dict[str, Any]]]:
+        key = self._point_cache_key(lat, lon)
+        cached = self._cache_get(key)
+        if cached is not None:
+            return cached
+
         try:
             result = self.fetcher(lat, lon)
             if result is None:
                 return None
-            return list(result)
+            alerts = list(result)
+            self._cache_set(key, alerts)
+            return alerts
         except Exception as exc:  # noqa: BLE001
             logger.warning("[route-alerts] fetch failed for point %.3f,%.3f: %s", lat, lon, exc)
             return None
