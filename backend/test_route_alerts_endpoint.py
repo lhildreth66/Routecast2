@@ -57,6 +57,13 @@ def test_route_alerts_endpoint_returns_shape():
         assert payload.get("status") in {"pending", "ready", "error"}
         assert isinstance(payload.get("alerts"), list)
         assert isinstance(payload.get("hazard_alerts"), list)
+        assert isinstance(payload.get("weather_alert_cards"), list)
+        assert len(payload.get("weather_alert_cards", [])) <= 10
+
+        # No duplicate IDs in returned cards
+        ids = [card.get("id") or card.get("alert_id") for card in payload.get("weather_alert_cards", [])]
+        ids = [i for i in ids if i]
+        assert len(ids) == len(set(ids))
         assert "road_conditions" in payload
         assert "weather_conditions" in payload
         # Should always return a contract, even when no alerts are present

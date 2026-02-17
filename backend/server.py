@@ -576,6 +576,7 @@ class HazardAlertsResponse(BaseModel):
     route_id: str
     hazard_alerts: List[HazardAlert]
     alerts: List[HazardAlert] = []
+    weather_alert_cards: List[HazardAlert] = []
     road_conditions: List[ConditionSegment] = []
     weather_conditions: List[ConditionSegment] = []
     hazard_status: str = "ready"
@@ -3714,6 +3715,24 @@ async def get_route_weather_alerts(route_id: str):
     hazard_waypoints_data = downsample_waypoints(hazard_waypoints_data, target_points)
     hazard_total_waypoints = len(hazard_waypoints_data)
 
+    sampled_points = [
+        {
+            "index": i,
+            "lat": round(wp.get("lat", 0.0), 4),
+            "lon": round(wp.get("lon", 0.0), 4),
+        }
+        for i, wp in enumerate(hazard_waypoints_data)
+    ]
+    logger.info(
+        "route_alerts_sampled_points",
+        extra={
+            "route_id": route_id,
+            "count": hazard_total_waypoints,
+            "first3": sampled_points[:3],
+            "last3": sampled_points[-3:],
+        },
+    )
+
     is_alaska_route = any(
         (wp.get("lat") is not None and wp.get("lon") is not None and wp.get("lat") >= 50 and wp.get("lon") <= -130)
         for wp in hazard_waypoints_data
@@ -3726,8 +3745,23 @@ async def get_route_weather_alerts(route_id: str):
 
     async def fetch_hazard_wp(wp_dict: Dict[str, Any], index: int, total: int) -> WaypointWeather:
         wp = Waypoint(**wp_dict)
+        logger.info(
+            "route_alerts_nws_fetch_start",
+            extra={"route_id": route_id, "idx": index, "total": total, "lat": wp.lat, "lon": wp.lon},
+        )
         weather = await get_noaa_weather(wp.lat, wp.lon)
         alerts = alaska_alerts_cache if alaska_alerts_cache is not None else await get_noaa_alerts(wp.lat, wp.lon)
+        logger.info(
+            "route_alerts_nws_fetch_done",
+            extra={
+                "route_id": route_id,
+                "idx": index,
+                "lat": wp.lat,
+                "lon": wp.lon,
+                "features_count": len(alerts or []),
+                "first_event": (alerts[0].event if alerts else None),
+            },
+        )
         return WaypointWeather(waypoint=wp, weather=weather, alerts=alerts)
 
     try:
@@ -3738,6 +3772,21 @@ async def get_route_weather_alerts(route_id: str):
         hazard_tasks = [fetch_hazard_wp(wp, i, hazard_total_waypoints) for i, wp in enumerate(hazard_waypoints_data)]
         hazard_waypoints_weather = await asyncio.gather(*hazard_tasks)
         mark("alerts_fetch")
+
+        per_point_features = [
+            {
+                "idx": i,
+                "lat": round(hwp.waypoint.lat, 4),
+                "lon": round(hwp.waypoint.lon, 4),
+                "features_count": len(hwp.alerts or []),
+                "first_event": (hwp.alerts[0].event if hwp.alerts else None),
+            }
+            for i, hwp in enumerate(hazard_waypoints_weather)
+        ]
+        logger.info(
+            "route_alerts_points_features",
+            extra={"route_id": route_id, "last_points": per_point_features[-6:]},
+        )
 
         hazard_alerts = generate_hazard_alerts(
             list(hazard_waypoints_weather),
@@ -3874,6 +3923,18 @@ async def get_route_weather_alerts(route_id: str):
         union_cards.sort(key=_card_sort_key)
         returned_cards = union_cards[:10]
 
+        logger.info(
+            "route_alerts_union_summary",
+            extra={
+                "route_id": route_id,
+                "raw_union_count": nws_raw_count,
+                "dedup_count": len(union_cards),
+                "returned_count": len(returned_cards),
+                "returned_ids": [card.alert_id for card in returned_cards if card.alert_id],
+                "returned_events": [card.event or card.message for card in returned_cards],
+            },
+        )
+
         await hydrate_alert_roads_from_geometry(hazard_alerts, geometry_index)
         road_conditions = build_condition_segments(hazard_alerts, category="road")
         weather_conditions = build_condition_segments(hazard_alerts, category="weather")
@@ -3920,6 +3981,7 @@ async def get_route_weather_alerts(route_id: str):
             route_id=route_id,
             hazard_alerts=hazard_alerts,
             alerts=returned_cards,
+            weather_alert_cards=returned_cards,
             road_conditions=road_conditions,
             weather_conditions=weather_conditions,
             hazard_status=status_value,
