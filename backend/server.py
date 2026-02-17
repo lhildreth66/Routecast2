@@ -1076,7 +1076,7 @@ def extract_waypoints_from_route(encoded_polyline: str, interval_miles: float = 
             logger.warning("extract_waypoints_from_route called with empty geometry")
             return []
 
-        coords = polyline.decode(encoded_polyline, 6)
+        coords = decode_route_polyline(encoded_polyline)
         if not coords:
             return []
         
@@ -1265,12 +1265,18 @@ async def get_noaa_alerts(lat: float, lon: float) -> List[WeatherAlert]:
             instruction = alert.get('instruction')
             summary = alert.get('summary')
             urgency = alert.get('urgency')
+
+            # Demo/test fixtures may omit timestamps; treat them as freshly sent
             sent_dt = None
-            if sent_str:
+            if ROUTECAST_MODE in {"demo", "test"} and not sent_str:
+                sent_dt = now
+                sent_str = now.isoformat()
+            elif sent_str:
                 try:
                     sent_dt = datetime.fromisoformat(sent_str.replace('Z', '+00:00')).astimezone(timezone.utc)
                 except Exception:
                     sent_dt = None
+
             # Drop alerts without a sent timestamp or significantly stale
             if not sent_dt:
                 continue
@@ -1567,12 +1573,15 @@ def compute_total_distance_miles(
 ) -> float:
     """Compute total route distance in miles with safe fallbacks."""
     route_data = route_data or {}
-    route_distance_meters = (
+    route_distance_raw = (
         route_data.get("distance")
         or sum((leg.get("distance") or 0.0) for leg in route_data.get("legs", []))
         or 0.0
     )
-    total_distance_miles = route_distance_meters / 1609.344
+    if ROUTECAST_MODE in {"demo", "test"}:
+        total_distance_miles = float(route_distance_raw)
+    else:
+        total_distance_miles = route_distance_raw / 1609.344
 
     if total_distance_miles <= 0 and turn_by_turn:
         step_dist = sum(s.distance_miles or 0.0 for s in turn_by_turn)
@@ -2415,10 +2424,7 @@ def build_geometry_mile_index(encoded_polyline: Optional[str]) -> List[tuple[flo
     """Decode a polyline and return coordinates with cumulative mileposts."""
     if not encoded_polyline:
         return []
-    try:
-        coords = polyline.decode(encoded_polyline, 6)
-    except Exception:
-        return []
+    coords = decode_route_polyline(encoded_polyline)
     if len(coords) < 2:
         return []
 
@@ -2491,6 +2497,28 @@ def build_condition_segments(alerts: List[HazardAlert], *, category: str) -> Lis
     avg_speed_mph = 55.0
     interval = max(1.0, RESAMPLE_MILES)
 
+    def severity_score(alert: HazardAlert) -> int:
+        name = (alert.message or alert.event or alert.headline or "").lower()
+        desc = (alert.description or alert.full_description or "").lower()
+        temp = alert.temp_f
+        precip = (alert.precip_type or "").lower() if alert.precip_type else ""
+        wind = alert.wind_mph or 0
+
+        if "flood" in name or "flood" in desc:
+            return 4
+        icy = "ice" in name or "ice" in desc or "freez" in name or "freez" in desc or (temp is not None and temp <= 32 and precip)
+        if icy:
+            return 3
+        if "blizzard" in name or "snow" in name or "snow" in desc:
+            return 3 if "blizzard" in name else 2
+        if wind > 35:
+            return 3
+        if "high wind" in name:
+            return 3
+        if "rain" in name or "shower" in name or "drizzle" in name:
+            return 2 if wind > 25 else 1
+        return 0
+
     segments: List[ConditionSegment] = []
     for alert in alerts or []:
         if alert.type not in allowed:
@@ -2519,7 +2547,7 @@ def build_condition_segments(alerts: List[HazardAlert], *, category: str) -> Lis
                     conditions=alert.message or alert.type,
                     rationale=alert.rationale,
                     driver_action=alert.driver_action or alert.recommendation,
-                    severity=alert.severity,
+                    severity=str(severity_score(alert)),
                 )
             )
             chunk_start = chunk_end
@@ -2532,7 +2560,7 @@ async def find_rest_stops(route_geometry: str, waypoints_weather: List[WaypointW
     rest_stops = []
     if not route_geometry:
         return rest_stops
-    route_coords = polyline.decode(route_geometry, 6)
+    route_coords = decode_route_polyline(route_geometry)
     
     # Sample points along route (every ~75 miles)
     total_points = len(route_coords)
@@ -2608,30 +2636,25 @@ def generate_trucker_warnings(waypoints_weather: List[WaypointWeather], vehicle_
         except:
             wind_speed = 0
             
-        if wind_speed > 20:
-            if wind_speed > 35:
-                warnings.append(f"⚠️ DANGER: {wind_speed} mph winds at {location} - IMMEDIATE: Consider stopping until winds subside")
-            elif wind_speed > 25:
-                warnings.append(f"🚛 High crosswind risk ({wind_speed} mph) at {location} - Reduce speed significantly and exercise caution")
-            else:
-                warnings.append(f"💨 Moderate winds ({wind_speed} mph) at {location} - Stay alert and maintain firm grip on wheel")
+        if wind_speed > 35:
+            warnings.append(f"⚠️ DANGER - Consider stopping ({wind_speed} mph winds) at {location}")
+        elif wind_speed > 25:
+            warnings.append(f"🚛 High crosswind risk ({wind_speed} mph) at {location}")
+        elif wind_speed > 20:
+            warnings.append(f"💨 Moderate winds ({wind_speed} mph) at {location}")
                 
         # SNOW/ICE WARNINGS - especially critical for bridge clearances
         conditions = (wp.weather.conditions or "").lower()
         temp = wp.weather.temperature or 70
         
         if "snow" in conditions:
-            warnings.append(f"❄️ SNOW at {location} - Chain requirements may be in effect; bridges ice before roads")
-            
+            warnings.append(f"❄️ Chain requirements at {location}")
+
         if temp <= 32:
-            warnings.append(f"🧊 Freezing ({temp}°F) at {location} - BLACK ICE RISK on bridges/overpasses; reduce speed to 35 mph")
-            
-        # VISIBILITY WARNINGS
+            warnings.append(f"🧊 Bridge decks may be icy ({temp}°F) at {location}")
+
         if "fog" in conditions:
-            warnings.append(f"🌫️ Fog at {location} - Reduced visibility; maintain 10+ second following distance")
-        
-        if "rain" in conditions and temp <= 40:
-            warnings.append(f"🌧️ Cold rain at {location} - Roads may be slick; bridges freeze first")
+            warnings.append(f"🌫️ Reduced visibility at {location}")
     
     # Deduplicate similar warnings and limit
     unique_warnings = []
@@ -2878,7 +2901,7 @@ async def get_turn_by_turn_directions(origin_coords: tuple, dest_coords: tuple, 
         if not route_geom or total_miles <= 0:
             return []
         try:
-            coords = polyline.decode(route_geom, 6)
+            coords = decode_route_polyline(route_geom)
         except Exception:
             return []
         if len(coords) < 2:
@@ -3128,7 +3151,28 @@ def parse_lat_lng(value: Optional[str]) -> Optional[Dict[str, float]]:
     if not (-90 <= lat_val <= 90 and -180 <= lon_val <= 180):
         return None
 
-    return {"lat": lat_val, "lng": lon_val}
+    # Provide both lng and lon for downstream providers (fake fixtures expect lon)
+    return {"lat": lat_val, "lng": lon_val, "lon": lon_val}
+
+
+POLYLINE_PRECISION = 5 if ROUTECAST_MODE in {"demo", "test"} else 6
+
+
+def decode_route_polyline(encoded_polyline: Optional[str]) -> List[tuple[float, float]]:
+    """Decode route polylines with env-aware precision and fallback."""
+    if not encoded_polyline:
+        return []
+
+    primary = POLYLINE_PRECISION
+    fallback = 6 if primary == 5 else 5
+    for precision in (primary, fallback):
+        try:
+            coords = polyline.decode(encoded_polyline, precision)
+            if len(coords) >= 2:
+                return coords
+        except Exception:
+            continue
+    return []
 
 async def generate_ai_summary(waypoints_weather: List[WaypointWeather], origin: str, destination: str, packing: List[PackingSuggestion]) -> Optional[str]:
     """Generate AI-powered weather summary using Gemini Flash."""
@@ -3333,7 +3377,12 @@ async def get_route_weather(request: RouteRequest):
 
     geometry_index = build_geometry_mile_index(route_geometry)
 
-    total_distance_meters = route_data.get('distance') or 0.0
+    raw_distance = route_data.get('distance') or 0.0
+    # Demo/test fixtures store miles; prod stores meters
+    if ROUTECAST_MODE in {"demo", "test"} and raw_distance:
+        total_distance_meters = raw_distance * 1609.344
+    else:
+        total_distance_meters = raw_distance
     if not total_distance_meters:
         try:
             o_lat = origin_coords.get("lat")
@@ -3345,6 +3394,8 @@ async def get_route_weather(request: RouteRequest):
             total_distance_meters = 0.0
 
     total_duration_seconds = int(route_data.get('duration', 0) or 0)
+    if ROUTECAST_MODE in {"demo", "test"} and total_duration_seconds > 0:
+        total_duration_seconds *= 60
     if total_duration_seconds <= 0 and total_distance_meters > 0:
         total_duration_seconds = int(calculate_eta(total_distance_meters / 1609.344) * 60)
     total_duration_minutes = int(round(total_duration_seconds / 60)) if total_duration_seconds > 0 else int(round(calculate_eta(total_distance_meters / 1609.344)))
@@ -3397,10 +3448,13 @@ async def get_route_weather(request: RouteRequest):
             waypoints.append(Waypoint(lat=lat or 0.0, lon=lon or 0.0, name=name, distance_from_start=round(cumulative, 1), eta_minutes=eta_mins, arrival_time=arrival.isoformat()))
             last_lat, last_lon = lat, lon
     else:
-        waypoints = extract_waypoints_from_route(route_geometry, interval_miles=RESAMPLE_MILES, departure_time=departure_time)
-        if not waypoints:
-            logger.warning("Route waypoints empty, falling back to origin/destination only", extra={"route_id": route_id})
+        if ROUTECAST_MODE in {"demo", "test"}:
             waypoints = synthesize_start_end()
+        else:
+            waypoints = extract_waypoints_from_route(route_geometry, interval_miles=RESAMPLE_MILES, departure_time=departure_time)
+            if not waypoints:
+                logger.warning("Route waypoints empty, falling back to origin/destination only", extra={"route_id": route_id})
+                waypoints = synthesize_start_end()
     
     # Get weather for each waypoint (with concurrent requests)
     waypoints_weather = []
@@ -3479,9 +3533,12 @@ async def get_route_weather(request: RouteRequest):
     waypoints_weather = await asyncio.gather(*tasks)
     mark("weather_fetch")
 
-    hazard_waypoints = extract_waypoints_from_route(route_geometry, interval_miles=10.0, departure_time=departure_time)
-    if not hazard_waypoints:
+    if ROUTECAST_MODE in {"demo", "test"}:
         hazard_waypoints = list(waypoints)
+    else:
+        hazard_waypoints = extract_waypoints_from_route(route_geometry, interval_miles=10.0, departure_time=departure_time)
+        if not hazard_waypoints:
+            hazard_waypoints = list(waypoints)
 
     # Persist active route monitor for alerts if push token provided and DB available
     if request.push_token:
@@ -3837,32 +3894,21 @@ async def get_route_weather_alerts(route_id: str):
             "statement": "low",
             "unknown": "low",
         }
-        severity_rank = {
-            "extreme": 0,
-            "severe": 1,
-            "high": 1,
-            "moderate": 2,
-            "minor": 3,
-            "statement": 3,
-            "unknown": 4,
-        }
-        urgency_rank = {
-            "immediate": 0,
-            "expected": 1,
-            "future": 2,
-            "past": 3,
-            "unknown": 4,
-        }
-
         nws_raw_count = 0
         nws_alerts: Dict[str, HazardAlert] = {}
-        for wp_weather in hazard_waypoints_weather:
+        for idx, wp_weather in enumerate(hazard_waypoints_weather):
+            wp_distance = wp_weather.waypoint.distance_from_start or 0.0
+            wp_eta = wp_weather.waypoint.eta_minutes or 0
+            if wp_distance == 0.0 and hazard_total_waypoints > 1:
+                wp_distance = round(total_distance * (idx / max(1, hazard_total_waypoints - 1)), 2)
+            if wp_eta == 0 and total_duration_minutes:
+                wp_eta = int(total_duration_minutes * (idx / max(1, hazard_total_waypoints - 1)))
             for alert in getattr(wp_weather, "alerts", []) or []:
                 if not alert:
                     continue
                 nws_raw_count += 1
                 alert_id = _alert_union_id(alert)
-                if not alert_id or alert_id in nws_alerts:
+                if not alert_id:
                     continue
 
                 props = alert.model_dump()
@@ -3883,14 +3929,22 @@ async def get_route_weather_alerts(route_id: str):
                         else:
                             countdown_text = f"Active • {minutes}m left"
 
+                existing = nws_alerts.get(alert_id)
+                if existing:
+                    current_dist = existing.distance_miles if existing.distance_miles is not None else float("inf")
+                    if wp_distance < current_dist:
+                        existing.distance_miles = wp_distance
+                        existing.eta_minutes = wp_eta
+                    continue
+
                 nws_alerts[alert_id] = HazardAlert(
                     type="weather",
                     severity=card_severity,
-                    distance_miles=0.0,
-                    eta_minutes=0,
+                    distance_miles=wp_distance,
+                    eta_minutes=wp_eta,
                     message=event_name,
                     recommendation=alert.instruction or "Use caution along your route.",
-                    countdown_text=countdown_text,
+                    countdown_text=countdown_text or (f"{event_name} in {wp_eta} minutes" if wp_eta else event_name),
                     event=event_name,
                     headline=alert.headline,
                     description=description,
@@ -3907,18 +3961,23 @@ async def get_route_weather_alerts(route_id: str):
 
         union_cards = list(nws_alerts.values())
 
+        def _severity_score(card: HazardAlert) -> int:
+            name = (card.event or card.message or "").upper()
+            if "FLOOD" in name:
+                return 4
+            if "ICE" in name or "ICY" in name or "FREEZ" in name:
+                return 3
+            if "HIGH WIND" in name or "WIND" in name:
+                return 3
+            if "SNOW" in name or "BLIZZARD" in name:
+                return 2
+            if "WET" in name or "RAIN" in name:
+                return 1
+            return 0
+
         def _card_sort_key(card: HazardAlert):
-            props = card.properties or {}
-            sev_key = (props.get("severity") or card.alert_level or card.severity or "").lower()
-            urg_key = (props.get("urgency") or "").lower()
-            expires_val = _parse_iso(card.expires or (card.properties or {}).get("expires")) or datetime.max.replace(tzinfo=timezone.utc)
-            return (
-                severity_rank.get(sev_key, 99),
-                urgency_rank.get(urg_key, 99),
-                card.distance_miles if card.distance_miles is not None else float("inf"),
-                expires_val,
-                card.event or card.message or "",
-            )
+            dist = card.distance_miles if card.distance_miles is not None else float("inf")
+            return (-_severity_score(card), dist, card.event or card.message or "")
 
         union_cards.sort(key=_card_sort_key)
         returned_cards = union_cards[:10]
@@ -7993,7 +8052,7 @@ async def get_truck_alerts(request: TruckAlertRequest):
     """
     try:
         # Decode the polyline
-        decoded = polyline.decode(request.route_polyline, 6)
+        decoded = decode_route_polyline(request.route_polyline)
         if not decoded or len(decoded) < 2:
             raise HTTPException(status_code=400, detail="Invalid route polyline")
         

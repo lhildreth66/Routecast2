@@ -598,7 +598,19 @@ class RouteAlertService:
             "expires": expires,
             "sent_at": self.now(),
         }
-        self.db.sent_alerts.insert_one(doc)
+        query = {
+            "route_signature": doc["route_signature"],
+            "alert_id": doc["alert_id"],
+            "band": doc["band"],
+            "route_id": doc["route_id"],
+        }
+        if self.db.sent_alerts.find_one(query):
+            return
+        self.db.sent_alerts.update_one(
+            query,
+            {"$setOnInsert": doc, "$set": doc},
+            upsert=True,
+        )
 
     def _route_signature(self, route_id: str, sample_points: List[Dict[str, float]]) -> str:
         payload = {"route_id": route_id, "points": sample_points}
