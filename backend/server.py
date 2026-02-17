@@ -38,7 +38,7 @@ from connectivity_prediction_service import cell_bars_probability, obstruction_r
 from campsite_index_service import SiteFactors, Weights, score as campsite_score
 from claim_log_service import HazardEvent as ClaimHazardEvent, WeatherSnapshot as ClaimWeatherSnapshot, build_claim_log
 from claim_log_pdf import export_claim_log_to_pdf
-from notifications import NotificationService, ExpoPushClient, router as notifications_router
+from notifications import NotificationService, ExpoPushClient, router as notifications_router, get_route_alert_service
 from notifications.smart_delay import SmartDelayOptimizer
 from common.features import SMART_DELAY_ALERTS
 from radar_alerts import radar_router  # Weather radar & alerts integration
@@ -3417,7 +3417,7 @@ async def get_route_weather(request: RouteRequest):
         hazard_waypoints = list(waypoints)
 
     # Persist active route monitor for alerts if push token provided and DB available
-    if db is not None and request.push_token:
+    if request.push_token:
         try:
             route_points = [
                 {
@@ -3440,20 +3440,21 @@ async def get_route_weather(request: RouteRequest):
                 sample_points = sample_route_points(route_points, sample_miles=sample_miles, max_points=max_points)
                 bbox = _compute_bbox(route_points)
 
-                monitor_doc = {
-                    "push_token": request.push_token,
-                    "expo_push_token": request.push_token,
-                    "route_points": route_points,
-                    "sample_points": sample_points,
-                    "route_polyline": route_geometry,
-                    "bbox": bbox,
-                    "origin": request.origin,
-                    "destination": request.destination,
-                    "created_at": datetime.utcnow(),
-                    "expires_at": datetime.utcnow() + timedelta(hours=24),
-                    "active": True,
-                }
-                await db.route_monitors.insert_one(monitor_doc)
+                # Use shared alert service to ensure only one active monitor per user/token
+                service = get_route_alert_service()
+                service.start_monitor(
+                    user_id=request.push_token,
+                    push_token=request.push_token,
+                    route_id=route_id,
+                    route_points=route_points,
+                    sample_points=sample_points,
+                    route_polyline=route_geometry,
+                    bbox=bbox,
+                    sample_miles=sample_miles,
+                    max_points=max_points,
+                )
+        except HTTPException:
+            raise
         except Exception as exc:  # noqa: BLE001
             logger.warning("[route-weather] failed to persist route monitor: %s", exc)
     
@@ -5747,8 +5748,35 @@ def _dedupe_and_limit(stops: List[OvernightStop], limit: int = 25) -> List[Overn
         curr_len = len(current.name or "")
         return cand_len > curr_len
 
-    deduped = _dedupe_items(stops, _key_fn, _prefer)
-    deduped_sorted = sorted(deduped, key=lambda x: x.distance_miles)
+    primary = _dedupe_items(stops, _key_fn, _prefer)
+
+    # Secondary proximity merge to collapse node/way duplicates that share the
+    # same location but different OSM ids.
+    merged: List[OvernightStop] = []
+    for stop in primary:
+        merged_into_existing = False
+        for idx, existing in enumerate(merged):
+            if (
+                stop.latitude is None
+                or stop.longitude is None
+                or existing.latitude is None
+                or existing.longitude is None
+            ):
+                continue
+            if _haversine_meters(
+                stop.latitude,
+                stop.longitude,
+                existing.latitude,
+                existing.longitude,
+            ) <= 200:  # ~0.12 miles
+                if _prefer(stop, existing):
+                    merged[idx] = stop
+                merged_into_existing = True
+                break
+        if not merged_into_existing:
+            merged.append(stop)
+
+    deduped_sorted = sorted(merged, key=lambda x: x.distance_miles)
     return deduped_sorted[:limit]
 
 
@@ -5908,6 +5936,81 @@ async def _search_walmart_google_places(request: OvernightSearchRequest) -> List
     return stops
 
 
+async def _search_cracker_barrel_google_places(request: OvernightSearchRequest) -> List[OvernightStop]:
+    """Search Cracker Barrel via Google Places Text Search."""
+    if not GOOGLE_PLACES_API_KEY:
+        logger.error("GOOGLE_PLACES_API_KEY missing for Cracker Barrel search")
+        raise HTTPException(status_code=503, detail="Cracker Barrel search unavailable: missing GOOGLE_PLACES_API_KEY")
+
+    radius_meters = min(50000.0, float(request.radius_miles * 1609.34))
+    url = "https://places.googleapis.com/v1/places:searchText"
+    body = {
+        "textQuery": "Cracker Barrel",
+        "locationBias": {
+            "circle": {
+                "center": {"latitude": request.latitude, "longitude": request.longitude},
+                "radius": float(radius_meters),
+            }
+        },
+        "maxResultCount": 20,
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": GOOGLE_PLACES_API_KEY,
+        "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.location,places.nationalPhoneNumber,places.websiteUri,places.regularOpeningHours",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=12.0) as client:
+            resp = await client.post(url, headers=headers, json=body)
+            resp.raise_for_status()
+            payload = resp.json()
+    except httpx.HTTPStatusError as exc:
+        detail = getattr(exc.response, "text", "")[:200]
+        logger.warning("Cracker Barrel Google Places status error %s body=%s", exc.response.status_code, detail)
+        raise HTTPException(status_code=503, detail="Cracker Barrel search service error")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Cracker Barrel Google Places request failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Cracker Barrel search temporarily unavailable")
+
+    places = payload.get("places", []) or []
+    stops: List[OvernightStop] = []
+
+    for place in places:
+        loc = place.get("location") or {}
+        lat = loc.get("latitude")
+        lon = loc.get("longitude")
+        if lat is None or lon is None:
+            continue
+
+        distance_miles = _haversine_meters(request.latitude, request.longitude, lat, lon) * 0.000621371
+        display_name = (place.get("displayName") or {}).get("text") or "Cracker Barrel"
+        address = place.get("formattedAddress")
+        phone = place.get("nationalPhoneNumber")
+        website = place.get("websiteUri")
+        hours_desc = place.get("regularOpeningHours", {}).get("weekdayDescriptions")
+        hours = "; ".join(hours_desc) if hours_desc else None
+
+        stops.append(
+            OvernightStop(
+                name=display_name,
+                category="Cracker Barrel",
+                label=display_name,
+                distance_miles=distance_miles,
+                latitude=lat,
+                longitude=lon,
+                address=address,
+                phone=phone,
+                website=website,
+                hours=hours,
+                notes="RV overnight parking welcome. Call ahead to confirm with manager.",
+            )
+        )
+
+    stops.sort(key=lambda x: x.distance_miles)
+    return stops
+
+
 @api_router.post("/casinos/search", response_model=OvernightSearchResponse)
 async def search_casinos(request: OvernightSearchRequest):
     try:
@@ -5931,6 +6034,7 @@ async def search_casinos(request: OvernightSearchRequest):
         for element in osm_data.get("elements", []):
             stop = _build_stop(element, request, "Casino", "Free overnight RV parking welcome.")
             if stop:
+                stop.osm_id = None  # Deduplicate node/way duplicates by coordinates instead of OSM id.
                 stops.append(stop)
 
         stops.sort(key=lambda x: x.distance_miles)
@@ -6005,47 +6109,9 @@ _last_cracker_barrel_cache: Dict[str, Any] = {"ts": 0.0, "spots": []}
 async def search_cracker_barrel(request: OvernightSearchRequest):
     request_id = uuid.uuid4().hex[:8]
     started = time.time()
-    overpass_urls = [
-        "https://overpass-api.de/api/interpreter",
-        "https://lz4.overpass-api.de/api/interpreter",
-        "https://z.overpass-api.de/api/interpreter",
-    ]
 
     try:
-        radius_meters = int(request.radius_miles * 1609.34)
-        overpass_query = f"""
-        [out:json][timeout:10];
-        (
-                    node["amenity"="restaurant"]["name"~"Cracker Barrel",i](around:{radius_meters},{request.latitude},{request.longitude});
-                    way["amenity"="restaurant"]["name"~"Cracker Barrel",i](around:{radius_meters},{request.latitude},{request.longitude});
-                    node["brand"~"Cracker Barrel",i](around:{radius_meters},{request.latitude},{request.longitude});
-                    way["brand"~"Cracker Barrel",i](around:{radius_meters},{request.latitude},{request.longitude});
-        );
-        out body;
-        >;
-        out skel qt;
-        """
-
-        osm_data = await _fetch_overpass_first_success(
-            overpass_query,
-            "CrackerBarrel",
-            overpass_urls,
-            overall_timeout=9.0,
-            per_timeout=3.5,
-            request_id=request_id,
-        )
-
-        stops: List[OvernightStop] = []
-        for element in osm_data.get("elements", []):
-            stop = _build_stop(
-                element,
-                request,
-                "Cracker Barrel",
-                "RV overnight parking welcome. Call ahead to confirm with manager.",
-            )
-            if stop:
-                stops.append(stop)
-
+        stops = await _search_cracker_barrel_google_places(request)
         deduped = _dedupe_and_limit(stops)
         globals()["_last_cracker_barrel_cache"] = {"ts": time.time(), "spots": deduped}
 
@@ -6056,11 +6122,11 @@ async def search_cracker_barrel(request: OvernightSearchRequest):
             spots=deduped,
             is_premium_locked=False,
             ok=True,
-            source="overpass",
+            source="google_places",
         )
-    except asyncio.CancelledError as exc:
+    except HTTPException as exc:
         elapsed_ms = int((time.time() - started) * 1000)
-        logger.warning("[CrackerBarrel][%s] overpass cancelled after %dms: %s", request_id, elapsed_ms, exc)
+        logger.warning("[CrackerBarrel][%s] google places unavailable after %dms: %s", request_id, elapsed_ms, exc.detail)
         cache = globals().get("_last_cracker_barrel_cache", {})
         now = time.time()
         cached_spots = cache.get("spots") or []
@@ -6072,20 +6138,12 @@ async def search_cracker_barrel(request: OvernightSearchRequest):
                 is_premium_locked=False,
                 ok=True,
                 source="cached_fallback",
-                error="overpass_unavailable",
+                error="google_places_unavailable",
             )
-
-        return OvernightSearchResponse(
-            spots=[],
-            is_premium_locked=False,
-            ok=True,
-            source="overpass_unavailable",
-            error="overpass_unavailable",
-        )
-
+        raise
     except Exception as exc:  # noqa: BLE001
         elapsed_ms = int((time.time() - started) * 1000)
-        logger.warning("[CrackerBarrel][%s] overpass unavailable after %dms: %s", request_id, elapsed_ms, exc)
+        logger.warning("[CrackerBarrel][%s] unexpected failure after %dms: %s", request_id, elapsed_ms, exc)
         cache = globals().get("_last_cracker_barrel_cache", {})
         now = time.time()
         cached_spots = cache.get("spots") or []
@@ -6097,15 +6155,15 @@ async def search_cracker_barrel(request: OvernightSearchRequest):
                 is_premium_locked=False,
                 ok=True,
                 source="cached_fallback",
-                error="overpass_unavailable",
+                error="google_places_unavailable",
             )
 
         return OvernightSearchResponse(
             spots=[],
             is_premium_locked=False,
             ok=True,
-            source="overpass_unavailable",
-            error="overpass_unavailable",
+            source="google_places_unavailable",
+            error="google_places_unavailable",
         )
 
 
@@ -6261,18 +6319,19 @@ async def search_last_chance_supplies(request: LastChanceRequest):
                 subtype = "Gas Station"
             
             # Extract name with better fallbacks
-            name = tags.get("name") or tags.get("brand")
+            base_label = subtype or supply_type
+            name = (
+                tags.get("name")
+                or tags.get("brand")
+                or tags.get("operator")
+                or tags.get("official_name")
+            )
             if not name:
-                # Use operator if available
-                operator = tags.get("operator", "")
-                if operator:
-                    name = operator
-                else:
-                    # Use descriptive type-based name
-                    if subtype:
-                        name = f"{subtype}"
-                    else:
-                        name = f"{supply_type} Store"
+                city_hint = tags.get("addr:city") or tags.get("addr:place")
+                name_parts = [base_label]
+                if city_hint:
+                    name_parts.append(city_hint)
+                name = " - ".join(name_parts)
             
             # Add propane indicator if applicable
             if supply_type == "Propane" and "Propane" not in name and "LPG" not in name:
@@ -6336,7 +6395,7 @@ async def search_last_chance_supplies(request: LastChanceRequest):
             rating = 3.8
             
             supplies.append(SupplyPoint(
-                name=name or "Store",
+                name=name or base_label or "Store",
                 title=name or None,
                 type=supply_type,
                 subtype=subtype,
@@ -6355,13 +6414,57 @@ async def search_last_chance_supplies(request: LastChanceRequest):
             ))
         
         # Dedupe, sort, limit
-        supplies = _dedupe_places(
-            supplies,
-            lambda s: _stable_place_key(s.name, s.latitude, s.longitude, place_id=None, source_id=None, precision=4),
-            lambda cand, curr: cand.distance_miles < curr.distance_miles,
-        )
-        supplies.sort(key=lambda x: x.distance_miles)
-        supplies = supplies[:30]
+        def _supply_score(supply: SupplyPoint) -> int:
+            score = 0
+            if supply.name and supply.name.lower() not in GENERIC_PLACEHOLDERS:
+                score += 2
+            if supply.address:
+                score += 1
+            if supply.phone and supply.phone != "N/A":
+                score += 1
+            if supply.website:
+                score += 1
+            return score
+
+        def _supply_key(supply: SupplyPoint) -> Optional[str]:
+            return _stable_place_key(
+                supply.name,
+                supply.latitude,
+                supply.longitude,
+                place_id=None,
+                source_id=None,
+                precision=3,
+            )
+
+        def _prefer_supply(candidate: SupplyPoint, current: SupplyPoint) -> bool:
+            cand_score = _supply_score(candidate)
+            curr_score = _supply_score(current)
+            if cand_score != curr_score:
+                return cand_score > curr_score
+            if candidate.distance_miles != current.distance_miles:
+                return candidate.distance_miles < current.distance_miles
+            return len(candidate.name or "") > len(current.name or "")
+
+        primary = _dedupe_places(supplies, _supply_key, _prefer_supply)
+
+        merged: List[SupplyPoint] = []
+        for supply in primary:
+            merged_into_existing = False
+            for idx, existing in enumerate(merged):
+                if _haversine_meters(
+                    supply.latitude,
+                    supply.longitude,
+                    existing.latitude,
+                    existing.longitude,
+                ) <= 250:  # merge nearby node/way variants
+                    if _prefer_supply(supply, existing):
+                        merged[idx] = supply
+                    merged_into_existing = True
+                    break
+            if not merged_into_existing:
+                merged.append(supply)
+
+        supplies = sorted(merged, key=lambda x: x.distance_miles)[:30]
         
         logger.info(f"Last chance supply search completed: found {len(supplies)} locations from OSM within {request.radius_miles} miles")
         

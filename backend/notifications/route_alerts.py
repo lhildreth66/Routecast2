@@ -247,6 +247,7 @@ class RouteAlertService:
         self.db = db
         self.push_gateway = push_gateway or PushGateway()
         self.now = now_fn
+        self.monitor_ttl_hours = float(os.environ.get("ROUTE_ALERTS_MONITOR_TTL_HOURS", "24"))
         self._ensure_indexes()
 
     def _ensure_indexes(self):
@@ -290,6 +291,7 @@ class RouteAlertService:
 
         now = self.now()
         monitor_id = str(uuid.uuid4())
+        expires_at = now + timedelta(hours=self.monitor_ttl_hours)
 
         self.db.route_monitors.update_many(
             {"$or": [{"user_id": user_id}, {"push_token": push_token}], "active": True},
@@ -309,6 +311,7 @@ class RouteAlertService:
             "route_signature": route_signature,
             "active": True,
             "created_at": now,
+            "expires_at": expires_at,
         }
         self.db.route_monitors.insert_one(doc)
         return {
@@ -331,7 +334,13 @@ class RouteAlertService:
         return getattr(result, "modified_count", 0)
 
     def get_active_monitors(self, limit: int = 200) -> List[Dict[str, Any]]:
-        return list(self.db.route_monitors.find({"active": True}).limit(limit))
+        query: Dict[str, Any] = {"active": True}
+        now = self.now()
+        query["$or"] = [
+            {"expires_at": {"$gt": now}},
+            {"expires_at": {"$exists": False}},
+        ]
+        return list(self.db.route_monitors.find(query).limit(limit))
 
     def has_sent(self, route_signature: str, route_id: str, alert_id: str, band: str, monitor_id: Optional[str] = None) -> bool:
         query: Dict[str, Any] = {"alert_id": alert_id, "band": band}
@@ -548,6 +557,16 @@ class CriticalRouteAlertWorker:
         sample_points_count = len(sample_points)
         first_points = sample_points[:2]
         expires_at = monitor.get("expires_at") or monitor.get("expires") or monitor.get("expiresAt")
+        if isinstance(expires_at, str):
+            try:
+                expires_at = datetime.fromisoformat(expires_at)
+            except Exception:
+                expires_at = None
+
+        if expires_at and isinstance(expires_at, datetime) and expires_at <= self.now():
+            stats["skipped"] += 1
+            stats["skipped_geometry"] += 1
+            return None, stats
         has_polyline = bool(route_points or polyline_val)
         token_prefix = (token or "")[:18]
         push_token_alt = monitor.get("expo_push_token") or monitor.get("pushToken") or monitor.get("fcm_token")
