@@ -276,7 +276,7 @@ class RouteAlertService:
         self.push_gateway = push_gateway or PushGateway()
         self.now = now_fn
         self.monitor_ttl_hours = float(os.environ.get("ROUTE_ALERTS_MONITOR_TTL_HOURS", "24"))
-        self.alert_key_ttl_minutes = int(os.environ.get("ROUTE_ALERT_KEY_TTL_MIN", "120"))
+        self.alert_key_ttl_minutes = int(os.environ.get("ROUTE_ALERT_KEY_TTL_MIN", "360"))
         self._ensure_indexes()
 
     def _ensure_indexes(self):
@@ -941,6 +941,7 @@ class CriticalRouteAlertWorker:
         }
 
         sent_alert_ids: List[str] = []
+        eligible_alerts: List[Dict[str, Any]] = []
 
         monitor_id = prepared["monitor_id"]
         token = prepared["token"]
@@ -1004,6 +1005,10 @@ class CriticalRouteAlertWorker:
 
         per_point_alerts: List[Dict[str, Any]] = []
         union_alerts: Dict[str, Dict[str, Optional[str]]] = {}
+        non_tornado_budget = max(
+            0,
+            self.cap_per_hour - self.service.count_recent(monitor_id, minutes=60, exclude_events=["Tornado Warning"]),
+        )
 
         for idx, point in enumerate(sample_points):
             key = self._point_cache_key(point["lat"], point["lon"])
@@ -1079,12 +1084,11 @@ class CriticalRouteAlertWorker:
                     continue
 
                 if event != "Tornado Warning":
-                    if self.service.count_recent(
-                        monitor_id, minutes=60, exclude_events=["Tornado Warning"]
-                    ) >= self.cap_per_hour:
+                    if non_tornado_budget <= 0:
                         stats["skipped"] += 1
                         stats["skipped_cap"] += 1
                         continue
+                    non_tornado_budget -= 1
 
                 payload = self._build_notification_payload(
                     alert=alert,
@@ -1095,43 +1099,17 @@ class CriticalRouteAlertWorker:
                     sample_points=sample_points,
                 )
 
-                if self._send_notification(token, payload):
-                    cache_key = self._recent_cache_key(monitor_id, route_signature, route_id, alert_id, band)
-                    self._recent_alert_cache[cache_key] = {
-                        "expires_at": self.now() + timedelta(minutes=self.resend_ttl_minutes),
+                eligible_alerts.append(
+                    {
+                        "alert": alert,
+                        "alert_id": alert_id,
+                        "event": event,
+                        "band": band,
+                        "distance": distance,
+                        "payload": payload,
+                        "alert_key": alert_key,
                     }
-                    self.service.mark_alert_key(monitor_id, alert_key, route_id)
-                    self.service.record_sent(
-                        monitor_id,
-                        route_signature,
-                        route_id,
-                        alert_id,
-                        event,
-                        band,
-                        distance,
-                        payload["headline"],
-                        payload["expires"],
-                        alert_key=alert_key,
-                    )
-                    sent_alert_ids.append(alert_id)
-                    logger.info(
-                        "[route-alerts] push_sent",
-                        extra={
-                            "run_id": run_label,
-                            "monitor_id": monitor_id,
-                            "user_id": user_id,
-                            "push_token_suffix": token_suffix,
-                            "route_id": route_id,
-                            "alert_id": alert_id,
-                            "event": event,
-                            "band": band,
-                            "distance_miles": round(distance, 2),
-                        },
-                    )
-                    stats["sent"] += 1
-                else:
-                    stats["skipped"] += 1
-                    stats["skipped_push"] += 1
+                )
 
             per_point_alerts.append(
                 {
@@ -1162,6 +1140,99 @@ class CriticalRouteAlertWorker:
                 "per_point_alerts": per_point_alerts,
             },
         )
+
+        severity_rank = {"extreme": 0, "severe": 1, "high": 1, "moderate": 2, "minor": 3, "statement": 3, "unknown": 4}
+        urgency_rank = {"immediate": 0, "expected": 1, "future": 2, "past": 3, "unknown": 4}
+
+        def _eligible_sort_key(item: Dict[str, Any]):
+            alert = item.get("alert") or {}
+            props = alert.get("properties", {}) if isinstance(alert, dict) else getattr(alert, "properties", {}) or {}
+            sev_key = (props.get("severity") or getattr(alert, "severity", "") or "").lower()
+            urg_key = (props.get("urgency") or getattr(alert, "urgency", "") or "").lower()
+            return (
+                severity_rank.get(sev_key, 99),
+                urgency_rank.get(urg_key, 99),
+                item.get("distance", float("inf")),
+                item.get("event") or "",
+            )
+
+        def _build_summary_payload(selected: List[Dict[str, Any]]) -> Dict[str, Any]:
+            top = sorted(selected, key=_eligible_sort_key)[0]
+            top_payload = top.get("payload") or {}
+            top_event = top.get("event") or top_payload.get("data", {}).get("event") or "Weather Alert"
+            top_alert_id = top.get("alert_id")
+            count = len(selected)
+            events = sorted({item.get("event") for item in selected if item.get("event")})
+            collapsed_body = f"{count} active alerts near your route"
+            expanded_lines = [f"• {e}" for e in events][:8]
+            expanded_body = "\n".join(expanded_lines) if expanded_lines else collapsed_body
+            severity_icon = top_payload.get("title", "").split(" ")[0] if top_payload else "⚠️"
+            data = {
+                "type": "critical_route_alert_summary",
+                "alertIds": [item.get("alert_id") for item in selected if item.get("alert_id")],
+                "topEvent": top_event,
+                "count": count,
+                "band": top.get("band"),
+                "distanceMiles": f"{top.get('distance', 0.0):.1f}",
+                "routeId": route_id,
+            }
+            if top_alert_id:
+                data["alertId"] = top_alert_id
+
+            return {
+                "title": f"{severity_icon} {top_event.upper()}",
+                "headline": top_event,
+                "collapsed_body": collapsed_body,
+                "expanded_body": expanded_body,
+                "expires": top_payload.get("expires"),
+                "data": data,
+            }
+
+        if eligible_alerts:
+            selected_alerts = sorted(eligible_alerts, key=_eligible_sort_key)
+            summary_payload = _build_summary_payload(selected_alerts)
+            if self._send_notification(token, summary_payload):
+                for item in selected_alerts:
+                    alert_id = item.get("alert_id")
+                    band = item.get("band")
+                    alert_key = item.get("alert_key")
+                    distance = item.get("distance", 0.0)
+                    payload = item.get("payload") or {}
+                    event = item.get("event") or payload.get("data", {}).get("event") or payload.get("headline")
+                    cache_key = self._recent_cache_key(monitor_id, route_signature, route_id, alert_id, band)
+                    self._recent_alert_cache[cache_key] = {
+                        "expires_at": self.now() + timedelta(minutes=self.resend_ttl_minutes),
+                    }
+                    self.service.mark_alert_key(monitor_id, alert_key, route_id)
+                    self.service.record_sent(
+                        monitor_id,
+                        route_signature,
+                        route_id,
+                        alert_id,
+                        event,
+                        band,
+                        distance,
+                        payload.get("headline") if isinstance(payload, dict) else None,
+                        payload.get("expires") if isinstance(payload, dict) else None,
+                        alert_key=alert_key,
+                    )
+                    sent_alert_ids.append(alert_id)
+                logger.info(
+                    "[route-alerts] push_sent",
+                    extra={
+                        "run_id": run_label,
+                        "monitor_id": monitor_id,
+                        "user_id": user_id,
+                        "push_token_suffix": token_suffix,
+                        "route_id": route_id,
+                        "alert_ids": sorted(set(sent_alert_ids)),
+                        "count": len(selected_alerts),
+                    },
+                )
+                stats["sent"] += len(selected_alerts)
+            else:
+                stats["skipped"] += len(eligible_alerts)
+                stats["skipped_push"] += 1
 
         if sent_alert_ids:
             logger.info(

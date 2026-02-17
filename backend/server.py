@@ -68,12 +68,24 @@ db = None
 TIMING_DEBUG = bool(int(os.environ.get("DEBUG_TIMINGS", "0") or 0))
 CACHE_TTL_SECONDS = int(os.environ.get("ROUTE_CACHE_TTL", "900"))
 OVERPASS_CACHE_TTL_SECONDS = int(os.environ.get("OVERPASS_CACHE_TTL", "600"))
+NOAA_CACHE_TTL_SECONDS = int(os.environ.get("NOAA_CACHE_TTL", "600"))
 
 # Simple in-memory caches with TTL (per-process)
 _geocode_cache: Dict[str, Dict[str, Any]] = {}
 _route_cache: Dict[str, Dict[str, Any]] = {}
 _route_context_cache: Dict[str, Dict[str, Any]] = {}
 _overpass_response_cache: Dict[str, Dict[str, Any]] = {}
+_noaa_weather_cache: Dict[str, Dict[str, Any]] = {}
+_noaa_alerts_cache: Dict[str, Dict[str, Any]] = {}
+
+# Track NOAA cache behavior for one-run diagnostics
+_noaa_cache_stats = {
+    "weather_hits": 0,
+    "weather_misses": 0,
+    "alerts_hits": 0,
+    "alerts_misses": 0,
+    "nws_http_calls": 0,
+}
 
 OVERPASS_URLS = [
     "https://overpass-api.de/api/interpreter",
@@ -106,6 +118,16 @@ def _cache_set(cache: Dict[str, Dict[str, Any]], key: str, value: Any, ttl: int 
     if not _cache_enabled():
         return
     cache[key] = {"value": value, "expires": time.time() + ttl}
+
+
+def _snapshot_noaa_cache_stats() -> Dict[str, int]:
+    """Return a shallow copy of NOAA cache stats for delta calculations."""
+    return dict(_noaa_cache_stats)
+
+
+def _bucket_coord(value: float, grid: float = 0.25) -> float:
+    """Snap coordinate to a simple grid to improve cache hit rate."""
+    return round(value / grid) * grid
 
 
 async def cached_geocode(location: str) -> Optional[Dict[str, float]]:
@@ -1161,8 +1183,17 @@ async def get_mapbox_route(origin_coords: Dict, dest_coords: Dict, waypoints: Li
 
 async def get_noaa_weather(lat: float, lon: float) -> Optional[WeatherData]:
     """Get weather data using active provider (NOAA in prod, fixtures in demo)."""
+    cache_key = f"{_bucket_coord(lat):.2f}:{_bucket_coord(lon):.2f}"
+    cached = _cache_get(_noaa_weather_cache, cache_key)
+    if cached is not None:
+        _noaa_cache_stats["weather_hits"] += 1
+        return cached
+
+    _noaa_cache_stats["weather_misses"] += 1
+
     try:
         raw = await get_providers().weather.get_weather(lat, lon)
+        _noaa_cache_stats["nws_http_calls"] += 1
         if not raw:
             return None
         hourly_raw = raw.get('hourly_forecast', [])
@@ -1176,7 +1207,7 @@ async def get_noaa_weather(lat: float, lon: float) -> Optional[WeatherData]:
             )
             for entry in hourly_raw
         ]
-        return WeatherData(
+        weather = WeatherData(
             temperature=raw.get('temperature'),
             temperature_unit=raw.get('temperature_unit', 'F'),
             wind_speed=raw.get('wind_speed'),
@@ -1189,6 +1220,8 @@ async def get_noaa_weather(lat: float, lon: float) -> Optional[WeatherData]:
             sunset=raw.get('sunset'),
             hourly_forecast=hourly_forecast,
         )
+        _cache_set(_noaa_weather_cache, cache_key, weather, ttl=NOAA_CACHE_TTL_SECONDS)
+        return weather
     except Exception as e:
         logger.error(f"Weather provider error for {lat},{lon}: {e}")
         return None
@@ -1196,8 +1229,17 @@ async def get_noaa_weather(lat: float, lon: float) -> Optional[WeatherData]:
 
 async def get_noaa_alerts(lat: float, lon: float) -> List[WeatherAlert]:
     """Get alerts using active provider (NOAA in prod, fixtures in demo)."""
+    cache_key = f"{_bucket_coord(lat):.2f}:{_bucket_coord(lon):.2f}"
+    cached = _cache_get(_noaa_alerts_cache, cache_key)
+    if cached is not None:
+        _noaa_cache_stats["alerts_hits"] += 1
+        return cached
+
+    _noaa_cache_stats["alerts_misses"] += 1
+
     try:
         raw_alerts = await get_providers().alerts.get_alerts(lat, lon)
+        _noaa_cache_stats["nws_http_calls"] += 1
         alerts: List[WeatherAlert] = []
         now = datetime.now(timezone.utc)
         cutoff = now - timedelta(hours=12)
@@ -1292,7 +1334,9 @@ async def get_noaa_alerts(lat: float, lon: float) -> List[WeatherAlert]:
             return datetime.min
 
         alerts.sort(key=_ts, reverse=True)
-        return alerts[:10]
+        alerts = alerts[:50]
+        _cache_set(_noaa_alerts_cache, cache_key, alerts, ttl=NOAA_CACHE_TTL_SECONDS)
+        return alerts
     except Exception as e:
         logger.error(f"Alerts provider error for {lat},{lon}: {e}")
         return []
@@ -3649,18 +3693,25 @@ async def get_route_weather_alerts(route_id: str):
     route_geometry = ctx.get("route_geometry", "")
     geometry_index = build_geometry_mile_index(route_geometry) if route_geometry else {}
 
-    max_alert_points = 6
+    stats_before = _snapshot_noaa_cache_stats()
+
+    base_points = 10
+    extra_points = min(6, max(0, int(total_distance // 100)))
+    target_points = max(base_points + extra_points, 10)
+    target_points = min(target_points, 16)
 
     def downsample_waypoints(data: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
         if len(data) <= limit:
             return data
-        if limit <= 1:
-            return [data[0]]
+        if limit <= 2:
+            return [data[0], data[-1]]
         step = (len(data) - 1) / float(limit - 1)
         indices = sorted({round(step * i) for i in range(limit)})
+        indices[0] = 0
+        indices[-1] = len(data) - 1
         return [data[i] for i in indices if 0 <= i < len(data)]
 
-    hazard_waypoints_data = downsample_waypoints(hazard_waypoints_data, max_alert_points)
+    hazard_waypoints_data = downsample_waypoints(hazard_waypoints_data, target_points)
     hazard_total_waypoints = len(hazard_waypoints_data)
 
     is_alaska_route = any(
@@ -3715,6 +3766,19 @@ async def get_route_weather_alerts(route_id: str):
             except Exception:
                 return None
 
+        def _alert_union_id(alert: WeatherAlert) -> str:
+            props = alert.model_dump()
+            for candidate in [getattr(alert, "id", None), props.get("@id"), props.get("id")]:
+                if candidate:
+                    return str(candidate)
+            signature = {
+                "event": getattr(alert, "event", None) or props.get("event"),
+                "headline": getattr(alert, "headline", None) or props.get("headline"),
+                "expires": getattr(alert, "expires", None) or props.get("expires"),
+                "areas": props.get("areas") or props.get("areaDesc"),
+            }
+            return hashlib.sha256(json.dumps(signature, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+
         severity_map = {
             "extreme": "extreme",
             "severe": "high",
@@ -3748,7 +3812,7 @@ async def get_route_weather_alerts(route_id: str):
                 if not alert:
                     continue
                 nws_raw_count += 1
-                alert_id = getattr(alert, "id", None)
+                alert_id = _alert_union_id(alert)
                 if not alert_id or alert_id in nws_alerts:
                     continue
 
@@ -3798,9 +3862,12 @@ async def get_route_weather_alerts(route_id: str):
             props = card.properties or {}
             sev_key = (props.get("severity") or card.alert_level or card.severity or "").lower()
             urg_key = (props.get("urgency") or "").lower()
+            expires_val = _parse_iso(card.expires or (card.properties or {}).get("expires")) or datetime.max.replace(tzinfo=timezone.utc)
             return (
                 severity_rank.get(sev_key, 99),
                 urgency_rank.get(urg_key, 99),
+                card.distance_miles if card.distance_miles is not None else float("inf"),
+                expires_val,
                 card.event or card.message or "",
             )
 
@@ -3811,6 +3878,20 @@ async def get_route_weather_alerts(route_id: str):
         road_conditions = build_condition_segments(hazard_alerts, category="road")
         weather_conditions = build_condition_segments(hazard_alerts, category="weather")
         mark("hazard_build")
+
+        stats_after = _snapshot_noaa_cache_stats()
+        stats_delta = {k: stats_after.get(k, 0) - stats_before.get(k, 0) for k in stats_after}
+        logger.info(
+            "noaa_cache_diagnostics",
+            extra={
+                "route_id": route_id,
+                "weather_hits": stats_delta.get("weather_hits", 0),
+                "weather_misses": stats_delta.get("weather_misses", 0),
+                "alerts_hits": stats_delta.get("alerts_hits", 0),
+                "alerts_misses": stats_delta.get("alerts_misses", 0),
+                "nws_http_calls": stats_delta.get("nws_http_calls", 0),
+            },
+        )
 
         status_value = "ready"
 

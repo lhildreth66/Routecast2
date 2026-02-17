@@ -170,7 +170,7 @@ def test_worker_dedupes_and_applies_band_and_severity_filter():
     result = worker.run_once()
 
     assert result["sent"] == 1
-    assert push.sent[0]["data"]["alertId"] == "alert-2"
+    assert "alert-2" in push.sent[0]["data"]["alertIds"]
     assert db.sent_alerts.count_documents({"alert_id": "alert-2"}) == 1
 
 
