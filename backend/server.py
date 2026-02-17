@@ -2875,31 +2875,30 @@ async def get_turn_by_turn_directions(origin_coords: tuple, dest_coords: tuple, 
         async with httpx.AsyncClient(timeout=15.0) as client:
             coords_str = f"{origin_lon},{origin_lat};{dest_lon},{dest_lat}"
             url = f"https://api.mapbox.com/directions/v5/mapbox/driving/{coords_str}"
-            name = (
-                tags.get("name")
-                or tags.get("brand")
-                or tags.get("operator")
-                or tags.get("official_name")
-                or tags.get("alt_name")
-                or tags.get("short_name")
-                or tags.get("loc_name")
-            )
-            if not name:
-                city_hint = tags.get("addr:city") or tags.get("addr:place")
-                street_hint = tags.get("addr:street")
-                base_label = subtype or supply_type
-                name_parts = [base_label]
-                if city_hint:
-                    name_parts.append(city_hint)
-                elif street_hint:
-                    name_parts.append(street_hint)
-                name = " - ".join(name_parts)
-                logger.warning("Turn-by-turn Mapbox error code=%s message=%s", api_code, data.get('message'))
+            params = {
+                "access_token": MAPBOX_ACCESS_TOKEN,
+                "steps": "true",
+                "geometries": "polyline6",
+                "overview": "full",
+            }
+
+            resp = await client.get(url, params=params)
+            data = resp.json() if resp else {}
+            api_code = data.get("code") or resp.status_code
+
+            if resp.status_code != 200 or api_code != "Ok":
+                logger.warning(
+                    "Turn-by-turn Mapbox error code=%s status=%s message=%s",
+                    api_code,
+                    getattr(resp, "status_code", None),
+                    data.get("message"),
+                )
                 return steps
+
             if not data.get('routes'):
                 logger.warning("Turn-by-turn: no routes returned")
                 return steps
-            
+
             route = data['routes'][0]
             legs = route.get('legs', [])
             steps_count = sum(len(leg.get('steps', []) or []) for leg in legs)
