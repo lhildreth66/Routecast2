@@ -19,6 +19,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 import httpx
+from pymongo.errors import OperationFailure
 
 logger = logging.getLogger(__name__)
 
@@ -299,12 +300,73 @@ class RouteAlertService:
         if hasattr(self.db, "sent_alert_keys"):
             ttl_seconds = int(self.alert_key_ttl_minutes * 60)
             self.db.sent_alert_keys.create_index([("monitor_id", 1), ("alert_key", 1)])
-            self.db.sent_alert_keys.create_index("expires_at", expireAfterSeconds=ttl_seconds)
+            self._ensure_sent_alert_keys_ttl(ttl_seconds)
 
         if hasattr(self.db, "push_tokens"):
             self.db.push_tokens.create_index("push_token")
             self.db.push_tokens.create_index("user_id")
             self.db.push_tokens.create_index("current_route_id")
+
+    def _ensure_sent_alert_keys_ttl(self, ttl_seconds: int) -> None:
+        """Ensure TTL index on sent_alert_keys.expires_at matches configured TTL.
+
+        If an existing index uses a different expireAfterSeconds, drop and recreate it.
+        Heal IndexOptionsConflict by dropping/recreating, and log when healing occurs.
+        """
+
+        coll = self.db.sent_alert_keys
+        desired_name = "expires_at_1"
+        desired_key = [("expires_at", 1)]
+
+        existing_name = None
+        existing_ttl = None
+        try:
+            for idx in coll.list_indexes():
+                key_items = list(idx.get("key", {}).items())
+                if key_items == desired_key:
+                    existing_name = idx.get("name")
+                    existing_ttl = idx.get("expireAfterSeconds")
+                    break
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[route-alerts] failed to inspect TTL index: %s", exc)
+
+        if existing_name and existing_ttl is not None and int(existing_ttl) != int(ttl_seconds):
+            logger.warning(
+                "[route-alerts] TTL index mismatch %s ttl=%s -> %s; recreating",
+                existing_name,
+                existing_ttl,
+                ttl_seconds,
+            )
+            try:
+                coll.drop_index(existing_name)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[route-alerts] failed dropping TTL index %s: %s", existing_name, exc)
+
+        def _create_ttl_index():
+            coll.create_index("expires_at", expireAfterSeconds=ttl_seconds, name=desired_name)
+
+        try:
+            _create_ttl_index()
+        except OperationFailure as exc:
+            code_name = (exc.details or {}).get("codeName") if getattr(exc, "details", None) else None
+            if getattr(exc, "code", None) == 85 or code_name == "IndexOptionsConflict":
+                logger.warning(
+                    "[route-alerts] TTL index conflict; dropping %s and recreating ttl=%s",
+                    desired_name,
+                    ttl_seconds,
+                )
+                try:
+                    coll.drop_index(desired_name)
+                except Exception:  # noqa: BLE001
+                    pass
+                try:
+                    _create_ttl_index()
+                except Exception as recreate_exc:  # noqa: BLE001
+                    logger.warning("[route-alerts] failed to recreate TTL index %s: %s", desired_name, recreate_exc)
+            else:
+                logger.warning("[route-alerts] TTL index creation failed: %s", exc)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[route-alerts] TTL index creation encountered error: %s", exc)
 
     def _persist_current_route(self, user_id: Optional[str], push_token: Optional[str], route_id: str, now: datetime) -> None:
         if not push_token or not hasattr(self.db, "push_tokens"):
