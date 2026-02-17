@@ -5044,9 +5044,15 @@ def _dedupe_camping_spots(spots: List[CampingSpot], precision: int = 3) -> List[
         return (rating, coverage)
 
     def _key_fn(spot: CampingSpot) -> Optional[str]:
-        if spot.latitude is not None and spot.longitude is not None:
-            return f"coord:{round(spot.latitude, precision)}:{round(spot.longitude, precision)}"
-        return _stable_place_key(spot.name, spot.latitude, spot.longitude, source_id=spot.source_id, precision=precision)
+        # Prefer a stable key that includes source id when available, otherwise
+        # fall back to rounded coordinates + normalized name.
+        return _stable_place_key(
+            spot.name,
+            spot.latitude,
+            spot.longitude,
+            source_id=spot.source_id,
+            precision=precision,
+        )
 
     def _prefer(candidate: CampingSpot, current: CampingSpot) -> bool:
         cand_score = _score(candidate)
@@ -5063,8 +5069,35 @@ def _dedupe_camping_spots(spots: List[CampingSpot], precision: int = 3) -> List[
         curr_coord = f"{current.latitude:.6f},{current.longitude:.6f}"
         return cand_coord < curr_coord
 
-    deduped = _dedupe_items(spots, _key_fn, _prefer)
-    return sorted(deduped, key=lambda x: x.distance_miles)
+    primary = _dedupe_items(spots, _key_fn, _prefer)
+
+    # Secondary proximity-based merge to catch near-duplicate nodes/ways that
+    # share the same location but differ slightly in geometry.
+    merged: List[CampingSpot] = []
+    for spot in primary:
+        merged_into_existing = False
+        for idx, existing in enumerate(merged):
+            if (
+                spot.latitude is None
+                or spot.longitude is None
+                or existing.latitude is None
+                or existing.longitude is None
+            ):
+                continue
+            if _haversine_meters(
+                spot.latitude,
+                spot.longitude,
+                existing.latitude,
+                existing.longitude,
+            ) <= 250:  # within ~0.15 miles
+                if _prefer(spot, existing):
+                    merged[idx] = spot
+                merged_into_existing = True
+                break
+        if not merged_into_existing:
+            merged.append(spot)
+
+    return sorted(merged, key=lambda x: x.distance_miles)
 
 @api_router.post("/free-camping/search", response_model=FreeCampingResponse)
 async def search_free_camping(request: FreeCampingRequest):
@@ -5139,18 +5172,28 @@ async def search_free_camping(request: FreeCampingRequest):
             tags = element.get("tags", {})
             
             # Extract name with better fallbacks
-            name = tags.get("name")
+            name_candidates = [
+                tags.get("name"),
+                tags.get("official_name"),
+                tags.get("alt_name"),
+                tags.get("operator"),
+                tags.get("ref"),
+                tags.get("designation"),
+            ]
+            name = next((n for n in name_candidates if n), None)
             if not name:
-                # Try to use operator or location as name
-                operator = tags.get("operator", "")
-                if operator:
-                    name = f"{operator} Camping Area"
-                elif tags.get("backcountry") == "yes":
-                    name = "Dispersed Camping Area"
+                nearest_place = (
+                    tags.get("addr:place")
+                    or tags.get("addr:city")
+                    or tags.get("addr:county")
+                    or tags.get("addr:state")
+                )
+                if tags.get("backcountry") == "yes":
+                    name = f"Backcountry near {nearest_place}" if nearest_place else "Backcountry Camping"
                 elif tags.get("tourism") == "camp_site":
-                    name = "Public Campsite"
+                    name = f"Public Campsite near {nearest_place}" if nearest_place else "Public Campsite"
                 else:
-                    name = "Free Camping Spot"
+                    name = f"Dispersed Camping near {nearest_place}" if nearest_place else "Dispersed Camping"
             
             # Extract contact information
             phone = tags.get("phone") or tags.get("contact:phone")
@@ -6015,6 +6058,31 @@ async def search_cracker_barrel(request: OvernightSearchRequest):
             ok=True,
             source="overpass",
         )
+    except asyncio.CancelledError as exc:
+        elapsed_ms = int((time.time() - started) * 1000)
+        logger.warning("[CrackerBarrel][%s] overpass cancelled after %dms: %s", request_id, elapsed_ms, exc)
+        cache = globals().get("_last_cracker_barrel_cache", {})
+        now = time.time()
+        cached_spots = cache.get("spots") or []
+        cached_ts = cache.get("ts", 0)
+        if cached_spots and now - cached_ts < 3600:
+            logger.info("[CrackerBarrel][%s] using cached fallback %d spots", request_id, len(cached_spots))
+            return OvernightSearchResponse(
+                spots=cached_spots,
+                is_premium_locked=False,
+                ok=True,
+                source="cached_fallback",
+                error="overpass_unavailable",
+            )
+
+        return OvernightSearchResponse(
+            spots=[],
+            is_premium_locked=False,
+            ok=True,
+            source="overpass_unavailable",
+            error="overpass_unavailable",
+        )
+
     except Exception as exc:  # noqa: BLE001
         elapsed_ms = int((time.time() - started) * 1000)
         logger.warning("[CrackerBarrel][%s] overpass unavailable after %dms: %s", request_id, elapsed_ms, exc)
@@ -6230,10 +6298,10 @@ async def search_last_chance_supplies(request: LastChanceRequest):
                 amenities.append("Tools & Repair Parts")
             
             # Hours
-            hours = tags.get("opening_hours", "Call for hours")
+            hours = tags.get("opening_hours") or "Call for hours"
             
             # Phone
-            phone = tags.get("phone", tags.get("contact:phone", "N/A"))
+            phone = tags.get("phone") or tags.get("contact:phone") or "N/A"
             
             # Website
             website = tags.get("website") or tags.get("contact:website") or tags.get("url")
@@ -6251,6 +6319,9 @@ async def search_last_chance_supplies(request: LastChanceRequest):
             if tags.get("addr:postcode"):
                 address_parts.append(tags.get("addr:postcode"))
             address = ", ".join(address_parts) if address_parts else None
+
+            formatted_address = address
+            vicinity = tags.get("addr:city") or tags.get("addr:place")
             
             # Description
             description = tags.get("description", f"{subtype} offering essential supplies")
@@ -6364,7 +6435,7 @@ async def search_rv_dealerships(request: RVDealershipRequest):
                 raise last_error or Exception("All Overpass instances failed")
         
         dealerships = []
-        seen_coords = set()
+        seen_keys = set()
         
         for element in osm_data.get("elements", []):
             # Get coordinates
@@ -6380,37 +6451,41 @@ async def search_rv_dealerships(request: RVDealershipRequest):
             if not lat or not lon:
                 continue
             
-            # Avoid duplicates
-            coord_key = (round(lat, 4), round(lon, 4))
-            if coord_key in seen_coords:
-                continue
-            seen_coords.add(coord_key)
-            
             # Calculate distance
             distance_miles = math.sqrt(
                 (lat - request.latitude) ** 2 + (lon - request.longitude) ** 2
             ) * 69.0
             
             tags = element.get("tags", {})
+            shop_type = tags.get("shop", "")
             
             # Extract name with better fallbacks
-            name = tags.get("name") or tags.get("brand")
+            name_candidates = [
+                tags.get("name"),
+                tags.get("brand"),
+                tags.get("operator"),
+                tags.get("official_name"),
+                tags.get("alt_name"),
+            ]
+            name = next((n for n in name_candidates if n), None)
             if not name:
-                # Use operator if available
-                operator = tags.get("operator", "")
-                if operator:
-                    name = operator
+                craft = tags.get("craft", "")
+                if "caravan" in craft or "caravan" in shop_type:
+                    name = "RV Dealership"
+                elif tags.get("amenity") == "car_repair":
+                    name = "RV Service Center"
+                elif "parts" in craft or "parts" in shop_type:
+                    name = "RV Parts & Service"
                 else:
-                    # Use craft or shop tag for descriptive name
-                    craft = tags.get("craft", "")
-                    shop = tags.get("shop", "")
-                    if "caravan" in craft or "caravan" in shop:
-                        name = "RV Service Center"
-                    elif tags.get("amenity") == "car_repair":
-                        name = "RV Repair Shop"
-                    else:
-                        # Last resort: use coordinates
-                        name = f"RV Service ({round(lat, 3)}, {round(lon, 3)})"
+                    nearest_city = tags.get("addr:city") or tags.get("addr:place")
+                    name = f"RV Service near {nearest_city}" if nearest_city else "RV Service"
+
+            osm_id = element.get("id")
+            dedupe_key = _stable_place_key(name, lat, lon, place_id=osm_id, precision=3)
+            if dedupe_key and dedupe_key in seen_keys:
+                continue
+            if dedupe_key:
+                seen_keys.add(dedupe_key)
             
             # Determine type
             dealership_type = "Dealership"
