@@ -85,6 +85,9 @@ class InMemoryService:
     def within_cooldown(self, monitor_id, event, cooldown_minutes):  # noqa: ANN001
         return False
 
+    def monitor_within_cooldown(self, monitor_id, cooldown_minutes):  # noqa: ANN001
+        return False, None
+
 
 def make_monitor(route_id: str = "r1"):
     points = [{"lat": 0.0, "lon": 0.0}]

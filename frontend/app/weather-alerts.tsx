@@ -24,6 +24,8 @@ interface HazardAlert {
   message: string;
   recommendation: string;
   countdown_text: string;
+  id?: string;
+  alert_id?: string;
   event?: string;
   headline?: string;
   full_description?: string;
@@ -58,9 +60,12 @@ export default function WeatherAlertsScreen() {
   const bridgeAlertsEnabled = params.bridgeAlertsEnabled === 'true';
   const [expandedBridge, setExpandedBridge] = useState<Set<number>>(new Set());
   
-  const sortedAlerts = useMemo(() => {
-    const list = (routeData?.hazard_alerts as HazardAlert[] | undefined) || [];
-    return [...list].sort((a, b) => (a.eta_minutes ?? 0) - (b.eta_minutes ?? 0));
+  const alerts = useMemo(() => {
+    const list =
+      (routeData?.alerts as HazardAlert[] | undefined) ||
+      (routeData?.hazard_alerts as HazardAlert[] | undefined) ||
+      [];
+    return Array.isArray(list) ? list : [];
   }, [routeData]);
 
   const severityFromConditions = (alert: HazardAlert) => {
@@ -144,8 +149,8 @@ export default function WeatherAlertsScreen() {
             <Text style={styles.sectionTitle}>⚠️ Weather Hazards on This Route</Text>
             <Text style={styles.sectionSubtitle}>Sorted by nearest hazard using live route weather data</Text>
 
-            {sortedAlerts.length > 0 ? (
-              sortedAlerts.map((alert: HazardAlert, index: number) => {
+            {alerts.length > 0 ? (
+              alerts.map((alert: HazardAlert, index: number) => {
                 const props = alert.properties || {};
                 const eventTitle = alert.message || alert.event || props.event || alert.headline || 'Weather Alert';
                 const subtitle = alert.recommendation || alert.driver_action || props.headline || '';
@@ -157,9 +162,10 @@ export default function WeatherAlertsScreen() {
                 const roadName = alert.road_name || alert.location_name || 'Unknown road';
                 const spanMiles = alert.span_miles;
                 const driverAction = pickDriverAction(alert);
+                const alertKey = alert.id || (alert as any).alert_id || (props as any).id || index;
 
                 return (
-                  <View key={index} style={[styles.alertCard, styles.alertCardNew]}>
+                  <View key={alertKey} style={[styles.alertCard, styles.alertCardNew]}>
                     <Text style={styles.alertTitle}>
                       {severity.emoji} ALERT {index + 1} — {severity.label} ({roadName})
                     </Text>

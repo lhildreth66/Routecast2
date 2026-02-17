@@ -20,6 +20,7 @@ import json
 import contextlib
 from io import BytesIO
 from datetime import datetime, timedelta, timezone
+
 import httpx
 import polyline
 from notifications.route_alerts import sample_route_points
@@ -31,11 +32,6 @@ from common.premium_gate import require_premium
 from common.features import SOLAR_FORECAST, PROPANE_USAGE, WATER_BUDGET, WIND_SHELTER, ROAD_SIM, CAMPSITE_INDEX, CELL_STARLINK, CLAIM_LOG
 from road_passability_service import RoadPassabilityService
 from solar_forecast_service import SolarForecastService
-from propane_usage_service import PropaneUsageService
-from water_budget_service import WaterBudgetService
-from terrain_shade_service import TerrainShadeService, SunSlot
-from wind_shelter_service import WindShelterService, Ridge
-from connectivity_prediction_service import cell_bars_probability, obstruction_risk, predict_cell_signal_at_location
 from campsite_index_service import SiteFactors, Weights, score as campsite_score
 from claim_log_service import HazardEvent as ClaimHazardEvent, WeatherSnapshot as ClaimWeatherSnapshot, build_claim_log
 from claim_log_pdf import export_claim_log_to_pdf
@@ -407,6 +403,8 @@ class HazardAlert(BaseModel):
     precip_intensity: Optional[str] = None
     visibility: Optional[str] = None
     hazard_id: Optional[str] = None  # stable deterministic id for client diffing
+    alert_id: Optional[str] = None  # NWS alert id for union cards
+    id: Optional[str] = None  # alias for alert_id
     hazard_schema_version: int = HAZARD_SCHEMA_VERSION
 
 
@@ -2159,25 +2157,31 @@ def generate_hazard_alerts(
             enrich_alert_fields(alert_obj)
             alerts.append(alert_obj)
             
-        # Weather alerts from NOAA - deduplicate by alert ID and event type
-        seen_alert_ids = set()
+        # Weather alerts from NOAA - keep all, dedupe later by NWS alert id
         for alert in wp.alerts:
-            # Create a unique key for this alert (id + event type + location)
-            alert_key = f"{getattr(alert, 'id', '')}:{alert.event}:{location_name}"
-            if alert_key in seen_alert_ids:
-                continue  # Skip duplicate alerts
-            seen_alert_ids.add(alert_key)
-            
-            severity_map = {"Extreme": "extreme", "Severe": "high", "Moderate": "medium"}
+            alert_id = getattr(alert, "id", None) or getattr(alert, "alert_id", None)
+            severity_val = (getattr(alert, "severity", None) or "").title()
+            severity_map = {"Extreme": "extreme", "Severe": "high", "Moderate": "medium", "Minor": "low"}
             alert_obj = HazardAlert(
                 type="alert",
-                severity=severity_map.get(alert.severity, "medium"),
+                severity=severity_map.get(severity_val, "medium"),
                 distance_miles=distance,
                 eta_minutes=eta_mins,
                 message=alert.event,
-                recommendation=alert.headline[:100],
+                recommendation=(alert.headline or alert.event or "")[:120],
                 countdown_text=f"{alert.event} in {eta_mins} minutes",
-                location_name=location_name
+                location_name=location_name,
+                event=alert.event,
+                headline=alert.headline,
+                description=getattr(alert, "description", None),
+                full_description=getattr(alert, "description", None),
+                instruction=getattr(alert, "instruction", None),
+                areaDesc=getattr(alert, "areas", None),
+                onset=getattr(alert, "onset", None),
+                expires=getattr(alert, "expires", None),
+                properties=alert.model_dump() if hasattr(alert, "model_dump") else None,
+                alert_id=alert_id,
+                id=alert_id,
             )
             apply_weather_fields(
                 alert_obj,
@@ -3703,6 +3707,106 @@ async def get_route_weather_alerts(route_id: str):
             deduped_alerts.append(alert)
         hazard_alerts = deduped_alerts
 
+        def _parse_iso(dt_str: Optional[str]) -> Optional[datetime]:
+            if not dt_str:
+                return None
+            try:
+                return datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
+            except Exception:
+                return None
+
+        severity_map = {
+            "extreme": "extreme",
+            "severe": "high",
+            "high": "high",
+            "moderate": "medium",
+            "minor": "low",
+            "statement": "low",
+            "unknown": "low",
+        }
+        severity_rank = {
+            "extreme": 0,
+            "severe": 1,
+            "high": 1,
+            "moderate": 2,
+            "minor": 3,
+            "statement": 3,
+            "unknown": 4,
+        }
+        urgency_rank = {
+            "immediate": 0,
+            "expected": 1,
+            "future": 2,
+            "past": 3,
+            "unknown": 4,
+        }
+
+        nws_raw_count = 0
+        nws_alerts: Dict[str, HazardAlert] = {}
+        for wp_weather in hazard_waypoints_weather:
+            for alert in getattr(wp_weather, "alerts", []) or []:
+                if not alert:
+                    continue
+                nws_raw_count += 1
+                alert_id = getattr(alert, "id", None)
+                if not alert_id or alert_id in nws_alerts:
+                    continue
+
+                props = alert.model_dump()
+                nws_severity = (alert.severity or props.get("severity") or "").lower()
+                card_severity = severity_map.get(nws_severity, "medium")
+                event_name = alert.event or alert.headline or "Weather Alert"
+                description = alert.description or alert.summary
+                expires_dt = _parse_iso(alert.expires or alert.ends or props.get("expires"))
+                countdown_text = "Active"
+                if expires_dt:
+                    now_utc = datetime.now(timezone.utc)
+                    delta = expires_dt - now_utc
+                    if delta.total_seconds() > 0:
+                        hours = int(delta.total_seconds() // 3600)
+                        minutes = int((delta.total_seconds() % 3600) // 60)
+                        if hours > 0:
+                            countdown_text = f"Active • {hours}h {minutes}m left"
+                        else:
+                            countdown_text = f"Active • {minutes}m left"
+
+                nws_alerts[alert_id] = HazardAlert(
+                    type="weather",
+                    severity=card_severity,
+                    distance_miles=0.0,
+                    eta_minutes=0,
+                    message=event_name,
+                    recommendation=alert.instruction or "Use caution along your route.",
+                    countdown_text=countdown_text,
+                    event=event_name,
+                    headline=alert.headline,
+                    description=description,
+                    full_description=description,
+                    instruction=alert.instruction,
+                    areaDesc=alert.areas,
+                    onset=alert.onset or alert.effective,
+                    expires=alert.expires or alert.ends,
+                    properties=props,
+                    alert_id=alert_id,
+                    id=alert_id,
+                    alert_level=alert.severity,
+                )
+
+        union_cards = list(nws_alerts.values())
+
+        def _card_sort_key(card: HazardAlert):
+            props = card.properties or {}
+            sev_key = (props.get("severity") or card.alert_level or card.severity or "").lower()
+            urg_key = (props.get("urgency") or "").lower()
+            return (
+                severity_rank.get(sev_key, 99),
+                urgency_rank.get(urg_key, 99),
+                card.event or card.message or "",
+            )
+
+        union_cards.sort(key=_card_sort_key)
+        returned_cards = union_cards[:10]
+
         await hydrate_alert_roads_from_geometry(hazard_alerts, geometry_index)
         road_conditions = build_condition_segments(hazard_alerts, category="road")
         weather_conditions = build_condition_segments(hazard_alerts, category="weather")
@@ -3715,6 +3819,10 @@ async def get_route_weather_alerts(route_id: str):
             extra={
                 "route_id": route_id,
                 "alerts_count": len(hazard_alerts),
+                "union_raw_count": nws_raw_count,
+                "union_dedup_count": len(union_cards),
+                "union_returned_count": len(returned_cards),
+                "union_ids": [card.alert_id for card in returned_cards if card.alert_id],
                 "nws_requests": hazard_total_waypoints,
                 "ms_fetch": timings.get("alerts_fetch"),
                 "ms_total": timings.get("hazard_build"),
@@ -3730,7 +3838,7 @@ async def get_route_weather_alerts(route_id: str):
         return HazardAlertsResponse(
             route_id=route_id,
             hazard_alerts=hazard_alerts,
-            alerts=hazard_alerts,
+            alerts=returned_cards,
             road_conditions=road_conditions,
             weather_conditions=weather_conditions,
             hazard_status=status_value,

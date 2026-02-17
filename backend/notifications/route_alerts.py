@@ -390,6 +390,23 @@ class RouteAlertService:
             logger.warning("[route-alerts] failed cooldown lookup for %s: %s", monitor_id, exc)
             return False
 
+    def monitor_within_cooldown(self, monitor_id: str, cooldown_minutes: int) -> Tuple[bool, Optional[datetime]]:
+        if not monitor_id:
+            return False, None
+        cutoff = self.now() - timedelta(minutes=cooldown_minutes)
+        try:
+            doc = self.db.sent_alerts.find_one({"monitor_id": monitor_id}, sort=[("sent_at", -1)])
+            if not doc:
+                return False, None
+            sent_at = doc.get("sent_at")
+            aware_sent = to_aware_utc(sent_at) if sent_at else None
+            if aware_sent and aware_sent >= cutoff:
+                return True, aware_sent
+            return False, aware_sent
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[route-alerts] failed monitor cooldown lookup for %s: %s", monitor_id, exc)
+            return False, None
+
     def start_monitor(
         self,
         user_id: str,
@@ -923,6 +940,8 @@ class CriticalRouteAlertWorker:
             "route_filter_passed": 0,
         }
 
+        sent_alert_ids: List[str] = []
+
         monitor_id = prepared["monitor_id"]
         token = prepared["token"]
         route_id = prepared["route_id"]
@@ -964,6 +983,24 @@ class CriticalRouteAlertWorker:
                 "current_route_id": current_route_id,
             },
         )
+
+        monitor_cooldown_active, last_sent_at = self.service.monitor_within_cooldown(monitor_id, self.cooldown_minutes)
+        if monitor_cooldown_active:
+            stats["skipped"] += 1
+            stats["alerts_suppressed_cooldown"] += 1
+            logger.info(
+                "[route-alerts] cooldown_suppressed",
+                extra={
+                    "run_id": run_label,
+                    "monitor_id": monitor_id,
+                    "user_id": user_id,
+                    "push_token_suffix": token_suffix,
+                    "route_id": route_id,
+                    "cooldown_minutes": self.cooldown_minutes,
+                    "last_sent_at": last_sent_at.isoformat() if last_sent_at else None,
+                },
+            )
+            return stats
 
         per_point_alerts: List[Dict[str, Any]] = []
         union_alerts: Dict[str, Dict[str, Optional[str]]] = {}
@@ -1076,6 +1113,21 @@ class CriticalRouteAlertWorker:
                         payload["expires"],
                         alert_key=alert_key,
                     )
+                    sent_alert_ids.append(alert_id)
+                    logger.info(
+                        "[route-alerts] push_sent",
+                        extra={
+                            "run_id": run_label,
+                            "monitor_id": monitor_id,
+                            "user_id": user_id,
+                            "push_token_suffix": token_suffix,
+                            "route_id": route_id,
+                            "alert_id": alert_id,
+                            "event": event,
+                            "band": band,
+                            "distance_miles": round(distance, 2),
+                        },
+                    )
                     stats["sent"] += 1
                 else:
                     stats["skipped"] += 1
@@ -1110,6 +1162,18 @@ class CriticalRouteAlertWorker:
                 "per_point_alerts": per_point_alerts,
             },
         )
+
+        if sent_alert_ids:
+            logger.info(
+                "[route-alerts] push_sent_summary",
+                extra={
+                    "run_id": run_label,
+                    "monitor_id": monitor_id,
+                    "route_id": route_id,
+                    "selected_alert_ids": sorted(set(sent_alert_ids)),
+                    "sent_count": len(sent_alert_ids),
+                },
+            )
 
         return stats
 

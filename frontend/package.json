@@ -6,7 +6,9 @@
     "start": "EXPO_NO_PROMPT=1 npx expo start --web --port 3000 --host lan",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "test": "echo \"No frontend tests configured\" && exit 0"
+    "test": "echo \"No frontend tests configured\" && exit 0",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@expo/ngrok": "^4.1.3",
