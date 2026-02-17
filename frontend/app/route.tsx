@@ -552,15 +552,21 @@ export default function RouteScreen() {
         console.log('[alerts] calling route alerts endpoint', { routeId });
         const resp = await axios.get(buildUrl(`route/weather/alerts/${routeId}`));
         const data = resp.data || {};
+
+        const cards = (data.weather_alert_cards || data.alerts || data.hazard_alerts || []) as HazardAlert[];
         const status = (data.status || data.hazard_status || 'ready') as 'pending' | 'ready' | 'error';
-        const hydratedAlerts = filterRecentAlerts(data.alerts || data.hazard_alerts || [], 2 * 60 * 60 * 1000, 10);
+        const hydratedAlerts = filterRecentAlerts(cards, 2 * 60 * 60 * 1000, 10);
 
         console.log('[alerts] fetched', {
           routeId,
           status,
-          rawCount: (data.alerts || data.hazard_alerts || []).length,
+          keys: Object.keys(data || {}),
+          weather_alert_cards_len: (data.weather_alert_cards || []).length,
+          alerts_len: (data.alerts || []).length,
+          hazard_alerts_len: (data.hazard_alerts || []).length,
           filteredCount: hydratedAlerts.length,
         });
+        console.log('weather_alert_cards length', (data.weather_alert_cards || []).length);
 
         setAlerts(hydratedAlerts);
         setAlertsStatus(status);
