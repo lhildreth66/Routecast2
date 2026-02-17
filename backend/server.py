@@ -7,8 +7,9 @@ import os
 import logging
 from pathlib import Path
 import re
-from pydantic import BaseModel, Field
-from typing import List, Optional, Dict, Any, Tuple, Callable, TypeVar
+import random
+from pydantic import BaseModel, Field, ConfigDict
+from typing import List, Optional, Dict, Any, Tuple, Callable, TypeVar, Set, Awaitable
 
 T = TypeVar("T")
 import uuid
@@ -70,11 +71,20 @@ db = None
 # Timing and cache defaults
 TIMING_DEBUG = bool(int(os.environ.get("DEBUG_TIMINGS", "0") or 0))
 CACHE_TTL_SECONDS = int(os.environ.get("ROUTE_CACHE_TTL", "900"))
+OVERPASS_CACHE_TTL_SECONDS = int(os.environ.get("OVERPASS_CACHE_TTL", "600"))
 
 # Simple in-memory caches with TTL (per-process)
 _geocode_cache: Dict[str, Dict[str, Any]] = {}
 _route_cache: Dict[str, Dict[str, Any]] = {}
 _route_context_cache: Dict[str, Dict[str, Any]] = {}
+_overpass_response_cache: Dict[str, Dict[str, Any]] = {}
+
+OVERPASS_URLS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://lz4.overpass-api.de/api/interpreter",
+    "https://z.overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+]
 
 
 def _cache_enabled() -> bool:
@@ -211,7 +221,7 @@ else:
     logger.error("MAPBOX_ACCESS_TOKEN is missing - Mapbox directions/geocoding will fail.")
 
 if not GOOGLE_PLACES_API_KEY:
-    logger.warning("GOOGLE_PLACES_API_KEY is missing - Walmart search will be unavailable.")
+    logger.info("GOOGLE_PLACES_API_KEY not set (expected in local/test); Google Places endpoints will fall back or be stubbed.")
 
 
 def require_mapbox_token():
@@ -345,6 +355,7 @@ class AlternateRoute(BaseModel):
     safety_score: int
     recommendation: str
     avoids: List[str]  # What hazards this route avoids
+
 
 class RouteRequest(BaseModel):
     origin: str
@@ -842,7 +853,7 @@ class OvernightStop(BaseModel):
     distance_miles: float
     latitude: float
     longitude: float
-    osm_id: Optional[int] = None
+    osm_id: Optional[Any] = None
     address: Optional[str] = None
     phone: Optional[str] = None
     website: Optional[str] = None
@@ -850,10 +861,12 @@ class OvernightStop(BaseModel):
     notes: Optional[str] = None
 
 class OvernightSearchRequest(BaseModel):
-    latitude: float
-    longitude: float
+    model_config = ConfigDict(populate_by_name=True)
+
+    latitude: float = Field(..., alias="lat")
+    longitude: float = Field(..., alias="lon")
     radius_miles: int
-    subscription_id: Optional[str] = None
+    subscription_id: Optional[str] = Field(None, alias="subscriptionId")
 
 class OvernightSearchResponse(BaseModel):
     spots: List[OvernightStop]
@@ -862,6 +875,7 @@ class OvernightSearchResponse(BaseModel):
     ok: bool = True
     source: Optional[str] = None
     error: Optional[str] = None
+    debug: Optional[Dict[str, Any]] = None
 
 # ----- Last Chance Supply Models -----
 class SupplyPoint(BaseModel):
@@ -883,10 +897,12 @@ class SupplyPoint(BaseModel):
     website: Optional[str] = None
 
 class LastChanceRequest(BaseModel):
-    latitude: float
-    longitude: float
+    model_config = ConfigDict(populate_by_name=True)
+
+    latitude: float = Field(..., alias="lat")
+    longitude: float = Field(..., alias="lon")
     radius_miles: int
-    subscription_id: Optional[str] = None
+    subscription_id: Optional[str] = Field(None, alias="subscriptionId")
 
 class LastChanceResponse(BaseModel):
     supplies: List[SupplyPoint]
@@ -2859,22 +2875,25 @@ async def get_turn_by_turn_directions(origin_coords: tuple, dest_coords: tuple, 
         async with httpx.AsyncClient(timeout=15.0) as client:
             coords_str = f"{origin_lon},{origin_lat};{dest_lon},{dest_lat}"
             url = f"https://api.mapbox.com/directions/v5/mapbox/driving/{coords_str}"
-            params = {
-                'access_token': MAPBOX_ACCESS_TOKEN,
-                'steps': 'true',
-                'geometries': 'polyline6',
-                'overview': 'full',
-                'annotations': 'distance,duration'
-            }
-            
-            response = await client.get(url, params=params)
-            if response.status_code != 200:
-                logger.warning("Turn-by-turn request failed status=%s body=%s", response.status_code, response.text[:200])
-                return steps
-
-            data = response.json()
-            api_code = data.get('code')
-            if api_code and api_code != 'Ok':
+            name = (
+                tags.get("name")
+                or tags.get("brand")
+                or tags.get("operator")
+                or tags.get("official_name")
+                or tags.get("alt_name")
+                or tags.get("short_name")
+                or tags.get("loc_name")
+            )
+            if not name:
+                city_hint = tags.get("addr:city") or tags.get("addr:place")
+                street_hint = tags.get("addr:street")
+                base_label = subtype or supply_type
+                name_parts = [base_label]
+                if city_hint:
+                    name_parts.append(city_hint)
+                elif street_hint:
+                    name_parts.append(street_hint)
+                name = " - ".join(name_parts)
                 logger.warning("Turn-by-turn Mapbox error code=%s message=%s", api_code, data.get('message'))
                 return steps
             if not data.get('routes'):
@@ -5524,13 +5543,21 @@ def _build_address(tags: Dict[str, Any]) -> Optional[str]:
     return formatted or None
 
 
-async def _fetch_overpass_data(overpass_query: str, label: str) -> Dict[str, Any]:
-    overpass_urls = [
-        "https://overpass-api.de/api/interpreter",
-        "https://lz4.overpass-api.de/api/interpreter",
-        "https://z.overpass-api.de/api/interpreter",
-        "https://overpass.kumi.systems/api/interpreter",
-    ]
+class OverpassError(Exception):
+    def __init__(self, message: str, attempts: List[Dict[str, Any]]):
+        super().__init__(message)
+        self.attempts = attempts
+
+
+async def _fetch_overpass_data(
+    overpass_query: str,
+    label: str,
+    post_fn: Optional[Callable[[str, str], Awaitable[httpx.Response]]] = None,
+) -> Dict[str, Any]:
+    cache_key = hashlib.sha256(f"{label}:{overpass_query}".encode("utf-8")).hexdigest()
+    cached = _cache_get(_overpass_response_cache, cache_key)
+    if cached:
+        return cached
 
     # Cache the last good endpoint for 10 minutes
     cache_ttl = timedelta(minutes=10)
@@ -5546,29 +5573,47 @@ async def _fetch_overpass_data(overpass_query: str, label: str) -> Dict[str, Any
     except Exception:
         pass
 
-    for url in overpass_urls:
+    for url in OVERPASS_URLS:
         if url not in candidates:
             candidates.append(url)
 
     timeout = httpx.Timeout(20.0, connect=5.0)
-    last_error = None
+    last_error: Optional[Exception] = None
+    attempts: List[Dict[str, Any]] = []
+    max_attempts = 3
+    backoff = 0.6
+    attempt_count = 0
+
+    async def _post(url: str):
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            return await client.post(url, data=overpass_query)
 
     for url in candidates:
+        if attempt_count >= max_attempts:
+            break
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                osm_response = await client.post(url, data=overpass_query)
-            if osm_response.status_code == 429 or osm_response.status_code >= 500:
-                raise httpx.HTTPStatusError("Overpass returned error", request=osm_response.request, response=osm_response)
-            osm_response.raise_for_status()
+            resp = await (_post(url) if post_fn is None else post_fn(url, overpass_query))
+            status = resp.status_code
+            if status == 429 or status >= 500:
+                raise httpx.HTTPStatusError("Overpass returned error", request=resp.request, response=resp)
+            resp.raise_for_status()
+            data = resp.json()
             globals()["_last_good_overpass"] = url
             globals()["_last_good_overpass_ts"] = now
-            return osm_response.json()
+            _cache_set(_overpass_response_cache, cache_key, data, ttl=OVERPASS_CACHE_TTL_SECONDS)
+            return data
         except Exception as exc:  # noqa: BLE001
+            attempt_count += 1
+            attempts.append({"url": url, "error": str(exc)})
             last_error = exc
             logger.warning("%s - Overpass instance %s failed: %s", label, url, exc)
+            if attempt_count < max_attempts:
+                delay = min(3.0, backoff + random.uniform(0.0, 0.3))
+                await asyncio.sleep(delay)
+                backoff = min(backoff * 2, 3.5)
             continue
 
-    raise last_error or Exception("All Overpass instances failed")
+    raise OverpassError("All Overpass instances failed", attempts) from last_error
 
 
 GENERIC_PLACEHOLDERS = {"store", "shop", "supermarket", "restaurant", "casino", "location"}
@@ -5953,6 +5998,8 @@ async def _search_cracker_barrel_google_places(request: OvernightSearchRequest) 
             }
         },
         "maxResultCount": 20,
+        "rankPreference": "DISTANCE",
+        "languageCode": "en",
     }
     headers = {
         "Content-Type": "application/json",
@@ -6003,12 +6050,181 @@ async def _search_cracker_barrel_google_places(request: OvernightSearchRequest) 
                 phone=phone,
                 website=website,
                 hours=hours,
+                osm_id=place.get("id"),
                 notes="RV overnight parking welcome. Call ahead to confirm with manager.",
             )
         )
 
     stops.sort(key=lambda x: x.distance_miles)
     return stops
+
+
+async def _search_boondockers_google_places(
+    request: OvernightSearchRequest,
+    *,
+    fetch_page_fn: Optional[Callable[[Optional[str]], Awaitable[Tuple[int, Dict[str, Any]]]]] = None,
+    sleep_fn: Optional[Callable[[float], Awaitable[None]]] = None,
+) -> Tuple[List[OvernightStop], Dict[str, Any]]:
+    """Search for boondocking-friendly spots via Google Places Nearby Search with strong dedupe/pagination.
+
+    - Deduplicates strictly by place_id across all pages.
+    - Retries next_page_token fetches with backoff to avoid premature ZERO_RESULTS.
+    - Returns structured debug info on errors or empty results.
+    """
+
+    sleep_fn = sleep_fn or asyncio.sleep
+    debug: Dict[str, Any] = {
+        "provider": "google_places",
+        "pages": [],
+        "status": None,
+        "reason": None,
+        "request_params": {
+            "lat": request.latitude,
+            "lon": request.longitude,
+            "radius_miles": request.radius_miles,
+        },
+    }
+
+    if not GOOGLE_PLACES_API_KEY and fetch_page_fn is None:
+        logger.warning("GOOGLE_PLACES_API_KEY missing for live Google Places call; returning debug-only response")
+        debug.update({"status": "MISSING_API_KEY", "reason": "GOOGLE_PLACES_API_KEY not set"})
+        return [], debug
+
+    radius_meters = min(50000.0, float(request.radius_miles * 1609.34))
+    url = "https://places.googleapis.com/v1/places:searchNearby"
+    base_body = {
+        "locationRestriction": {
+            "circle": {
+                "center": {"latitude": request.latitude, "longitude": request.longitude},
+                "radius": float(radius_meters),
+            }
+        },
+        "includedTypes": ["campground", "rv_park"],
+        "maxResultCount": 20,
+        "rankPreference": "DISTANCE",
+        "languageCode": "en",
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": GOOGLE_PLACES_API_KEY,
+        "X-Goog-FieldMask": "places.id,places.displayName,places.formattedAddress,places.location,places.nationalPhoneNumber,places.websiteUri,places.regularOpeningHours",
+    }
+
+    async def _default_fetch(page_token: Optional[str]) -> Tuple[int, Dict[str, Any]]:
+        body: Dict[str, Any] = {"pageToken": page_token} if page_token else base_body
+        async with httpx.AsyncClient(timeout=12.0) as client:
+            resp = await client.post(url, headers=headers, json=body)
+        try:
+            payload = resp.json()
+        except Exception:  # noqa: BLE001
+            payload = {"error": {"status": "BAD_JSON", "message": resp.text[:200]}}
+        return resp.status_code, payload
+
+    fetch_page = fetch_page_fn or _default_fetch
+
+    seen_place_ids: Set[str] = set()
+    spots: List[OvernightStop] = []
+    page_token: Optional[str] = None
+    pages_fetched = 0
+    max_pages = 3
+    token_retry_limit = 3
+
+    while pages_fetched < max_pages:
+        token_attempt = 0
+        while True:
+            if page_token:
+                await sleep_fn(1.2 * max(1, token_attempt + 1))
+
+            status_code, payload = await fetch_page(page_token)
+            google_status = payload.get("status") or payload.get("error", {}).get("status") or "OK"
+            error_message = payload.get("error", {}).get("message")
+
+            debug["pages"].append(
+                {
+                    "page": pages_fetched + 1,
+                    "page_token": page_token,
+                    "http_status": status_code,
+                    "google_status": google_status,
+                    "count": len(payload.get("places") or []),
+                    "error_message": error_message,
+                }
+            )
+
+            token_not_ready = page_token is not None and google_status in {"INVALID_ARGUMENT", "FAILED_PRECONDITION"}
+            if token_not_ready and token_attempt < token_retry_limit:
+                token_attempt += 1
+                continue
+
+            if status_code >= 400:
+                debug.update(
+                    {
+                        "status": google_status or f"HTTP_{status_code}",
+                        "reason": error_message or f"HTTP_{status_code}",
+                        "http_status": status_code,
+                    }
+                )
+                logger.warning(
+                    "[Boondockers][GooglePlaces] status_error code=%s gstatus=%s msg=%s",
+                    status_code,
+                    google_status,
+                    error_message,
+                )
+                return [], debug
+
+            places = payload.get("places") or []
+            for place in places:
+                place_id = place.get("id")
+                if not place_id or place_id in seen_place_ids:
+                    continue
+                seen_place_ids.add(place_id)
+
+                loc = place.get("location") or {}
+                lat = loc.get("latitude")
+                lon = loc.get("longitude")
+                if lat is None or lon is None:
+                    continue
+
+                distance_miles = _haversine_meters(request.latitude, request.longitude, lat, lon) * 0.000621371
+                display_name = (place.get("displayName") or {}).get("text") or "Boondocking"
+                address = place.get("formattedAddress")
+                phone = place.get("nationalPhoneNumber")
+                website = place.get("websiteUri")
+                hours_desc = place.get("regularOpeningHours", {}).get("weekdayDescriptions")
+                hours = "; ".join(hours_desc) if hours_desc else None
+
+                spots.append(
+                    OvernightStop(
+                        name=display_name,
+                        category="Boondockers",
+                        label=display_name,
+                        distance_miles=distance_miles,
+                        latitude=lat,
+                        longitude=lon,
+                        address=address,
+                        phone=phone,
+                        website=website,
+                        hours=hours,
+                        osm_id=f"google:{place_id}",
+                        notes="Free or low-cost camping; verify onsite policies.",
+                    )
+                )
+
+            pages_fetched += 1
+            page_token = payload.get("nextPageToken") if payload.get("nextPageToken") else None
+            break
+
+        if not page_token:
+            break
+
+    debug.update(
+        {
+            "status": debug.get("status") or ("OK" if spots else "ZERO_RESULTS"),
+            "reason": debug.get("reason") or ("No places returned" if not spots else None),
+            "unique_place_ids": len(seen_place_ids),
+        }
+    )
+
+    return spots, debug
 
 
 @api_router.post("/casinos/search", response_model=OvernightSearchResponse)
@@ -6037,7 +6253,43 @@ async def search_casinos(request: OvernightSearchRequest):
                 stop.osm_id = None  # Deduplicate node/way duplicates by coordinates instead of OSM id.
                 stops.append(stop)
 
-        stops.sort(key=lambda x: x.distance_miles)
+        def _casino_score(stop: OvernightStop) -> int:
+            score = 0
+            if stop.name and stop.name.lower() not in GENERIC_PLACEHOLDERS:
+                score += 2
+            if stop.address:
+                score += 1
+            if stop.phone or stop.website:
+                score += 1
+            return score
+
+        def _casino_key(stop: OvernightStop) -> Optional[str]:
+            return _stable_place_key(stop.name, stop.latitude, stop.longitude, place_id=None, source_id=None, precision=3)
+
+        def _prefer_casino(cand: OvernightStop, curr: OvernightStop) -> bool:
+            c_score = _casino_score(cand)
+            o_score = _casino_score(curr)
+            if c_score != o_score:
+                return c_score > o_score
+            if cand.distance_miles != curr.distance_miles:
+                return cand.distance_miles < curr.distance_miles
+            return len(cand.name or "") > len(curr.name or "")
+
+        primary = _dedupe_places(stops, _casino_key, _prefer_casino)
+
+        merged: List[OvernightStop] = []
+        for stop in primary:
+            merged_into_existing = False
+            for idx, existing in enumerate(merged):
+                if _haversine_meters(stop.latitude, stop.longitude, existing.latitude, existing.longitude) <= 250:
+                    if _prefer_casino(stop, existing):
+                        merged[idx] = stop
+                    merged_into_existing = True
+                    break
+            if not merged_into_existing:
+                merged.append(stop)
+
+        stops = sorted(merged, key=lambda x: x.distance_miles)
         return OvernightSearchResponse(
             spots=_dedupe_and_limit(stops),
             is_premium_locked=False,
@@ -6112,35 +6364,50 @@ async def search_cracker_barrel(request: OvernightSearchRequest):
 
     try:
         stops = await _search_cracker_barrel_google_places(request)
-        deduped = _dedupe_and_limit(stops)
-        globals()["_last_cracker_barrel_cache"] = {"ts": time.time(), "spots": deduped}
-
-        elapsed_ms = int((time.time() - started) * 1000)
-        logger.info("[CrackerBarrel][%s] returning %d stops elapsed_ms=%d", request_id, len(deduped), elapsed_ms)
-
-        return OvernightSearchResponse(
-            spots=deduped,
-            is_premium_locked=False,
-            ok=True,
-            source="google_places",
-        )
-    except HTTPException as exc:
-        elapsed_ms = int((time.time() - started) * 1000)
-        logger.warning("[CrackerBarrel][%s] google places unavailable after %dms: %s", request_id, elapsed_ms, exc.detail)
-        cache = globals().get("_last_cracker_barrel_cache", {})
-        now = time.time()
-        cached_spots = cache.get("spots") or []
-        cached_ts = cache.get("ts", 0)
-        if cached_spots and now - cached_ts < 3600:
-            logger.info("[CrackerBarrel][%s] using cached fallback %d spots", request_id, len(cached_spots))
-            return OvernightSearchResponse(
-                spots=cached_spots,
-                is_premium_locked=False,
-                ok=True,
-                source="cached_fallback",
-                error="google_places_unavailable",
+        source = "google_places"
+    except HTTPException:
+        logger.info("[CrackerBarrel][%s] falling back to Overpass", request_id)
+        radius_meters = int(request.radius_miles * 1609.34)
+        overpass_query = f"""
+        [out:json][timeout:10];
+        (
+                    node["amenity"="restaurant"]["name"~"Cracker Barrel",i](around:{radius_meters},{request.latitude},{request.longitude});
+                    way["amenity"="restaurant"]["name"~"Cracker Barrel",i](around:{radius_meters},{request.latitude},{request.longitude});
+                    node["brand"~"Cracker Barrel",i](around:{radius_meters},{request.latitude},{request.longitude});
+                    way["brand"~"Cracker Barrel",i](around:{radius_meters},{request.latitude},{request.longitude});
+        );
+        out body;
+        >;
+        out skel qt;
+        """
+        try:
+            osm_data = await _fetch_overpass_first_success(
+                overpass_query,
+                "CrackerBarrel",
+                [
+                    "https://overpass-api.de/api/interpreter",
+                    "https://lz4.overpass-api.de/api/interpreter",
+                    "https://z.overpass-api.de/api/interpreter",
+                ],
+                overall_timeout=9.0,
+                per_timeout=3.5,
+                request_id=request_id,
             )
-        raise
+            stops = []
+            for element in osm_data.get("elements", []):
+                stop = _build_stop(
+                    element,
+                    request,
+                    "Cracker Barrel",
+                    "RV overnight parking welcome. Call ahead to confirm with manager.",
+                )
+                if stop:
+                    stop.osm_id = None
+                    stops.append(stop)
+            source = "overpass_fallback"
+        except Exception as exc2:  # noqa: BLE001
+            logger.warning("[CrackerBarrel][%s] overpass fallback failed: %s", request_id, exc2)
+            return _empty_overpass_response(source="google_places_unavailable")
     except Exception as exc:  # noqa: BLE001
         elapsed_ms = int((time.time() - started) * 1000)
         logger.warning("[CrackerBarrel][%s] unexpected failure after %dms: %s", request_id, elapsed_ms, exc)
@@ -6166,11 +6433,53 @@ async def search_cracker_barrel(request: OvernightSearchRequest):
             error="google_places_unavailable",
         )
 
+    deduped = _dedupe_and_limit(stops)
+    globals()["_last_cracker_barrel_cache"] = {"ts": time.time(), "spots": deduped}
+
+    elapsed_ms = int((time.time() - started) * 1000)
+    logger.info("[CrackerBarrel][%s] returning %d stops source=%s elapsed_ms=%d", request_id, len(deduped), source, elapsed_ms)
+
+    return OvernightSearchResponse(
+        spots=deduped,
+        is_premium_locked=False,
+        ok=True,
+        source=source,
+    )
+
 
 # ==================== Boondockers Overnight (alias to free/low-cost camping) ====================
 
 @api_router.post("/boondockers/search", response_model=OvernightSearchResponse)
 async def search_boondockers(request: OvernightSearchRequest):
+    google_debug: Dict[str, Any] = {}
+    try:
+        if not GOOGLE_PLACES_API_KEY:
+            google_debug = {
+                "provider": "google_places",
+                "status": "MISSING_API_KEY",
+                "reason": "GOOGLE_PLACES_API_KEY not set",
+                "pages": [],
+                "request_params": {"lat": request.latitude, "lon": request.longitude, "radius_miles": request.radius_miles},
+            }
+        else:
+            google_spots, google_debug = await _search_boondockers_google_places(request)
+            if google_spots:
+                deduped = _dedupe_and_limit(google_spots)
+                return OvernightSearchResponse(
+                    spots=deduped,
+                    is_premium_locked=False,
+                    ok=True,
+                    source="google_places",
+                    debug=google_debug,
+                )
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Boondockers Google Places failed: %s", exc)
+        google_debug = {"status": "EXCEPTION", "reason": str(exc)}
+
+    # Fallback to Overpass so the endpoint never silently returns empty without context.
+    overpass_debug: Dict[str, Any] = {"google_places": google_debug}
     try:
         radius_meters = int(request.radius_miles * 1609.34)
         overpass_query = f"""
@@ -6205,10 +6514,21 @@ async def search_boondockers(request: OvernightSearchRequest):
             is_premium_locked=False,
             ok=True,
             source="overpass",
+            debug=overpass_debug,
         )
     except Exception as exc:  # noqa: BLE001
         logger.warning("Boondockers search using Overpass failed: %s", exc)
-        return _empty_overpass_response()
+        overpass_debug.update({"status": "OVERPASS_FAILED", "reason": str(exc)})
+        if isinstance(exc, OverpassError):
+            overpass_debug["attempts"] = exc.attempts
+        return OvernightSearchResponse(
+            spots=[],
+            is_premium_locked=False,
+            ok=True,
+            source="overpass",
+            error="overpass_unavailable",
+            debug=overpass_debug,
+        )
 
 
 # ==================== Last Chance Supply Finder Endpoint ====================
@@ -6294,14 +6614,14 @@ async def search_last_chance_supplies(request: LastChanceRequest):
             ) * 69.0
             
             tags = element.get("tags", {})
-            
+
             # Determine type and subtype first (needed for name fallback)
             shop_type = tags.get("shop", "")
             amenity = tags.get("amenity", "")
-            
+
             supply_type = "Grocery"
             subtype = "Store"
-            
+
             if shop_type == "supermarket":
                 supply_type = "Grocery"
                 subtype = "Supermarket"
@@ -6317,24 +6637,51 @@ async def search_last_chance_supplies(request: LastChanceRequest):
             elif amenity == "fuel" and tags.get("fuel:lpg") == "yes":
                 supply_type = "Propane"
                 subtype = "Gas Station"
-            
+
             # Extract name with better fallbacks
             base_label = subtype or supply_type
-            name = (
-                tags.get("name")
-                or tags.get("brand")
-                or tags.get("operator")
-                or tags.get("official_name")
+            city_hint = (
+                tags.get("addr:city")
+                or tags.get("addr:place")
+                or tags.get("addr:town")
+                or tags.get("addr:village")
             )
+            street_line = None
+            if tags.get("addr:housenumber") and tags.get("addr:street"):
+                street_line = f"{tags.get('addr:housenumber')} {tags.get('addr:street')}"
+            elif tags.get("addr:street"):
+                street_line = tags.get("addr:street")
+
+            name = None
+            for candidate in [
+                tags.get("name"),
+                tags.get("brand"),
+                tags.get("operator"),
+                tags.get("official_name"),
+                tags.get("alt_name"),
+                tags.get("short_name"),
+                tags.get("loc_name"),
+                tags.get("branch"),
+            ]:
+                if candidate and candidate.strip().lower() not in GENERIC_PLACEHOLDERS:
+                    name = candidate.strip()
+                    break
+
             if not name:
-                city_hint = tags.get("addr:city") or tags.get("addr:place")
-                name_parts = [base_label]
-                if city_hint:
-                    name_parts.append(city_hint)
-                name = " - ".join(name_parts)
-            
+                if street_line and city_hint:
+                    name = f"{base_label} - {street_line}, {city_hint}"
+                elif street_line:
+                    name = f"{base_label} - {street_line}"
+                elif city_hint:
+                    name = f"{base_label} - {city_hint}"
+                elif supply_type == "Propane":
+                    name = f"{base_label} near ({round(lat, 3)}, {round(lon, 3)})"
+                else:
+                    # Skip unlabeled points that would appear as generic "Store"
+                    continue
+
             # Add propane indicator if applicable
-            if supply_type == "Propane" and "Propane" not in name and "LPG" not in name:
+            if supply_type == "Propane" and "propane" not in name.lower() and "lpg" not in name.lower():
                 name = f"{name} (Propane Available)"
             
             # Extract amenities
@@ -6427,13 +6774,15 @@ async def search_last_chance_supplies(request: LastChanceRequest):
             return score
 
         def _supply_key(supply: SupplyPoint) -> Optional[str]:
+            # If name is generic, lean more on coordinate precision to merge.
+            prec = 3 if supply.name and supply.name.lower() not in GENERIC_PLACEHOLDERS else 2
             return _stable_place_key(
                 supply.name,
                 supply.latitude,
                 supply.longitude,
                 place_id=None,
                 source_id=None,
-                precision=3,
+                precision=prec,
             )
 
         def _prefer_supply(candidate: SupplyPoint, current: SupplyPoint) -> bool:

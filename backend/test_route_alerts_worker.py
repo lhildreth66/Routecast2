@@ -34,6 +34,7 @@ class InMemoryService:
         self.push_gateway = push_gateway or FakePushGateway()
         self.sent = []
         self.monitors = []
+        self.current_route_id: str | None = None
 
     def get_active_monitors(self):
         return self.monitors
@@ -58,7 +59,7 @@ class InMemoryService:
             and s["event"] not in events
         )
 
-    def record_sent(self, monitor_id, route_signature_val, route_id, alert_id, event, band, distance, headline, expires):
+    def record_sent(self, monitor_id, route_signature_val, route_id, alert_id, event, band, distance, headline, expires, alert_key=None):
         self.sent.append(
             {
                 "monitor_id": monitor_id,
@@ -68,8 +69,21 @@ class InMemoryService:
                 "band": band,
                 "event": event,
                 "sent_at": self.now(timezone.utc),
+                "alert_key": alert_key,
             }
         )
+
+    def get_current_route_id(self, user_id=None, push_token=None):  # noqa: ANN001
+        return self.current_route_id
+
+    def mark_alert_key(self, monitor_id, alert_key, route_id):  # noqa: ANN001
+        return None
+
+    def alert_key_recent(self, monitor_id, alert_key, cooldown_minutes):  # noqa: ANN001
+        return False
+
+    def within_cooldown(self, monitor_id, event, cooldown_minutes):  # noqa: ANN001
+        return False
 
 
 def make_monitor(route_id: str = "r1"):
@@ -135,6 +149,7 @@ def test_dedupe_allows_b_then_a(monkeypatch):
     service = InMemoryService(now_fn=now_fn)
     monitor = make_monitor()
     service.monitors = [monitor]
+    service.current_route_id = monitor["route_id"]
 
     alert = make_alert()
 
@@ -159,6 +174,7 @@ def test_dedupe_blocks_a_then_b(monkeypatch):
     service = InMemoryService(now_fn=now_fn)
     monitor = make_monitor()
     service.monitors = [monitor]
+    service.current_route_id = monitor["route_id"]
     alert = make_alert()
 
     worker = CriticalRouteAlertWorker(service, fetcher=lambda lat, lon: [alert])
@@ -182,6 +198,7 @@ def test_hourly_cap_and_tornado(monkeypatch):
     service = InMemoryService(now_fn=now_fn)
     monitor = make_monitor()
     service.monitors = [monitor]
+    service.current_route_id = monitor["route_id"]
 
     alerts = [make_alert(alert_id=f"a{i}") for i in range(3)]
     worker = CriticalRouteAlertWorker(service, fetcher=lambda lat, lon: alerts)

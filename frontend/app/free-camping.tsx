@@ -22,10 +22,31 @@ interface CampingSpot {
   elevation_ft: number;
   rating: number; // 0-5
   free: boolean;
+  source_id?: string;
   phone?: string;
   website?: string;
   contact?: string;
 }
+
+const dedupeSpots = (spots: CampingSpot[]): CampingSpot[] => {
+  const seen = new Map<string, CampingSpot>();
+
+  const makeKey = (spot: CampingSpot): string => {
+    if (spot.source_id) return String(spot.source_id);
+    const lat = spot.latitude?.toFixed(4);
+    const lon = spot.longitude?.toFixed(4);
+    return `${spot.name?.toLowerCase() || 'unknown'}:${lat}:${lon}`;
+  };
+
+  for (const spot of spots) {
+    const key = makeKey(spot);
+    if (!seen.has(key)) {
+      seen.set(key, spot);
+    }
+  }
+
+  return Array.from(seen.values());
+};
 
 export default function FreeCampingScreen() {
   const router = useRouter();
@@ -101,7 +122,7 @@ export default function FreeCampingScreen() {
         longitude: parseFloat(longitude),
         radius_miles: parseInt(searchRadius, 10),
       });
-      setSpots(resp.data.spots || []);
+      setSpots(dedupeSpots(resp.data.spots || []));
       if (resp.data.spots && resp.data.spots.length === 0) {
         setError('No free camping spots found in this area. Try increasing the search radius or searching a different location.');
       }
@@ -252,11 +273,12 @@ export default function FreeCampingScreen() {
             <Text style={styles.resultsTitle}>Found {spots.length} Free Camping Spot{spots.length !== 1 ? 's' : ''}</Text>
             
             {spots.map((spot, index) => {
+              const key = spot.source_id || `${spot.name}-${spot.latitude}-${spot.longitude}`;
               const isExpanded = expandedSpots.has(index);
               
               return (
                 <TouchableOpacity
-                  key={index}
+                  key={key}
                   style={[styles.spotCard, isExpanded && styles.spotCardExpanded]}
                   onPress={() => toggleSpotExpand(index)}
                   activeOpacity={0.8}

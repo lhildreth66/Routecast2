@@ -248,6 +248,7 @@ class RouteAlertService:
         self.push_gateway = push_gateway or PushGateway()
         self.now = now_fn
         self.monitor_ttl_hours = float(os.environ.get("ROUTE_ALERTS_MONITOR_TTL_HOURS", "24"))
+        self.alert_key_ttl_minutes = int(os.environ.get("ROUTE_ALERT_KEY_TTL_MIN", "120"))
         self._ensure_indexes()
 
     def _ensure_indexes(self):
@@ -266,6 +267,100 @@ class RouteAlertService:
             unique=True,
         )
         self.db.sent_alerts.create_index("sent_at")
+
+        if hasattr(self.db, "sent_alert_keys"):
+            ttl_seconds = int(self.alert_key_ttl_minutes * 60)
+            self.db.sent_alert_keys.create_index([("monitor_id", 1), ("alert_key", 1)])
+            self.db.sent_alert_keys.create_index("expires_at", expireAfterSeconds=ttl_seconds)
+
+        if hasattr(self.db, "push_tokens"):
+            self.db.push_tokens.create_index("push_token")
+            self.db.push_tokens.create_index("user_id")
+            self.db.push_tokens.create_index("current_route_id")
+
+    def _persist_current_route(self, user_id: Optional[str], push_token: Optional[str], route_id: str, now: datetime) -> None:
+        if not push_token or not hasattr(self.db, "push_tokens"):
+            return
+        try:
+            self.db.push_tokens.update_one(
+                {"push_token": push_token},
+                {
+                    "$set": {
+                        "push_token": push_token,
+                        "user_id": user_id or push_token,
+                        "current_route_id": route_id,
+                        "updated_at": now,
+                    }
+                },
+                upsert=True,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[route-alerts] failed to persist current_route_id for token=%s: %s", push_token[:12], exc)
+
+    def get_current_route_id(self, user_id: Optional[str], push_token: Optional[str]) -> Optional[str]:
+        if not hasattr(self.db, "push_tokens"):
+            return None
+
+        candidates = []
+        if push_token:
+            candidates.append({"push_token": push_token})
+        if user_id:
+            candidates.append({"user_id": user_id})
+
+        for query in candidates:
+            try:
+                doc = self.db.push_tokens.find_one(query)
+                if doc and doc.get("current_route_id"):
+                    return doc.get("current_route_id")
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[route-alerts] failed to read current_route_id: %s", exc)
+                return None
+        return None
+
+    def mark_alert_key(self, monitor_id: str, alert_key: str, route_id: str) -> None:
+        if not alert_key or not hasattr(self.db, "sent_alert_keys"):
+            return
+        now = self.now()
+        expires_at = now + timedelta(minutes=self.alert_key_ttl_minutes)
+        try:
+            self.db.sent_alert_keys.update_one(
+                {"monitor_id": monitor_id, "alert_key": alert_key},
+                {
+                    "$set": {
+                        "monitor_id": monitor_id,
+                        "alert_key": alert_key,
+                        "route_id": route_id,
+                        "last_sent_at": now,
+                        "expires_at": expires_at,
+                    }
+                },
+                upsert=True,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[route-alerts] failed to upsert alert_key %s for %s: %s", alert_key, monitor_id, exc)
+
+    def alert_key_recent(self, monitor_id: str, alert_key: str, cooldown_minutes: int) -> bool:
+        if not alert_key or not hasattr(self.db, "sent_alert_keys"):
+            return False
+        try:
+            doc = self.db.sent_alert_keys.find_one({"monitor_id": monitor_id, "alert_key": alert_key})
+            return bool(doc)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[route-alerts] failed to read alert_key for %s: %s", monitor_id, exc)
+            return False
+
+    def within_cooldown(self, monitor_id: str, event: str, cooldown_minutes: int) -> bool:
+        if not event:
+            return False
+        cutoff = self.now() - timedelta(minutes=cooldown_minutes)
+        try:
+            doc = self.db.sent_alerts.find_one(
+                {"monitor_id": monitor_id, "event": event, "sent_at": {"$gte": cutoff}}
+            )
+            return bool(doc)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[route-alerts] failed cooldown lookup for %s: %s", monitor_id, exc)
+            return False
 
     def start_monitor(
         self,
@@ -308,12 +403,14 @@ class RouteAlertService:
             "bbox": bbox or _compute_bbox(samples) or _compute_bbox(route_points),
             "expo_push_token": push_token,
             "route_id": route_id,
+            "current_route_id": route_id,
             "route_signature": route_signature,
             "active": True,
             "created_at": now,
             "expires_at": expires_at,
         }
         self.db.route_monitors.insert_one(doc)
+        self._persist_current_route(user_id=user_id, push_token=push_token, route_id=route_id, now=now)
         return {
             "monitor_id": monitor_id,
             "sample_points": samples,
@@ -378,12 +475,14 @@ class RouteAlertService:
         distance_miles: float,
         headline: str,
         expires: Optional[str],
+        alert_key: Optional[str] = None,
     ) -> None:
         doc = {
             "monitor_id": monitor_id,
             "route_signature": route_signature,
             "route_id": route_id,
             "alert_id": alert_id,
+            "alert_key": alert_key,
             "event": event,
             "band": band,
             "distance_miles": distance_miles,
@@ -420,12 +519,29 @@ class CriticalRouteAlertWorker:
         self.now = now_fn
         self.cap_per_hour = int(os.environ.get("ROUTE_ALERTS_CAP_PER_HOUR", "2"))
         self.resend_ttl_minutes = int(os.environ.get("ROUTE_ALERTS_RESEND_TTL_MIN", "15"))
+        self.cooldown_minutes = int(os.environ.get("ROUTE_ALERTS_COOLDOWN_MIN", "60"))
+        self._current_run_id: Optional[str] = None
         self._recent_alert_cache: Dict[str, Dict[str, Any]] = {}
 
     def _recent_cache_key(
         self, monitor_id: str, route_signature: str, route_id: str, alert_id: str, band: str
     ) -> str:
         return f"{monitor_id}:{route_signature}:{route_id}:{alert_id}:{band}"
+
+    def _alert_key(self, alert: Dict[str, Any]) -> str:
+        props = alert.get("properties", {})
+        candidate = props.get("id") or alert.get("id")
+        if candidate:
+            return str(candidate)
+
+        payload = {
+            "event": props.get("event"),
+            "onset": props.get("onset"),
+            "expires": props.get("expires"),
+            "area": props.get("areaDesc"),
+        }
+        raw = json.dumps(payload, sort_keys=True)
+        return hashlib.sha256(raw.encode()).hexdigest()
 
     def _skip_for_recent(self, monitor_id: str, route_signature: str, route_id: str, alert_id: str, band: str) -> bool:
         now = self.now()
@@ -438,17 +554,22 @@ class CriticalRouteAlertWorker:
         return bool(entry and entry.get("expires_at") and entry["expires_at"] > now)
 
     def run_once(self) -> Dict[str, Any]:
+        run_id = uuid.uuid4().hex[:8]
+        self._current_run_id = run_id
         monitors = self.service.get_active_monitors()
         logger.info(
             "[route-alerts] fetched active monitors count=%d filter=active=True",
             len(monitors),
         )
+        monitors_considered_ids = [m.get("monitor_id") for m in monitors if m.get("monitor_id")]
+        monitors_after_route_filter: List[str] = []
         summary = {
             "monitors": len(monitors),
             "sent": 0,
             "skipped": 0,
             "nws_calls": 0,
             "alerts_seen": 0,
+            "alerts_found": 0,
             "skipped_type": 0,
             "skipped_distance": 0,
             "skipped_dedupe": 0,
@@ -456,6 +577,9 @@ class CriticalRouteAlertWorker:
             "skipped_push": 0,
             "skipped_points": 0,
             "skipped_geometry": 0,
+            "skipped_current_route": 0,
+            "alerts_suppressed_already_sent": 0,
+            "alerts_suppressed_cooldown": 0,
             "monitors_with_geometry": 0,
             "monitors_without_geometry": 0,
         }
@@ -484,7 +608,9 @@ class CriticalRouteAlertWorker:
         summary["nws_calls"] += len(unique_points)
 
         for item in prepared:
-            result = self._process_monitor_with_cache(item, alerts_cache)
+            result = self._process_monitor_with_cache(item, alerts_cache, run_id=run_id)
+            if result.get("route_filter_passed"):
+                monitors_after_route_filter.append(item.get("monitor_id"))
             for key in summary:
                 if key in result:
                     summary[key] += result[key]
@@ -508,6 +634,19 @@ class CriticalRouteAlertWorker:
             summary["skipped_points"],
             summary["skipped_geometry"],
             summary["monitors_without_geometry"],
+        )
+
+        logger.info(
+            "[route-alerts] instrumentation",
+            extra={
+                "run_id": run_id,
+                "monitors_considered": monitors_considered_ids,
+                "monitors_after_current_route_filter": monitors_after_route_filter,
+                "alerts_found": summary["alerts_found"],
+                "alerts_sent": summary["sent"],
+                "alerts_suppressed_already_sent": summary["alerts_suppressed_already_sent"],
+                "alerts_suppressed_cooldown": summary["alerts_suppressed_cooldown"],
+            },
         )
         return summary
 
@@ -695,17 +834,27 @@ class CriticalRouteAlertWorker:
             except TypeError:
                 return self.service.push_gateway.send(token, payload["title"], payload["collapsed_body"])
 
-    def _process_monitor_with_cache(self, prepared: Dict[str, Any], alerts_cache: Dict[str, List[Dict[str, Any]]]) -> Dict[str, int]:
+    def _process_monitor_with_cache(
+        self,
+        prepared: Dict[str, Any],
+        alerts_cache: Dict[str, List[Dict[str, Any]]],
+        run_id: Optional[str] = None,
+    ) -> Dict[str, int]:
         stats = {
             "sent": 0,
             "skipped": 0,
             "nws_calls": 0,
             "alerts_seen": 0,
+            "alerts_found": 0,
             "skipped_type": 0,
             "skipped_distance": 0,
             "skipped_dedupe": 0,
             "skipped_cap": 0,
             "skipped_push": 0,
+            "skipped_current_route": 0,
+            "alerts_suppressed_already_sent": 0,
+            "alerts_suppressed_cooldown": 0,
+            "route_filter_passed": 0,
         }
 
         monitor_id = prepared["monitor_id"]
@@ -713,6 +862,40 @@ class CriticalRouteAlertWorker:
         route_id = prepared["route_id"]
         route_signature = prepared["route_signature"]
         sample_points = prepared["sample_points"]
+        monitor_doc = prepared.get("monitor") or {}
+        user_id = monitor_doc.get("user_id") or token
+        token_suffix = (token or "")[-6:]
+        current_route_id = self.service.get_current_route_id(user_id=user_id, push_token=token) or monitor_doc.get("current_route_id")
+
+        run_label = run_id or self._current_run_id
+        if not current_route_id or not route_id or route_id != current_route_id:
+            stats["skipped"] += 1
+            stats["skipped_current_route"] += 1
+            logger.info(
+                "[route-alerts] route gate suppressed",
+                extra={
+                    "run_id": run_label,
+                    "monitor_id": monitor_id,
+                    "user_id": user_id,
+                    "push_token_suffix": token_suffix,
+                    "route_id": route_id,
+                    "current_route_id": current_route_id,
+                },
+            )
+            return stats
+
+        stats["route_filter_passed"] = 1
+        logger.info(
+            "[route-alerts] route gate passed",
+            extra={
+                "run_id": run_label,
+                "monitor_id": monitor_id,
+                "user_id": user_id,
+                "push_token_suffix": token_suffix,
+                "route_id": route_id,
+                "current_route_id": current_route_id,
+            },
+        )
 
         for point in sample_points:
             key = self._point_cache_key(point["lat"], point["lon"])
@@ -721,6 +904,7 @@ class CriticalRouteAlertWorker:
                 continue
             stats["alerts_seen"] += len(alerts)
             for alert in alerts:
+                stats["alerts_found"] += 1
                 if not self._is_critical(alert):
                     stats["skipped"] += 1
                     stats["skipped_type"] += 1
@@ -728,6 +912,7 @@ class CriticalRouteAlertWorker:
 
                 event = alert.get("properties", {}).get("event", "Unknown")
                 alert_id = alert.get("id") or alert.get("properties", {}).get("id") or str(uuid.uuid4())
+                alert_key = self._alert_key(alert)
 
                 distance = self._distance_to_alert(point, alert)
                 band = self._band_for_distance(distance)
@@ -736,19 +921,33 @@ class CriticalRouteAlertWorker:
                     stats["skipped_distance"] += 1
                     continue
 
+                if self.service.alert_key_recent(monitor_id, alert_key, self.cooldown_minutes):
+                    stats["skipped"] += 1
+                    stats["skipped_dedupe"] += 1
+                    stats["alerts_suppressed_already_sent"] += 1
+                    continue
+
                 if self._skip_for_recent(monitor_id, route_signature, route_id, alert_id, band):
                     stats["skipped"] += 1
                     stats["skipped_dedupe"] += 1
+                    stats["alerts_suppressed_already_sent"] += 1
                     continue
 
                 if band == "within_15" and self._has_sent(route_signature, route_id, alert_id, "within_5", monitor_id=monitor_id):
                     stats["skipped"] += 1
                     stats["skipped_dedupe"] += 1
+                    stats["alerts_suppressed_already_sent"] += 1
                     continue
 
                 if self._has_sent(route_signature, route_id, alert_id, band, monitor_id=monitor_id):
                     stats["skipped"] += 1
                     stats["skipped_dedupe"] += 1
+                    stats["alerts_suppressed_already_sent"] += 1
+                    continue
+
+                if self.service.within_cooldown(monitor_id, event, self.cooldown_minutes):
+                    stats["skipped"] += 1
+                    stats["alerts_suppressed_cooldown"] += 1
                     continue
 
                 if event != "Tornado Warning":
@@ -773,6 +972,7 @@ class CriticalRouteAlertWorker:
                     self._recent_alert_cache[cache_key] = {
                         "expires_at": self.now() + timedelta(minutes=self.resend_ttl_minutes),
                     }
+                    self.service.mark_alert_key(monitor_id, alert_key, route_id)
                     self.service.record_sent(
                         monitor_id,
                         route_signature,
@@ -783,6 +983,7 @@ class CriticalRouteAlertWorker:
                         distance,
                         payload["headline"],
                         payload["expires"],
+                        alert_key=alert_key,
                     )
                     stats["sent"] += 1
                 else:

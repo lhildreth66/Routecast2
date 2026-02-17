@@ -81,6 +81,7 @@ Frontend will be available at `http://localhost:3000` (web) or via Expo Go app (
 | `MONGO_URL` | Yes | MongoDB connection string |
 | `DB_NAME` | Yes | Database name |
 | `MAPBOX_ACCESS_TOKEN` | Yes | Mapbox API key for geocoding/routing |
+| `GOOGLE_PLACES_API_KEY` | Prod | Google Places Nearby for Boondockers/Walmart/Cracker Barrel; optional locally (tests mock, Overpass fallback) |
 | `GOOGLE_API_KEY` | Yes | Google API key for Gemini AI chat |
 | `NOAA_USER_AGENT` | No | User agent for NOAA API requests |
 

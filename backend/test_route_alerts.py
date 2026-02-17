@@ -40,8 +40,14 @@ class FakeCollection:
                     doc.update(update["$set"])
         return type("Result", (), {"modified_count": matched})
 
-    def update_one(self, query, update):
+    def update_one(self, query, update, upsert=False):
+        before = len(self.docs)
         self.update_many(query, update)
+        if upsert and len(self.docs) == before:
+            doc = {}
+            if "$set" in update:
+                doc.update(update["$set"])
+            self.docs.append(doc)
 
     def find(self, query=None):
         query = query or {}
@@ -68,6 +74,8 @@ class FakeDB:
     def __init__(self):
         self.route_monitors = FakeCollection()
         self.sent_alerts = FakeCollection()
+        self.sent_alert_keys = FakeCollection()
+        self.push_tokens = FakeCollection()
 
 
 class FakePushGateway:
