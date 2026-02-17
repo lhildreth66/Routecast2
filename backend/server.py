@@ -3626,12 +3626,34 @@ async def get_route_weather_alerts(route_id: str):
     route_geometry = ctx.get("route_geometry", "")
     geometry_index = build_geometry_mile_index(route_geometry) if route_geometry else {}
 
+    max_alert_points = 6
+
+    def downsample_waypoints(data: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
+        if len(data) <= limit:
+            return data
+        if limit <= 1:
+            return [data[0]]
+        step = (len(data) - 1) / float(limit - 1)
+        indices = sorted({round(step * i) for i in range(limit)})
+        return [data[i] for i in indices if 0 <= i < len(data)]
+
+    hazard_waypoints_data = downsample_waypoints(hazard_waypoints_data, max_alert_points)
     hazard_total_waypoints = len(hazard_waypoints_data)
+
+    is_alaska_route = any(
+        (wp.get("lat") is not None and wp.get("lon") is not None and wp.get("lat") >= 50 and wp.get("lon") <= -130)
+        for wp in hazard_waypoints_data
+    )
+
+    alaska_alerts_cache: Optional[List[WeatherAlert]] = None
+    if is_alaska_route and hazard_waypoints_data:
+        first_wp = hazard_waypoints_data[0]
+        alaska_alerts_cache = await get_noaa_alerts(first_wp.get("lat"), first_wp.get("lon"))
 
     async def fetch_hazard_wp(wp_dict: Dict[str, Any], index: int, total: int) -> WaypointWeather:
         wp = Waypoint(**wp_dict)
         weather = await get_noaa_weather(wp.lat, wp.lon)
-        alerts = await get_noaa_alerts(wp.lat, wp.lon)
+        alerts = alaska_alerts_cache if alaska_alerts_cache is not None else await get_noaa_alerts(wp.lat, wp.lon)
         return WaypointWeather(waypoint=wp, weather=weather, alerts=alerts)
 
     try:
@@ -3650,6 +3672,17 @@ async def get_route_weather_alerts(route_id: str):
             total_route_minutes=total_duration_minutes,
             route_id=route_id,
         )
+
+        deduped_alerts: List[HazardAlert] = []
+        seen_ids = set()
+        for alert in hazard_alerts:
+            alert_id = getattr(alert, "id", None) or getattr(alert, "alert_id", None)
+            if alert_id:
+                if alert_id in seen_ids:
+                    continue
+                seen_ids.add(alert_id)
+            deduped_alerts.append(alert)
+        hazard_alerts = deduped_alerts
 
         await hydrate_alert_roads_from_geometry(hazard_alerts, geometry_index)
         road_conditions = build_condition_segments(hazard_alerts, category="road")
