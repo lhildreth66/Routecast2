@@ -3934,6 +3934,15 @@ async def get_route_weather_alerts(route_id: str):
                 "returned_events": [card.event or card.message for card in returned_cards],
             },
         )
+        logger.info(
+            "route_alerts_union_debug",
+            extra={
+                "route_id": route_id,
+                "raw_features_total": nws_raw_count,
+                "dedup_count": len(union_list),
+                "returned_events": [card.event or card.message for card in returned_cards],
+            },
+        )
         if debug_enabled:
             debug_payload["union_summary"] = {
                 "raw_union_count": nws_raw_count,
