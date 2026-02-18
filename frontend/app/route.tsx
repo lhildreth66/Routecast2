@@ -543,6 +543,13 @@ export default function RouteScreen() {
     setExpandedCards(newExpanded);
   };
 
+  const stopSpeech = useCallback((options?: { skipState?: boolean }) => {
+    Speech.stop();
+    if (!options?.skipState) {
+      setIsSpeaking(false);
+    }
+  }, []);
+
   const fetchAlertsForRoute = useCallback(
     async (routeId?: string) => {
       if (!routeId) return;
@@ -605,6 +612,13 @@ export default function RouteScreen() {
     [fetchAlertsForRoute]
   );
   
+
+  useEffect(() => {
+    return () => {
+      stopSpeech({ skipState: true });
+    };
+  }, [stopSpeech]);
+
 
   useEffect(() => {
     const perfParam = Array.isArray(params.perf) ? params.perf[0] : (params.perf as string | undefined);
@@ -780,6 +794,7 @@ export default function RouteScreen() {
 
   const speakSummary = () => {
     if (!routeData) return;
+    stopSpeech();
     setIsSpeaking(true);
     const parts: string[] = [];
 
@@ -904,7 +919,7 @@ export default function RouteScreen() {
             <Ionicons name="radio-outline" size={18} color="#22c55e" />
             <Text style={styles.radarBtnText}>Radar</Text>
           </TouchableOpacity>
-          <TouchableOpacity onPress={speakSummary} style={styles.speakBtn}>
+          <TouchableOpacity onPress={isSpeaking ? () => stopSpeech() : speakSummary} style={styles.speakBtn}>
             <Ionicons name={isSpeaking ? "stop-circle" : "volume-high"} size={22} color={isSpeaking ? "#ef4444" : "#60a5fa"} />
           </TouchableOpacity>
           <TouchableOpacity onPress={shareRoute} style={styles.shareBtn}>
@@ -1401,7 +1416,7 @@ export default function RouteScreen() {
           <Ionicons name="navigate" size={24} color="#fff" />
           <Text style={styles.navText}>Start Navigation</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.actionBtn} onPress={speakSummary}>
+        <TouchableOpacity style={styles.actionBtn} onPress={isSpeaking ? () => stopSpeech() : speakSummary}>
           <Ionicons name={isSpeaking ? "stop" : "volume-high"} size={22} color="#fff" />
           <Text style={styles.actionText}>{isSpeaking ? 'Stop' : 'Listen'}</Text>
         </TouchableOpacity>
