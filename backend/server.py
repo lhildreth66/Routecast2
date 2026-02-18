@@ -224,7 +224,10 @@ HAZARD_CONFIG = {
     "log_detail": int(_env_float("HAZARD_LOG_DETAIL", 0)),
 }
 
-RESAMPLE_MILES = _env_float("RESAMPLE_MILES", 10.0)
+RESAMPLE_MILES = _env_float("RESAMPLE_MILES", 50.0)
+ALERTS_PER_WAYPOINT = 5
+ALERTS_RETURN_LIMIT = 10
+DEFAULT_ROUTE_SPEED_MPH = 55
 MIN_STEPS_FOR_NATIVE = int(_env_float("MIN_STEPS_FOR_NATIVE", 30))
 
 HAZARD_SCHEMA_VERSION = 2
@@ -514,6 +517,7 @@ class WeatherAlert(BaseModel):
     urgency: Optional[str] = None
     sent: Optional[str] = None
     issued: Optional[str] = None
+    properties: Optional[Dict[str, Any]] = None
 
 class PackingSuggestion(BaseModel):
     item: str
@@ -583,6 +587,7 @@ class HazardAlertsResponse(BaseModel):
     status: str = "ready"
     error: Optional[str] = None
     timings_ms: Optional[Dict[str, float]] = None
+    debug_route_alerts: Optional[Dict[str, Any]] = None
 
 class FavoriteRouteRequest(BaseModel):
     origin: str
@@ -1183,7 +1188,7 @@ async def get_mapbox_route(origin_coords: Dict, dest_coords: Dict, waypoints: Li
 
 
 async def get_noaa_weather(lat: float, lon: float) -> Optional[WeatherData]:
-    """Get weather data using active provider (NOAA in prod, fixtures in demo)."""
+    """Fetch waypoint weather directly from NWS points + forecastHourly endpoints."""
     cache_key = f"{_bucket_coord(lat):.2f}:{_bucket_coord(lon):.2f}"
     cached = _cache_get(_noaa_weather_cache, cache_key)
     if cached is not None:
@@ -1192,44 +1197,83 @@ async def get_noaa_weather(lat: float, lon: float) -> Optional[WeatherData]:
 
     _noaa_cache_stats["weather_misses"] += 1
 
+    point_url = f"https://api.weather.gov/points/{lat},{lon}"
+
     try:
-        raw = await get_providers().weather.get_weather(lat, lon)
-        _noaa_cache_stats["nws_http_calls"] += 1
-        if not raw:
-            return None
-        hourly_raw = raw.get('hourly_forecast', [])
-        hourly_forecast = [
-            HourlyForecast(
-                time=entry.get('time', ''),
-                temperature=entry.get('temperature', 0),
-                conditions=entry.get('conditions', ''),
-                wind_speed=entry.get('wind_speed', ''),
-                precipitation_chance=entry.get('precipitation_chance'),
+        async with httpx.AsyncClient(timeout=12.0) as client:
+            point_resp = await client.get(point_url, headers=NOAA_HEADERS)
+            _noaa_cache_stats["nws_http_calls"] += 1
+            if point_resp.status_code != 200:
+                logger.warning("NWS points lookup failed status=%s", point_resp.status_code)
+                return None
+
+            point_data = point_resp.json()
+            props = point_data.get("properties") or {}
+            forecast_url = props.get("forecastHourly")
+            if not forecast_url:
+                logger.warning("NWS points response missing forecastHourly")
+                return None
+
+            forecast_resp = await client.get(forecast_url, headers=NOAA_HEADERS)
+            _noaa_cache_stats["nws_http_calls"] += 1
+            if forecast_resp.status_code != 200:
+                logger.warning("NWS forecastHourly failed status=%s", forecast_resp.status_code)
+                return None
+
+            forecast_data = forecast_resp.json() if forecast_resp else {}
+            periods = (forecast_data.get("properties") or {}).get("periods") or []
+            if not periods:
+                return None
+
+            current = periods[0]
+            def _parse_wind(val: Optional[str]) -> str:
+                if not val:
+                    return "0 mph"
+                matches = re.findall(r"\d+", str(val))
+                if matches:
+                    try:
+                        return f"{max(int(m) for m in matches)} mph"
+                    except Exception:
+                        pass
+                return str(val)
+
+            temperature = current.get("temperature")
+            wind_speed_raw = _parse_wind(current.get("windSpeed"))
+            conditions = current.get("shortForecast") or current.get("detailedForecast") or ""
+
+            hourly_forecast = []
+            for entry in periods[:4]:
+                hourly_forecast.append(
+                    HourlyForecast(
+                        time=entry.get("startTime", ""),
+                        temperature=entry.get("temperature", 0),
+                        conditions=entry.get("shortForecast", ""),
+                        wind_speed=_parse_wind(entry.get("windSpeed")),
+                        precipitation_chance=(entry.get("probabilityOfPrecipitation") or {}).get("value"),
+                    )
+                )
+
+            weather = WeatherData(
+                temperature=temperature,
+                temperature_unit=current.get("temperatureUnit", "F"),
+                wind_speed=wind_speed_raw,
+                wind_direction=current.get("windDirection"),
+                conditions=conditions,
+                icon=current.get("icon"),
+                humidity=(current.get("relativeHumidity") or {}).get("value"),
+                is_daytime=current.get("isDaytime", True),
+                hourly_forecast=hourly_forecast,
             )
-            for entry in hourly_raw
-        ]
-        weather = WeatherData(
-            temperature=raw.get('temperature'),
-            temperature_unit=raw.get('temperature_unit', 'F'),
-            wind_speed=raw.get('wind_speed'),
-            wind_direction=raw.get('wind_direction'),
-            conditions=raw.get('conditions'),
-            icon=raw.get('icon'),
-            humidity=raw.get('humidity'),
-            is_daytime=raw.get('is_daytime', True),
-            sunrise=raw.get('sunrise'),
-            sunset=raw.get('sunset'),
-            hourly_forecast=hourly_forecast,
-        )
-        _cache_set(_noaa_weather_cache, cache_key, weather, ttl=NOAA_CACHE_TTL_SECONDS)
-        return weather
-    except Exception as e:
+
+            _cache_set(_noaa_weather_cache, cache_key, weather, ttl=NOAA_CACHE_TTL_SECONDS)
+            return weather
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Weather provider error for {lat},{lon}: {e}")
         return None
 
 
 async def get_noaa_alerts(lat: float, lon: float) -> List[WeatherAlert]:
-    """Get alerts using active provider (NOAA in prod, fixtures in demo)."""
+    """Fetch raw NWS alert features for a point (alerts/active?point=lat,lon)."""
     cache_key = f"{_bucket_coord(lat):.2f}:{_bucket_coord(lon):.2f}"
     cached = _cache_get(_noaa_alerts_cache, cache_key)
     if cached is not None:
@@ -1239,112 +1283,51 @@ async def get_noaa_alerts(lat: float, lon: float) -> List[WeatherAlert]:
     _noaa_cache_stats["alerts_misses"] += 1
 
     try:
-        raw_alerts = await get_providers().alerts.get_alerts(lat, lon)
-        _noaa_cache_stats["nws_http_calls"] += 1
-        alerts: List[WeatherAlert] = []
-        now = datetime.now(timezone.utc)
-        cutoff = now - timedelta(hours=12)
+        url = f"https://api.weather.gov/alerts/active?point={lat},{lon}"
+        async with httpx.AsyncClient(timeout=12.0) as client:
+            resp = await client.get(url, headers=NOAA_HEADERS)
+            _noaa_cache_stats["nws_http_calls"] += 1
+            if resp.status_code != 200:
+                logger.warning("NWS alerts lookup failed status=%s", resp.status_code)
+                return []
 
-        if ALERT_DEBUG:
-            logger.info(
-                "noaa_alerts_raw",
-                extra={
-                    "lat": round(lat, 4),
-                    "lon": round(lon, 4),
-                    "raw_count": len(raw_alerts),
-                },
-            )
+            data = resp.json() if resp else {}
+            features = data.get("features") or []
+            alerts: List[WeatherAlert] = []
 
-        for alert in raw_alerts:
-            # Parse timestamps to filter active alerts
-            onset_str = alert.get('onset')
-            expires_str = alert.get('expires')
-            effective_str = alert.get('effective')
-            ends_str = alert.get('ends')
-            sent_str = alert.get('sent')
-            instruction = alert.get('instruction')
-            summary = alert.get('summary')
-            urgency = alert.get('urgency')
+            if ALERT_DEBUG:
+                logger.info(
+                    "nws_alerts_raw",
+                    extra={"lat": round(lat, 4), "lon": round(lon, 4), "raw_count": len(features)},
+                )
 
-            # Demo/test fixtures may omit timestamps; treat them as freshly sent
-            sent_dt = None
-            if ROUTECAST_MODE in {"demo", "test"} and not sent_str:
-                sent_dt = now
-                sent_str = now.isoformat()
-            elif sent_str:
-                try:
-                    sent_dt = datetime.fromisoformat(sent_str.replace('Z', '+00:00')).astimezone(timezone.utc)
-                except Exception:
-                    sent_dt = None
-
-            # Drop alerts without a sent timestamp or significantly stale
-            if not sent_dt:
-                continue
-            if sent_dt < cutoff:
-                continue
-            
-            # Determine if alert is currently active
-            is_active = True
-            try:
-                # Use onset or effective as start time
-                start_time = None
-                if onset_str:
-                    start_time = datetime.fromisoformat(onset_str.replace('Z', '+00:00'))
-                elif effective_str:
-                    start_time = datetime.fromisoformat(effective_str.replace('Z', '+00:00'))
-                
-                # Use expires or ends as end time
-                end_time = None
-                if expires_str:
-                    end_time = datetime.fromisoformat(expires_str.replace('Z', '+00:00'))
-                elif ends_str:
-                    end_time = datetime.fromisoformat(ends_str.replace('Z', '+00:00'))
-                
-                # Only include alerts that are active now or within next 12 hours
-                if start_time and end_time:
-                    # Filter to alerts starting within last 12 hours and not yet expired
-                    time_since_start = (now - start_time).total_seconds() / 3600  # hours
-                    is_expired = now > end_time
-                    is_active = time_since_start <= 12 and not is_expired
-            except:
-                # If timestamp parsing fails, include the alert
-                pass
-            
-            if is_active and sent_dt >= cutoff:
+            for feat in features[:ALERTS_PER_WAYPOINT]:
+                props = feat.get("properties") or {}
+                alert_id = props.get("id") or feat.get("id") or str(uuid.uuid4())
                 alerts.append(
                     WeatherAlert(
-                        id=alert.get('id', str(uuid.uuid4())),
-                        headline=alert.get('headline', 'Weather Alert'),
-                        severity=alert.get('severity', 'Unknown'),
-                        event=alert.get('event', 'Weather Event'),
-                            description=alert.get('description', '')[:500],
-                            instruction=instruction,
-                            summary=summary,
-                            urgency=urgency,
-                            sent=sent_str,
-                            issued=effective_str or sent_str,
-                        areas=alert.get('areas'),
-                        onset=onset_str,
-                        expires=expires_str,
-                        effective=effective_str,
-                        ends=ends_str,
+                        id=str(alert_id),
+                        headline=props.get("headline") or props.get("event") or "Weather Alert",
+                        severity=props.get("severity") or "Unknown",
+                        event=props.get("event") or "Weather Event",
+                        description=props.get("description") or props.get("headline") or "",
+                        instruction=props.get("instruction"),
+                        summary=props.get("description"),
+                        urgency=props.get("urgency"),
+                        sent=props.get("sent"),
+                        issued=props.get("effective") or props.get("onset") or props.get("sent"),
+                        areas=props.get("areaDesc"),
+                        onset=props.get("onset"),
+                        expires=props.get("expires"),
+                        effective=props.get("effective"),
+                        ends=props.get("ends"),
+                        properties=props,
                     )
                 )
-        # Sort newest first by sent/issued/effective and cap at 10
-        def _ts(a: WeatherAlert):
-            for candidate in [a.sent, a.issued, a.effective, a.onset, a.expires]:
-                if candidate:
-                    try:
-                        return datetime.fromisoformat(candidate.replace('Z', '+00:00'))
-                    except Exception:
-                        continue
-            return datetime.min
 
-        alerts.sort(key=_ts, reverse=True)
-        alerts = alerts[:50]
-        _cache_set(_noaa_alerts_cache, cache_key, alerts, ttl=NOAA_CACHE_TTL_SECONDS)
-        return alerts
-    except Exception as e:
+            _cache_set(_noaa_alerts_cache, cache_key, alerts, ttl=NOAA_CACHE_TTL_SECONDS)
+            return alerts
+    except Exception as e:  # noqa: BLE001
         logger.error(f"Alerts provider error for {lat},{lon}: {e}")
         return []
 
@@ -2611,61 +2594,63 @@ async def find_rest_stops(route_geometry: str, waypoints_weather: List[WaypointW
 
 def generate_trucker_warnings(waypoints_weather: List[WaypointWeather], vehicle_height_ft: Optional[float] = None) -> List[str]:
     """Generate trucker-specific warnings for high-profile vehicles."""
-    warnings = []
-    
-    # Default to standard semi truck height if not provided
+    warnings: List[str] = []
+
     if vehicle_height_ft is None:
         vehicle_height_ft = 13.5
-    
+
+    def parse_wind(speed_str: Optional[str]) -> int:
+        if not speed_str:
+            return 0
+        matches = re.findall(r"\d+", speed_str)
+        if not matches:
+            return 0
+        try:
+            return max(int(m) for m in matches)
+        except Exception:
+            return 0
+
     for wp in waypoints_weather:
         if not wp.weather:
             continue
-            
+
         distance = wp.waypoint.distance_from_start or 0
         location = wp.waypoint.name or f"Mile {int(distance)}"
-        
-        # CHECK FOR BRIDGE CLEARANCE ISSUES FIRST (CRITICAL)
+
         bridge_warnings = get_bridge_warnings(location, vehicle_height_ft)
         if bridge_warnings:
             warnings.extend(bridge_warnings)
-        
-        # WIND WARNINGS for high-profile vehicles
-        wind_str = wp.weather.wind_speed or "0 mph"
-        try:
-            wind_speed = int(''.join(filter(str.isdigit, wind_str.split()[0])))
-        except:
-            wind_speed = 0
-            
-        if wind_speed > 35:
-            warnings.append(f"⚠️ DANGER - Consider stopping ({wind_speed} mph winds) at {location}")
-        elif wind_speed > 25:
-            warnings.append(f"🚛 High crosswind risk ({wind_speed} mph) at {location}")
-        elif wind_speed > 20:
-            warnings.append(f"💨 Moderate winds ({wind_speed} mph) at {location}")
-                
-        # SNOW/ICE WARNINGS - especially critical for bridge clearances
-        conditions = (wp.weather.conditions or "").lower()
-        temp = wp.weather.temperature or 70
-        
-        if "snow" in conditions:
-            warnings.append(f"❄️ Chain requirements at {location}")
+
+        wind_speed = parse_wind(wp.weather.wind_speed)
+        forecast = (wp.weather.conditions or "").lower()
+        temp = wp.weather.temperature or 0
+
+        if "snow" in forecast or "blizzard" in forecast:
+            warnings.append(f"❄️ Snow at {location} - Chain requirements may be in effect")
 
         if temp <= 32:
-            warnings.append(f"🧊 Bridge decks may be icy ({temp}°F) at {location}")
+            warnings.append(f"🌉 Freezing temps at {location} - Bridge decks may be icy")
 
-        if "fog" in conditions:
-            warnings.append(f"🌫️ Reduced visibility at {location}")
-    
-    # Deduplicate similar warnings and limit
-    unique_warnings = []
+        if wind_speed > 35:
+            warnings.append(f"⚠️ DANGER: {wind_speed} mph winds at {location} - Consider stopping")
+        elif wind_speed > 25:
+            warnings.append(f"💨 High winds at {location} - High crosswind risk")
+        elif wind_speed > 20:
+            warnings.append(f"💨 Winds at {location} - Moderate crosswind")
+
+        if "fog" in forecast or "mist" in forecast:
+            warnings.append(f"🌫️ Fog at {location} - Reduced visibility")
+
+    unique: List[str] = []
     seen = set()
-    for w in warnings:
-        key = w.split(" - ")[0][:30]  # Use first 30 chars as key
-        if key not in seen:
-            unique_warnings.append(w)
-            seen.add(key)
-            
-    return unique_warnings[:15]  # Return top 15 warnings to accommodate bridge data
+    for warning in warnings:
+        key = warning.split(" - ")[0]
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(warning)
+
+    return unique
 
 def calculate_optimal_departure(origin: str, destination: str, waypoints_weather: List[WaypointWeather], base_departure: datetime) -> Optional[DepartureWindow]:
     """Calculate optimal departure window based on weather patterns."""
@@ -2724,7 +2709,7 @@ def _weather_is_missing(weather: Optional[WeatherData]) -> bool:
 
 
 def derive_road_condition(weather: Optional[WeatherData], alerts: List[WeatherAlert]) -> RoadCondition:
-    """Derive road surface condition from weather data."""
+    """Derive road surface condition from NWS weather + alerts (hierarchy order)."""
     if _weather_is_missing(weather):
         return RoadCondition(
             condition="out_of_coverage",
@@ -2733,57 +2718,57 @@ def derive_road_condition(weather: Optional[WeatherData], alerts: List[WeatherAl
             icon="📡",
             color="#6b7280",
             description="No provider coverage for this segment",
-            recommendation="Coverage limited here; drive with normal caution"
+            recommendation="Coverage limited here; drive with normal caution",
         )
-    
+
     temp = weather.temperature or 50
     conditions = (weather.conditions or "").lower()
     wind_str = weather.wind_speed or "0 mph"
-    
+
     try:
-        wind_speed = int(''.join(filter(str.isdigit, wind_str.split()[0])))
-    except:
+        wind_matches = re.findall(r"\d+", wind_str)
+        wind_speed = max(int(m) for m in wind_matches) if wind_matches else 0
+    except Exception:
         wind_speed = 0
-    
-    # Check for severe alerts first
-    severe_alerts = [a for a in alerts if a.severity in ["Extreme", "Severe"]]
-    if severe_alerts:
-        for alert in severe_alerts:
-            event = alert.event.lower()
-            if "flood" in event or "flash flood" in event:
-                return RoadCondition(
-                    condition="flooded",
-                    severity=4,
-                    label="FLOODING",
-                    icon="🌊",
-                    color="#dc2626",
-                    description=f"Flash flood warning - {alert.headline[:60]}",
-                    recommendation="🚫 DO NOT DRIVE - Find alternate route immediately"
-                )
-            if "ice" in event or "freezing" in event:
-                return RoadCondition(
-                    condition="icy",
-                    severity=3,
-                    label="ICY",
-                    icon="🧊",
-                    color="#ef4444",
-                    description=f"Ice storm - {alert.headline[:60]}",
-                    recommendation="⚠️ DANGEROUS - Avoid travel if possible"
-                )
-    
-    # Ice conditions (freezing temp + any precipitation)
-    if temp <= 32 and any(w in conditions for w in ["rain", "drizzle", "freezing", "sleet", "ice"]):
+
+    alert_text = " ".join([(a.event or "") + " " + (a.headline or "") for a in alerts]).lower()
+
+    if "flood" in alert_text:
+        return RoadCondition(
+            condition="flooded",
+            severity=4,
+            label="FLOODING",
+            icon="🌊",
+            color="#dc2626",
+            description="Flooding reported in NWS alert",
+            recommendation="🚫 Avoid water on roadways; find alternate route",
+        )
+
+    if any(k in alert_text for k in ["ice", "freezing"]):
+        return RoadCondition(
+            condition="icy",
+            severity=3,
+            label="ICY",
+            icon="🧊",
+            color="#ef4444",
+            description="Ice risk from active NWS alert",
+            recommendation="⚠️ Dangerous icing possible; reduce speed and avoid bridges if possible",
+        )
+
+    precip_keywords = ["rain", "drizzle", "storm", "snow", "sleet", "freezing", "ice"]
+    has_precip = any(k in conditions for k in precip_keywords)
+
+    if temp <= 32 and has_precip:
         return RoadCondition(
             condition="icy",
             severity=3,
             label="ICY ROADS",
             icon="🧊",
             color="#ef4444",
-            description=f"Freezing precipitation at {temp}°F",
-            recommendation="⚠️ Black ice likely - Reduce speed to 25 mph on bridges"
+            description=f"Freezing conditions {temp}°F with precipitation",
+            recommendation="⚠️ Black ice likely; slow to 25 mph on bridges",
         )
-    
-    # Snow covered
+
     if "snow" in conditions or "blizzard" in conditions:
         severity = 3 if "heavy" in conditions or "blizzard" in conditions else 2
         return RoadCondition(
@@ -2792,35 +2777,32 @@ def derive_road_condition(weather: Optional[WeatherData], alerts: List[WeatherAl
             label="SNOW",
             icon="❄️",
             color="#93c5fd",
-            description=f"Snow conditions at {temp}°F",
-            recommendation="🚗 Reduce speed 50%, increase following distance to 8 seconds"
+            description=f"Snow expected ({conditions})",
+            recommendation="Reduce speed 50% and increase following distance",
         )
-    
-    # Potential ice (just below freezing, roads may have frozen overnight)
-    if temp <= 36 and temp > 32:
+
+    if 32 < temp <= 36:
         return RoadCondition(
             condition="slippery",
             severity=2,
             label="SLIPPERY",
             icon="⚠️",
             color="#f59e0b",
-            description=f"Near-freezing {temp}°F - bridges/overpasses may be icy",
-            recommendation="⚡ Watch for black ice on elevated surfaces"
+            description=f"Near-freezing {temp}°F",
+            recommendation="Watch bridges/overpasses for refreeze",
         )
-    
-    # Low visibility
-    if "fog" in conditions or "mist" in conditions or "smoke" in conditions:
+
+    if any(k in conditions for k in ["fog", "mist", "smoke"]):
         return RoadCondition(
             condition="low_visibility",
             severity=2,
             label="LOW VIS",
             icon="🌫️",
             color="#9ca3af",
-            description="Fog/reduced visibility",
-            recommendation="💡 Low beams only, reduce speed to match visibility"
+            description="Reduced visibility",
+            recommendation="Use low beams and slow down",
         )
-    
-    # Dangerous wind
+
     if wind_speed > 35:
         return RoadCondition(
             condition="dangerous_wind",
@@ -2828,24 +2810,22 @@ def derive_road_condition(weather: Optional[WeatherData], alerts: List[WeatherAl
             label="HIGH WIND",
             icon="💨",
             color="#8b5cf6",
-            description=f"Dangerous crosswinds at {wind_speed} mph",
-            recommendation="🚛 HIGH-PROFILE VEHICLES: Consider stopping until winds subside"
+            description=f"Winds {wind_speed} mph",
+            recommendation="High-profile vehicles should consider stopping",
         )
-    
-    # Wet roads
-    if any(w in conditions for w in ["rain", "shower", "drizzle", "storm", "thunder"]):
-        severity = 2 if "heavy" in conditions or "thunder" in conditions else 1
+
+    if any(k in conditions for k in ["rain", "shower", "drizzle", "storm"]):
+        severity = 2 if "heavy" in conditions or "storm" in conditions else 1
         return RoadCondition(
             condition="wet",
             severity=severity,
             label="WET",
             icon="💧",
             color="#3b82f6",
-            description=f"Wet roads - {conditions}",
-            recommendation="🌧️ Headlights on, increase following distance to 4 seconds"
+            description=f"Wet roads - {conditions or 'rain'}",
+            recommendation="Headlights on; increase following distance",
         )
-    
-    # Dry/good conditions
+
     return RoadCondition(
         condition="dry",
         severity=0,
@@ -2853,7 +2833,7 @@ def derive_road_condition(weather: Optional[WeatherData], alerts: List[WeatherAl
         icon="✓",
         color="#22c55e",
         description=f"Good conditions - {temp}°F, {conditions or 'Clear'}",
-        recommendation="✅ Normal driving conditions"
+        recommendation="Normal driving conditions",
     )
 
 async def get_turn_by_turn_directions(origin_coords: tuple, dest_coords: tuple, waypoints_weather: List[WaypointWeather]) -> List[TurnByTurnStep]:
@@ -3529,14 +3509,14 @@ async def get_route_weather(request: RouteRequest):
             alerts=[],
         )
 
-    tasks = [fetch_weather_only(wp, i, total_waypoints, request.origin, request.destination) for i, wp in enumerate(waypoints)]
+    tasks = [fetch_waypoint_weather(wp, i, total_waypoints, request.origin, request.destination) for i, wp in enumerate(waypoints)]
     waypoints_weather = await asyncio.gather(*tasks)
     mark("weather_fetch")
 
     if ROUTECAST_MODE in {"demo", "test"}:
         hazard_waypoints = list(waypoints)
     else:
-        hazard_waypoints = extract_waypoints_from_route(route_geometry, interval_miles=10.0, departure_time=departure_time)
+        hazard_waypoints = extract_waypoints_from_route(route_geometry, interval_miles=50.0, departure_time=departure_time)
         if not hazard_waypoints:
             hazard_waypoints = list(waypoints)
 
@@ -3707,6 +3687,8 @@ async def get_route_weather(request: RouteRequest):
 async def get_route_weather_alerts(route_id: str):
     """Compute hazard/NWS alerts in a single follow-up call using cached context."""
     logger.info("route_alerts_request", extra={"route_id": route_id})
+    debug_enabled = os.environ.get("ROUTE_ALERTS_DEBUG") in {"1", "true", "True", "on", "yes"}
+    debug_payload: Optional[Dict[str, Any]] = {} if debug_enabled else None
     ctx = get_route_context(route_id)
     if not ctx:
         logger.warning("route_alerts_context_missing", extra={"route_id": route_id})
@@ -3719,6 +3701,7 @@ async def get_route_weather_alerts(route_id: str):
             hazard_status="error",
             status="error",
             error="Route context expired or missing",
+            debug_route_alerts=debug_payload if debug_enabled else None,
         )
 
     t0 = time.perf_counter()
@@ -3739,6 +3722,7 @@ async def get_route_weather_alerts(route_id: str):
             hazard_status="error",
             status="error",
             error="No hazard waypoints available",
+            debug_route_alerts=debug_payload if debug_enabled else None,
         )
 
     try:
@@ -3789,6 +3773,9 @@ async def get_route_weather_alerts(route_id: str):
             "last3": sampled_points[-3:],
         },
     )
+    if debug_enabled:
+        debug_payload["sampled_points_count"] = hazard_total_waypoints
+        debug_payload["sampled_points"] = sampled_points
 
     is_alaska_route = any(
         (wp.get("lat") is not None and wp.get("lon") is not None and wp.get("lat") >= 50 and wp.get("lon") <= -130)
@@ -3837,13 +3824,24 @@ async def get_route_weather_alerts(route_id: str):
                 "lon": round(hwp.waypoint.lon, 4),
                 "features_count": len(hwp.alerts or []),
                 "first_event": (hwp.alerts[0].event if hwp.alerts else None),
+                "first_feature_id": (
+                    (
+                        hwp.alerts[0].id
+                        or hwp.alerts[0].model_dump().get("id")
+                        or hwp.alerts[0].model_dump().get("@id")
+                    )
+                    if hwp.alerts
+                    else None
+                ),
             }
             for i, hwp in enumerate(hazard_waypoints_weather)
         ]
         logger.info(
             "route_alerts_points_features",
-            extra={"route_id": route_id, "last_points": per_point_features[-6:]},
+            extra={"route_id": route_id, "sample_points_count": hazard_total_waypoints, "points": per_point_features},
         )
+        if debug_enabled:
+            debug_payload["per_point_features"] = per_point_features
 
         hazard_alerts = generate_hazard_alerts(
             list(hazard_waypoints_weather),
@@ -3864,38 +3862,16 @@ async def get_route_weather_alerts(route_id: str):
             deduped_alerts.append(alert)
         hazard_alerts = deduped_alerts
 
-        def _parse_iso(dt_str: Optional[str]) -> Optional[datetime]:
-            if not dt_str:
-                return None
-            try:
-                return datetime.fromisoformat(dt_str.replace("Z", "+00:00"))
-            except Exception:
-                return None
-
         def _alert_union_id(alert: WeatherAlert) -> str:
-            props = alert.model_dump()
-            for candidate in [getattr(alert, "id", None), props.get("@id"), props.get("id")]:
+            props = alert.properties or alert.model_dump()
+            for candidate in [props.get("id"), props.get("@id"), getattr(alert, "id", None)]:
                 if candidate:
                     return str(candidate)
-            signature = {
-                "event": getattr(alert, "event", None) or props.get("event"),
-                "headline": getattr(alert, "headline", None) or props.get("headline"),
-                "expires": getattr(alert, "expires", None) or props.get("expires"),
-                "areas": props.get("areas") or props.get("areaDesc"),
-            }
-            return hashlib.sha256(json.dumps(signature, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+            return str(uuid.uuid4())
 
-        severity_map = {
-            "extreme": "extreme",
-            "severe": "high",
-            "high": "high",
-            "moderate": "medium",
-            "minor": "low",
-            "statement": "low",
-            "unknown": "low",
-        }
         nws_raw_count = 0
-        nws_alerts: Dict[str, HazardAlert] = {}
+        union_cards: Dict[str, HazardAlert] = {}
+
         for idx, wp_weather in enumerate(hazard_waypoints_weather):
             wp_distance = wp_weather.waypoint.distance_from_start or 0.0
             wp_eta = wp_weather.waypoint.eta_minutes or 0
@@ -3903,96 +3879,68 @@ async def get_route_weather_alerts(route_id: str):
                 wp_distance = round(total_distance * (idx / max(1, hazard_total_waypoints - 1)), 2)
             if wp_eta == 0 and total_duration_minutes:
                 wp_eta = int(total_duration_minutes * (idx / max(1, hazard_total_waypoints - 1)))
-            for alert in getattr(wp_weather, "alerts", []) or []:
+
+            for alert in getattr(wp_weather, "alerts", [])[:ALERTS_PER_WAYPOINT] or []:
                 if not alert:
                     continue
                 nws_raw_count += 1
                 alert_id = _alert_union_id(alert)
-                if not alert_id:
-                    continue
-
-                props = alert.model_dump()
-                nws_severity = (alert.severity or props.get("severity") or "").lower()
-                card_severity = severity_map.get(nws_severity, "medium")
-                event_name = alert.event or alert.headline or "Weather Alert"
-                description = alert.description or alert.summary
-                expires_dt = _parse_iso(alert.expires or alert.ends or props.get("expires"))
-                countdown_text = "Active"
-                if expires_dt:
-                    now_utc = datetime.now(timezone.utc)
-                    delta = expires_dt - now_utc
-                    if delta.total_seconds() > 0:
-                        hours = int(delta.total_seconds() // 3600)
-                        minutes = int((delta.total_seconds() % 3600) // 60)
-                        if hours > 0:
-                            countdown_text = f"Active • {hours}h {minutes}m left"
-                        else:
-                            countdown_text = f"Active • {minutes}m left"
-
-                existing = nws_alerts.get(alert_id)
-                if existing:
-                    current_dist = existing.distance_miles if existing.distance_miles is not None else float("inf")
-                    if wp_distance < current_dist:
+                if alert_id in union_cards:
+                    existing = union_cards[alert_id]
+                    if wp_distance < (existing.distance_miles or float("inf")):
                         existing.distance_miles = wp_distance
                         existing.eta_minutes = wp_eta
                     continue
 
-                nws_alerts[alert_id] = HazardAlert(
+                eta_mins = int((wp_distance / DEFAULT_ROUTE_SPEED_MPH) * 60) if wp_distance else wp_eta
+                event_name = alert.event or alert.headline or "Weather Alert"
+                headline = alert.headline or event_name
+
+                union_cards[alert_id] = HazardAlert(
                     type="weather",
-                    severity=card_severity,
+                    severity="medium",
                     distance_miles=wp_distance,
-                    eta_minutes=wp_eta,
+                    eta_minutes=eta_mins,
                     message=event_name,
                     recommendation=alert.instruction or "Use caution along your route.",
-                    countdown_text=countdown_text or (f"{event_name} in {wp_eta} minutes" if wp_eta else event_name),
+                    countdown_text=f"{event_name} in {eta_mins} minutes" if eta_mins else event_name,
                     event=event_name,
-                    headline=alert.headline,
-                    description=description,
-                    full_description=description,
+                    headline=headline,
+                    description=alert.description,
+                    full_description=alert.description,
                     instruction=alert.instruction,
                     areaDesc=alert.areas,
                     onset=alert.onset or alert.effective,
                     expires=alert.expires or alert.ends,
-                    properties=props,
+                    properties=alert.properties or alert.model_dump(),
                     alert_id=alert_id,
                     id=alert_id,
                     alert_level=alert.severity,
                 )
 
-        union_cards = list(nws_alerts.values())
-
-        def _severity_score(card: HazardAlert) -> int:
-            name = (card.event or card.message or "").upper()
-            if "FLOOD" in name:
-                return 4
-            if "ICE" in name or "ICY" in name or "FREEZ" in name:
-                return 3
-            if "HIGH WIND" in name or "WIND" in name:
-                return 3
-            if "SNOW" in name or "BLIZZARD" in name:
-                return 2
-            if "WET" in name or "RAIN" in name:
-                return 1
-            return 0
-
-        def _card_sort_key(card: HazardAlert):
-            dist = card.distance_miles if card.distance_miles is not None else float("inf")
-            return (-_severity_score(card), dist, card.event or card.message or "")
-
-        union_cards.sort(key=_card_sort_key)
-        returned_cards = union_cards[:10]
+        union_list = list(union_cards.values())
+        union_list.sort(key=lambda card: card.distance_miles if card.distance_miles is not None else float("inf"))
+        returned_cards = union_list[:ALERTS_RETURN_LIMIT]
 
         logger.info(
             "route_alerts_union_summary",
             extra={
                 "route_id": route_id,
                 "raw_union_count": nws_raw_count,
-                "dedup_count": len(union_cards),
+                "dedup_count": len(union_list),
                 "returned_count": len(returned_cards),
                 "returned_ids": [card.alert_id for card in returned_cards if card.alert_id],
                 "returned_events": [card.event or card.message for card in returned_cards],
             },
         )
+        if debug_enabled:
+            debug_payload["union_summary"] = {
+                "raw_union_count": nws_raw_count,
+                "dedup_count": len(union_list),
+                "returned_count": len(returned_cards),
+                "returned_ids": [card.alert_id for card in returned_cards if card.alert_id],
+                "returned_events": [card.event or card.message for card in returned_cards],
+            }
 
         await hydrate_alert_roads_from_geometry(hazard_alerts, geometry_index)
         road_conditions = build_condition_segments(hazard_alerts, category="road")
@@ -4021,7 +3969,7 @@ async def get_route_weather_alerts(route_id: str):
                 "route_id": route_id,
                 "alerts_count": len(hazard_alerts),
                 "union_raw_count": nws_raw_count,
-                "union_dedup_count": len(union_cards),
+                "union_dedup_count": len(union_list),
                 "union_returned_count": len(returned_cards),
                 "union_ids": [card.alert_id for card in returned_cards if card.alert_id],
                 "nws_requests": hazard_total_waypoints,
@@ -4046,6 +3994,7 @@ async def get_route_weather_alerts(route_id: str):
             hazard_status=status_value,
             status=status_value,
             timings_ms=timings if TIMING_DEBUG else None,
+            debug_route_alerts=debug_payload if debug_enabled else None,
         )
     except Exception as exc:
         logger.error("route_alerts_fetch_failed", exc_info=True, extra={"route_id": route_id})
@@ -4059,6 +4008,7 @@ async def get_route_weather_alerts(route_id: str):
             status="error",
             error=str(exc),
             timings_ms=timings if TIMING_DEBUG else None,
+            debug_route_alerts=debug_payload if debug_enabled else None,
         )
 
 
