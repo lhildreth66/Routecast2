@@ -1161,83 +1161,98 @@ class CriticalRouteAlertWorker:
             stats["alerts_seen"] += len(alerts)
             point_union_ids: List[str] = []
             for alert in alerts:
-                props = alert.get("properties", {})
-                union_id = str(alert.get("id") or props.get("id") or self._alert_key(alert))
-                union_alerts.setdefault(
-                    union_id,
-                    {
-                        "event": props.get("event"),
-                        "headline": props.get("headline") or props.get("event"),
-                    },
-                )
-                point_union_ids.append(union_id)
-                stats["alerts_found"] += 1
-                # Enforce per-alert-id cooldown (6 hours) before any other checks
-                if self.service.has_sent_recent_alert(alert_id, monitor_id, minutes=360):
-                    stats["skipped"] += 1
-                    stats["alerts_suppressed_already_sent"] += 1
-                    continue
-                if not self._is_critical(alert):
-                    logger.info(
-                        "[route-alerts] skipped_type",
+                union_id: Optional[str] = None
+                try:
+                    props = alert.get("properties", {})
+                    union_id = str(alert.get("id") or props.get("id") or self._alert_key(alert))
+                    alert_id = union_id
+                    union_alerts.setdefault(
+                        union_id,
+                        {
+                            "event": props.get("event"),
+                            "headline": props.get("headline") or props.get("event"),
+                        },
+                    )
+                    point_union_ids.append(union_id)
+                    stats["alerts_found"] += 1
+                    # Enforce per-alert-id cooldown (6 hours) before any other checks
+                    if self.service.has_sent_recent_alert(alert_id, monitor_id, minutes=360):
+                        stats["skipped"] += 1
+                        stats["alerts_suppressed_already_sent"] += 1
+                        continue
+                    if not self._is_critical(alert):
+                        logger.info(
+                            "[route-alerts] skipped_type",
+                            extra={
+                                "run_id": run_label,
+                                "monitor_id": monitor_id,
+                                "event": props.get("event"),
+                                "severity": props.get("severity"),
+                                "alert_id": union_id,
+                            },
+                        )
+                        stats["skipped"] += 1
+                        stats["skipped_type"] += 1
+                        continue
+
+                    event = props.get("event", "Unknown")
+                    alert_key = self._alert_key(alert)
+
+                    distance = self._distance_to_alert(point, alert)
+                    band = self._band_for_distance(distance)
+                    if band is None:
+                        stats["skipped"] += 1
+                        stats["skipped_distance"] += 1
+                        continue
+
+                    if self.service.alert_key_recent(monitor_id, alert_key, self.cooldown_minutes):
+                        stats["skipped"] += 1
+                        stats["skipped_dedupe"] += 1
+                        stats["alerts_suppressed_already_sent"] += 1
+                        continue
+
+                    if self._skip_for_recent(monitor_id, route_signature, route_id, alert_id, band):
+                        stats["skipped"] += 1
+                        stats["skipped_dedupe"] += 1
+                        stats["alerts_suppressed_already_sent"] += 1
+                        continue
+
+                    if band == "within_15" and self._has_sent(route_signature, route_id, alert_id, "within_5", monitor_id=monitor_id):
+                        stats["skipped"] += 1
+                        stats["skipped_dedupe"] += 1
+                        stats["alerts_suppressed_already_sent"] += 1
+                        continue
+
+                    if self._has_sent(route_signature, route_id, alert_id, band, monitor_id=monitor_id):
+                        stats["skipped"] += 1
+                        stats["skipped_dedupe"] += 1
+                        stats["alerts_suppressed_already_sent"] += 1
+                        continue
+
+                    if self.service.within_cooldown(monitor_id, event, self.cooldown_minutes):
+                        stats["skipped"] += 1
+                        stats["alerts_suppressed_cooldown"] += 1
+                        continue
+
+                    if event != "Tornado Warning":
+                        if non_tornado_budget <= 0:
+                            stats["skipped"] += 1
+                            stats["skipped_cap"] += 1
+                            continue
+                        non_tornado_budget -= 1
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "[route-alerts] alert_processing_error",
                         extra={
                             "run_id": run_label,
                             "monitor_id": monitor_id,
-                            "event": props.get("event"),
-                            "severity": props.get("severity"),
+                            "route_id": route_id,
                             "alert_id": union_id,
+                            "error": str(exc),
                         },
                     )
                     stats["skipped"] += 1
-                    stats["skipped_type"] += 1
                     continue
-
-                event = props.get("event", "Unknown")
-                alert_id = union_id
-                alert_key = self._alert_key(alert)
-
-                distance = self._distance_to_alert(point, alert)
-                band = self._band_for_distance(distance)
-                if band is None:
-                    stats["skipped"] += 1
-                    stats["skipped_distance"] += 1
-                    continue
-
-                if self.service.alert_key_recent(monitor_id, alert_key, self.cooldown_minutes):
-                    stats["skipped"] += 1
-                    stats["skipped_dedupe"] += 1
-                    stats["alerts_suppressed_already_sent"] += 1
-                    continue
-
-                if self._skip_for_recent(monitor_id, route_signature, route_id, alert_id, band):
-                    stats["skipped"] += 1
-                    stats["skipped_dedupe"] += 1
-                    stats["alerts_suppressed_already_sent"] += 1
-                    continue
-
-                if band == "within_15" and self._has_sent(route_signature, route_id, alert_id, "within_5", monitor_id=monitor_id):
-                    stats["skipped"] += 1
-                    stats["skipped_dedupe"] += 1
-                    stats["alerts_suppressed_already_sent"] += 1
-                    continue
-
-                if self._has_sent(route_signature, route_id, alert_id, band, monitor_id=monitor_id):
-                    stats["skipped"] += 1
-                    stats["skipped_dedupe"] += 1
-                    stats["alerts_suppressed_already_sent"] += 1
-                    continue
-
-                if self.service.within_cooldown(monitor_id, event, self.cooldown_minutes):
-                    stats["skipped"] += 1
-                    stats["alerts_suppressed_cooldown"] += 1
-                    continue
-
-                if event != "Tornado Warning":
-                    if non_tornado_budget <= 0:
-                        stats["skipped"] += 1
-                        stats["skipped_cap"] += 1
-                        continue
-                    non_tornado_budget -= 1
 
                 payload = self._build_notification_payload(
                     alert=alert,
