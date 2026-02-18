@@ -585,6 +585,7 @@ class RouteAlertService:
         expires: Optional[str],
         alert_key: Optional[str] = None,
     ) -> None:
+        now = self.now()
         doc = {
             "monitor_id": monitor_id,
             "route_signature": route_signature,
@@ -596,7 +597,7 @@ class RouteAlertService:
             "distance_miles": distance_miles,
             "headline": headline,
             "expires": expires,
-            "sent_at": self.now(),
+            "sent_at": now,
         }
         query = {
             "route_signature": doc["route_signature"],
@@ -606,11 +607,28 @@ class RouteAlertService:
         }
         if self.db.sent_alerts.find_one(query):
             return
-        self.db.sent_alerts.update_one(
-            query,
-            {"$setOnInsert": doc, "$set": doc},
-            upsert=True,
-        )
+        try:
+            # Avoid Mongo path conflicts (code 40) by not setting the same field in multiple operators.
+            self.db.sent_alerts.update_one(
+                query,
+                {
+                    "$setOnInsert": doc,
+                    "$set": {
+                        "sent_at": now,
+                        "headline": headline,
+                        "expires": expires,
+                        "distance_miles": distance_miles,
+                    },
+                },
+                upsert=True,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[route-alerts] failed to persist sent_alert monitor_id=%s alert_id=%s: %s",
+                monitor_id,
+                alert_id,
+                exc,
+            )
 
     def _route_signature(self, route_id: str, sample_points: List[Dict[str, float]]) -> str:
         payload = {"route_id": route_id, "points": sample_points}
