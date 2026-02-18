@@ -7515,6 +7515,8 @@ class ParkingSpot(BaseModel):
     distance_miles: float
     latitude: float
     longitude: float
+    address: Optional[str] = None
+    rating: Optional[float] = None
     capacity: Optional[int] = None
     amenities: List[str]
     restrictions: List[str]
@@ -7529,100 +7531,75 @@ async def search_truck_parking(request: TruckParkingRequest):
     """Find truck parking including rest areas and safe parking zones."""
     # TESTING: Paywalls disabled - require_premium(request.subscription_id, TRUCK_PARKING)
     try:
-        radius_meters = int(request.radius_miles * 1609.34)
-        
-        # Simplified query - nodes only to prevent timeout
-        overpass_query = f"""
-        [out:json][timeout:15];
-        (
-          node["highway"="rest_area"](around:{radius_meters},{request.latitude},{request.longitude});
-          node["highway"="services"](around:{radius_meters},{request.latitude},{request.longitude});
-          node["amenity"="parking"]["hgv"="yes"](around:{radius_meters},{request.latitude},{request.longitude});
-          node["amenity"="parking"]["parking"="truck_stop"](around:{radius_meters},{request.latitude},{request.longitude});
-        );
-        out body;
-        """
-        
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post("https://overpass-api.de/api/interpreter", data=overpass_query)
-            response.raise_for_status()
-            data = response.json()
+        if not GOOGLE_PLACES_API_KEY:
+            logger.error("GOOGLE_PLACES_API_KEY missing for truck parking search")
+            raise HTTPException(status_code=503, detail="Truck parking search unavailable: missing GOOGLE_PLACES_API_KEY")
+
+        radius_meters = 80000  # ~50 miles
+        url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
+
+        async def _fetch(keyword: str, place_type: Optional[str]) -> List[Dict[str, Any]]:
+            params = {
+                "keyword": keyword,
+                "location": f"{request.latitude},{request.longitude}",
+                "radius": radius_meters,
+                "key": GOOGLE_PLACES_API_KEY,
+            }
+            if place_type:
+                params["type"] = place_type
+
+            async with httpx.AsyncClient(timeout=12.0) as client:
+                resp = await client.get(url, params=params)
+                resp.raise_for_status()
+                payload = resp.json()
+
+            status = payload.get("status")
+            if status not in {"OK", "ZERO_RESULTS"}:
+                logger.warning("Truck parking Google Places status=%s message=%s", status, payload.get("error_message"))
+                raise HTTPException(status_code=503, detail="Truck parking search temporarily unavailable")
+            return payload.get("results", []) or []
+
+        combined: Dict[str, Dict[str, Any]] = {}
+        for keyword, place_type in [
+            ("truck parking", "parking"),
+            ("truck stop", "gas_station"),
+        ]:
+            for place in await _fetch(keyword, place_type):
+                place_id = place.get("place_id")
+                if not place_id or place_id in combined:
+                    continue
+                combined[place_id] = place
         
         spots = []
-        for element in data.get('elements', []):
-            if element['type'] != 'node':
+        for place in combined.values():
+            loc = (place.get("geometry") or {}).get("location") or {}
+            lat = loc.get("lat")
+            lon = loc.get("lng")
+            if lat is None or lon is None:
                 continue
-            
-            tags = element.get('tags', {})
-            lat = element.get('lat', 0)
-            lon = element.get('lon', 0)
-            
+
             distance = haversine_miles(request.latitude, request.longitude, lat, lon)
-            
-            # Determine type
-            highway = tags.get('highway')
-            amenity = tags.get('amenity')
-            if highway == 'rest_area':
-                spot_type = 'rest_area'
-            elif highway == 'services':
-                spot_type = 'rest_area'
-            elif amenity == 'parking':
-                spot_type = 'parking_lot'
+            types = place.get("types") or []
+            if "gas_station" in types:
+                spot_type = "truck_stop"
+            elif "rest_area" in types:
+                spot_type = "rest_area"
             else:
-                spot_type = 'truck_stop'
-            
-            # Amenities
-            amenities = []
-            if tags.get('toilets') == 'yes':
-                amenities.append('Restrooms')
-            if tags.get('drinking_water') == 'yes':
-                amenities.append('Water')
-            if tags.get('shower') == 'yes':
-                amenities.append('Showers')
-            if tags.get('picnic_table') == 'yes':
-                amenities.append('Picnic Area')
-            if tags.get('wifi') == 'yes':
-                amenities.append('WiFi')
-            
-            # Restrictions
-            restrictions = []
-            max_stay = tags.get('maxstay')
-            if max_stay:
-                restrictions.append(f'Max stay: {max_stay}')
-            if tags.get('supervised') == 'yes':
-                restrictions.append('Supervised')
-            
-            # Capacity
-            capacity = None
-            if tags.get('capacity:hgv'):
-                try:
-                    capacity = int(tags.get('capacity:hgv'))
-                except:
-                    pass
-            elif tags.get('capacity:disabled'):
-                try:
-                    capacity = int(tags.get('capacity')) - int(tags.get('capacity:disabled'))
-                except:
-                    pass
-            
-            # Fee
-            fee = None
-            if tags.get('fee') == 'yes':
-                fee = tags.get('charge') or 'Paid parking'
-            elif tags.get('fee') == 'no':
-                fee = 'Free'
-            
+                spot_type = "parking_lot"
+
             spots.append(ParkingSpot(
-                name=tags.get('name', f'Rest Area ({spot_type})'),
+                name=place.get("name", "Truck Parking"),
                 type=spot_type,
                 distance_miles=round(distance, 1),
                 latitude=lat,
                 longitude=lon,
-                capacity=capacity,
-                amenities=amenities,
-                restrictions=restrictions,
-                hours=tags.get('opening_hours'),
-                fee=fee,
+                address=place.get("vicinity") or place.get("formatted_address"),
+                rating=place.get("rating"),
+                capacity=None,
+                amenities=[],
+                restrictions=[],
+                hours=None,
+                fee=None,
             ))
         
         spots = _dedupe_items(
@@ -7634,7 +7611,7 @@ async def search_truck_parking(request: TruckParkingRequest):
         spots.sort(key=lambda x: x.distance_miles)
         spots = spots[:20]
         
-        logger.info(f"Found {len(spots)} truck parking spots within {request.radius_miles} miles")
+        logger.info(f"Found {len(spots)} truck parking spots within 50 miles")
         return TruckParkingResponse(spots=spots)
     
     except Exception as e:
@@ -7654,6 +7631,8 @@ class TruckService(BaseModel):
     distance_miles: float
     latitude: float
     longitude: float
+    address: Optional[str] = None
+    rating: Optional[float] = None
     services_offered: List[str]
     brands_serviced: List[str]
     phone: Optional[str] = None
@@ -7667,81 +7646,87 @@ class TruckServiceResponse(BaseModel):
 async def search_truck_services(request: TruckServiceRequest):
     """Find truck repair shops, tire services, washes, and scales."""
     try:
-        radius_meters = int(request.radius_miles * 1609.34)
-        
-        # Simplified query - look for general automotive services
-        overpass_query = f"""
-        [out:json][timeout:15];
-        (
-          node["shop"="car_repair"](around:{radius_meters},{request.latitude},{request.longitude});
-          node["shop"="tyres"](around:{radius_meters},{request.latitude},{request.longitude});
-          node["amenity"="car_wash"](around:{radius_meters},{request.latitude},{request.longitude});
-          node["amenity"="weighbridge"](around:{radius_meters},{request.latitude},{request.longitude});
-        );
-        out center;
-        """
-        
-        async with httpx.AsyncClient(timeout=30.0) as client:
-            response = await client.post("https://overpass-api.de/api/interpreter", data=overpass_query)
-            response.raise_for_status()
-            data = response.json()
+        if not GOOGLE_PLACES_API_KEY:
+            logger.error("GOOGLE_PLACES_API_KEY missing for truck services search")
+            raise HTTPException(status_code=503, detail="Truck services search unavailable: missing GOOGLE_PLACES_API_KEY")
+
+        radius_meters = 80000  # ~50 miles
+        url = "https://maps.googleapis.com/maps/api/place/nearbysearch/json"
+
+        async def _fetch(keyword: str, place_type: Optional[str]) -> List[Dict[str, Any]]:
+            params = {
+                "keyword": keyword,
+                "location": f"{request.latitude},{request.longitude}",
+                "radius": radius_meters,
+                "key": GOOGLE_PLACES_API_KEY,
+            }
+            if place_type:
+                params["type"] = place_type
+
+            async with httpx.AsyncClient(timeout=12.0) as client:
+                resp = await client.get(url, params=params)
+                resp.raise_for_status()
+                payload = resp.json()
+
+            status = payload.get("status")
+            if status not in {"OK", "ZERO_RESULTS"}:
+                logger.warning("Truck services Google Places status=%s message=%s", status, payload.get("error_message"))
+                raise HTTPException(status_code=503, detail="Truck services search temporarily unavailable")
+            return payload.get("results", []) or []
+
+        combined: Dict[str, Dict[str, Any]] = {}
+        for keyword, place_type, service_type_hint in [
+            ("truck repair", "car_repair", "repair"),
+            ("truck wash", None, "wash"),
+            ("weigh station", None, "scale"),
+        ]:
+            for place in await _fetch(keyword, place_type):
+                place_id = place.get("place_id")
+                if not place_id or place_id in combined:
+                    continue
+                place["__service_type_hint"] = service_type_hint
+                combined[place_id] = place
         
         services = []
-        for element in data.get('elements', []):
-            if element['type'] != 'node':
+        for place in combined.values():
+            loc = (place.get("geometry") or {}).get("location") or {}
+            lat = loc.get("lat")
+            lon = loc.get("lng")
+            if lat is None or lon is None:
                 continue
-            
-            tags = element.get('tags', {})
-            lat = element.get('lat', 0)
-            lon = element.get('lon', 0)
-            
+
             distance = haversine_miles(request.latitude, request.longitude, lat, lon)
-            
-            # Determine service type
-            shop = tags.get('shop')
-            amenity = tags.get('amenity')
-            if shop == 'car_repair':
-                service_type = 'repair'
-            elif shop == 'tyres':
-                service_type = 'tire'
-            elif amenity == 'car_wash':
-                service_type = 'wash'
-            elif amenity == 'weighbridge':
-                service_type = 'scale'
+            types = place.get("types") or []
+            hint = place.get("__service_type_hint")
+            if "car_wash" in types:
+                service_type = "wash"
+            elif "weigh_station" in types:
+                service_type = "scale"
+            elif "car_repair" in types:
+                service_type = "repair"
             else:
-                service_type = 'repair'
-            
-            # Services offered
-            services_offered = []
-            if service_type == 'repair':
-                if tags.get('service:vehicle:engine_repair') == 'yes':
-                    services_offered.append('Engine Repair')
-                if tags.get('service:vehicle:brakes') == 'yes':
-                    services_offered.append('Brakes')
-                if tags.get('service:vehicle:electrical') == 'yes':
-                    services_offered.append('Electrical')
-                if tags.get('service:vehicle:tyres') == 'yes':
-                    services_offered.append('Tires')
-                if not services_offered:
-                    services_offered.append('General Repair')
-            elif service_type == 'tire':
-                services_offered = ['Tire Sales', 'Tire Repair', 'Tire Service']
-            elif service_type == 'wash':
-                services_offered = ['Truck Wash', 'Detailing']
-            elif service_type == 'scale':
-                services_offered = ['CAT Scale', 'Weighing']
-            
+                service_type = hint or "repair"
+
+            if service_type == "wash":
+                services_offered = ["Truck Wash"]
+            elif service_type == "scale":
+                services_offered = ["Weigh Station"]
+            else:
+                services_offered = ["Truck Repair"]
+
             services.append(TruckService(
-                name=tags.get('name', f'Truck {service_type.title()} Service'),
+                name=place.get("name", f"Truck {service_type.title()} Service"),
                 service_type=service_type,
                 distance_miles=round(distance, 1),
                 latitude=lat,
                 longitude=lon,
+                address=place.get("vicinity") or place.get("formatted_address"),
+                rating=place.get("rating"),
                 services_offered=services_offered,
                 brands_serviced=[],
-                phone=tags.get('phone'),
-                website=tags.get('website'),
-                hours=tags.get('opening_hours'),
+                phone=None,
+                website=None,
+                hours=None,
             ))
         
         services = _dedupe_items(
@@ -7753,7 +7738,7 @@ async def search_truck_services(request: TruckServiceRequest):
         services.sort(key=lambda x: x.distance_miles)
         services = services[:15]
         
-        logger.info(f"Found {len(services)} truck services within {request.radius_miles} miles")
+        logger.info(f"Found {len(services)} truck services within 50 miles")
         return TruckServiceResponse(services=services)
     
     except Exception as e:
