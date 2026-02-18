@@ -651,7 +651,6 @@ class RouteAlertService:
             "distance_miles": distance_miles,
             "headline": headline,
             "expires": expires,
-            "sent_at": now,
         }
         query = {
             "monitor_id": doc["monitor_id"],
