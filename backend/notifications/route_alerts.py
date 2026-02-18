@@ -586,13 +586,30 @@ class RouteAlertService:
                 "monitor_id": monitor_id,
                 "sent_at": {"$gte": cutoff},
             }
+            query_for_log = {
+                "alert_id": alert_id,
+                "monitor_id": monitor_id,
+                "sent_at": {"$gte": cutoff.isoformat()},
+            }
+            logger.info(
+                "[route-alerts] cooldown_query",
+                extra={
+                    "alert_id": alert_id,
+                    "monitor_id": monitor_id,
+                    "minutes": minutes,
+                    "query": query_for_log,
+                },
+            )
             doc = self.db.sent_alerts.find_one(query)
+            doc_repr = repr(doc) if doc is not None else None
             logger.info(
                 "[route-alerts] cooldown_check",
                 extra={
                     "alert_id": alert_id,
                     "monitor_id": monitor_id,
                     "cutoff": cutoff.isoformat(),
+                    "query": query_for_log,
+                    "raw_result": doc_repr,
                     "found": bool(doc),
                     "found_sent_at": doc.get("sent_at").isoformat() if doc and doc.get("sent_at") else None,
                 },
@@ -659,6 +676,7 @@ class RouteAlertService:
                 },
                 upsert=True,
             )
+            inserted_doc = {**doc, "sent_at": now.isoformat()}
             logger.info(
                 "[route-alerts] record_sent",
                 extra={
@@ -672,6 +690,7 @@ class RouteAlertService:
                     "modified": result.modified_count,
                     "upserted_id": str(result.upserted_id) if result.upserted_id else None,
                     "sent_at": now.isoformat(),
+                    "insert_doc": inserted_doc,
                 },
             )
         except Exception as exc:  # noqa: BLE001
@@ -748,6 +767,17 @@ class CriticalRouteAlertWorker:
     def run_once(self) -> Dict[str, Any]:
         run_id = uuid.uuid4().hex[:8]
         self._current_run_id = run_id
+        try:
+            sent_count = self.service.db.sent_alerts.count_documents({})
+            logger.info(
+                "[route-alerts] sent_alerts_count",
+                extra={"run_id": run_id, "count": sent_count},
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "[route-alerts] failed counting sent_alerts",
+                extra={"run_id": run_id, "error": str(exc)},
+            )
         monitors = self.service.get_active_monitors()
         logger.info(
             "[route-alerts] fetched active monitors count=%d filter=active=True",
