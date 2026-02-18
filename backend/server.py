@@ -25,7 +25,7 @@ import httpx
 import polyline
 from notifications.route_alerts import sample_route_points
 import asyncio
-from bridge_database import get_bridge_warnings
+from bridge_database import get_bridge_warnings, get_bridge_warnings_near_route
 from providers import get_providers
 from billing import billing_verifier, VerificationRequest, VerificationResponse
 from common.premium_gate import require_premium
@@ -2611,16 +2611,22 @@ def generate_trucker_warnings(waypoints_weather: List[WaypointWeather], vehicle_
         except Exception:
             return 0
 
+    route_points = [
+        {"lat": wp.waypoint.lat, "lon": wp.waypoint.lon}
+        for wp in waypoints_weather
+        if wp.waypoint and wp.waypoint.lat is not None and wp.waypoint.lon is not None
+    ]
+
+    bridge_warnings = get_bridge_warnings_near_route(route_points, vehicle_height_ft, radius_miles=5.0)
+    if bridge_warnings:
+        warnings.extend(bridge_warnings)
+
     for wp in waypoints_weather:
         if not wp.weather:
             continue
 
         distance = wp.waypoint.distance_from_start or 0
         location = wp.waypoint.name or f"Mile {int(distance)}"
-
-        bridge_warnings = get_bridge_warnings(location, vehicle_height_ft)
-        if bridge_warnings:
-            warnings.extend(bridge_warnings)
 
         wind_speed = parse_wind(wp.weather.wind_speed)
         forecast = (wp.weather.conditions or "").lower()
@@ -3672,11 +3678,18 @@ async def get_route_weather(request: RouteRequest):
             logger.warning("DB not initialized; skipping route save")
         else:
             route_doc = response.model_dump()
-            # Ensure created_at is serializable
-            if 'created_at' in route_doc and isinstance(route_doc['created_at'], datetime):
-                route_doc['created_at'] = route_doc['created_at']
+            if 'created_at' not in route_doc:
+                route_doc['created_at'] = datetime.utcnow()
             await db.routes.insert_one(route_doc)
-            logger.info(f"Saved route {response.id} to database")
+            logger.info(
+                "route_saved",
+                extra={
+                    "route_id": response.id,
+                    "origin": response.origin,
+                    "destination": response.destination,
+                    "created_at": str(route_doc.get('created_at')),
+                },
+            )
             logger.info(f"route_id_available_for_alerts route_id={route_id}")
     except Exception as e:
         logger.error(f"Error saving route: {e}", exc_info=True)
@@ -4043,16 +4056,27 @@ async def get_route_history():
         logger.warning("Database not available for route history")
         return []
     try:
-        routes = await db.routes.find().sort("created_at", -1).limit(10).to_list(10)
-        logger.info("Route history fetched: count=%s", len(routes))
-        return [SavedRoute(
-            id=str(r.get('_id', r.get('id'))),
-            origin=r['origin'],
-            destination=r['destination'],
-            stops=r.get('stops', []),
-            is_favorite=r.get('is_favorite', False),
-            created_at=r.get('created_at', datetime.utcnow())
-        ) for r in routes]
+        routes = await db.routes.find().sort("created_at", -1).limit(10).to_list(length=10)
+        logger.info(
+            "route_history_fetched",
+            extra={
+                "count": len(routes),
+                "ids": [str(r.get('_id', r.get('id'))) for r in routes[:5]],
+            },
+        )
+        history = [
+            SavedRoute(
+                id=str(r.get('_id', r.get('id'))),
+                origin=r.get('origin', ''),
+                destination=r.get('destination', ''),
+                stops=r.get('stops', []),
+                is_favorite=r.get('is_favorite', False),
+                created_at=r.get('created_at', datetime.utcnow()),
+            )
+            for r in routes
+            if r.get('origin') and r.get('destination')
+        ]
+        return history
     except Exception as e:
         logger.error(f"Error fetching route history: {e}")
         return []
