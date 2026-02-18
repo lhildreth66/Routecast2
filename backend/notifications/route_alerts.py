@@ -640,7 +640,7 @@ class RouteAlertService:
         alert_key: Optional[str] = None,
     ) -> None:
         now = self.now()
-        doc = {
+        base_doc = {
             "monitor_id": monitor_id,
             "route_signature": route_signature,
             "route_id": route_id,
@@ -653,45 +653,58 @@ class RouteAlertService:
             "expires": expires,
         }
         query = {
-            "monitor_id": doc["monitor_id"],
-            "alert_id": doc["alert_id"],
-            "band": doc["band"],
-            "route_id": doc["route_id"],
+            "monitor_id": base_doc["monitor_id"],
+            "alert_id": base_doc["alert_id"],
+            "band": base_doc["band"],
+            "route_id": base_doc["route_id"],
         }
-        if self.db.sent_alerts.find_one(query):
-            return
+
         try:
-            # Avoid Mongo path conflicts (code 40) by not setting the same field in multiple operators.
-            result = self.db.sent_alerts.update_one(
-                query,
-                {
-                    "$setOnInsert": doc,
-                    "$set": {
-                        "sent_at": now,
-                        "headline": headline,
-                        "expires": expires,
-                        "distance_miles": distance_miles,
+            existing = self.db.sent_alerts.find_one(query)
+            if existing is None:
+                insert_doc = {**base_doc, "sent_at": now}
+                result = self.db.sent_alerts.insert_one(insert_doc)
+                logger.info(
+                    "[route-alerts] record_sent_insert",
+                    extra={
+                        "alert_id": alert_id,
+                        "monitor_id": monitor_id,
+                        "route_id": route_id,
+                        "route_signature": route_signature,
+                        "band": band,
+                        "inserted_id": str(result.inserted_id),
+                        "sent_at": now.isoformat(),
+                        "insert_doc": {**insert_doc, "sent_at": now.isoformat()},
                     },
-                },
-                upsert=True,
-            )
-            inserted_doc = {**doc, "sent_at": now.isoformat()}
-            logger.info(
-                "[route-alerts] record_sent",
-                extra={
-                    "alert_id": alert_id,
-                    "monitor_id": monitor_id,
-                    "route_id": route_id,
-                    "route_signature": route_signature,
-                    "band": band,
-                    "acknowledged": result.acknowledged,
-                    "matched": result.matched_count,
-                    "modified": result.modified_count,
-                    "upserted_id": str(result.upserted_id) if result.upserted_id else None,
-                    "sent_at": now.isoformat(),
-                    "insert_doc": inserted_doc,
-                },
-            )
+                )
+            else:
+                update_fields = {
+                    "sent_at": now,
+                    "headline": headline,
+                    "expires": expires,
+                    "distance_miles": distance_miles,
+                }
+                # Ensure alert_key and route_signature are refreshed if provided.
+                if alert_key:
+                    update_fields["alert_key"] = alert_key
+                if route_signature:
+                    update_fields["route_signature"] = route_signature
+
+                result = self.db.sent_alerts.update_one(query, {"$set": update_fields})
+                logger.info(
+                    "[route-alerts] record_sent_update",
+                    extra={
+                        "alert_id": alert_id,
+                        "monitor_id": monitor_id,
+                        "route_id": route_id,
+                        "route_signature": route_signature,
+                        "band": band,
+                        "matched": result.matched_count,
+                        "modified": result.modified_count,
+                        "sent_at": now.isoformat(),
+                        "update_fields": {**update_fields, "sent_at": now.isoformat()},
+                    },
+                )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "[route-alerts] failed to persist sent_alert monitor_id=%s alert_id=%s: %s",
