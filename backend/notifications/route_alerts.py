@@ -287,9 +287,19 @@ class RouteAlertService:
         self.db.route_monitors.create_index("active")
         self.db.route_monitors.create_index("created_at")
 
+        # Ensure per-monitor uniqueness; drop legacy index if present.
+        try:
+            idx_info = self.db.sent_alerts.index_information()
+            legacy_name = "route_signature_1_alert_id_1_band_1_route_id_1"
+            if legacy_name in idx_info:
+                self.db.sent_alerts.drop_index(legacy_name)
+                logger.info("[route-alerts] dropped legacy sent_alerts index without monitor_id")
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[route-alerts] failed to inspect/drop legacy sent_alerts index: %s", exc)
+
         self.db.sent_alerts.create_index(
             [
-                ("route_signature", 1),
+                ("monitor_id", 1),
                 ("alert_id", 1),
                 ("band", 1),
                 ("route_id", 1),
@@ -571,11 +581,22 @@ class RouteAlertService:
             return False
         cutoff = self.now() - timedelta(minutes=minutes)
         try:
-            doc = self.db.sent_alerts.find_one({
+            query = {
                 "alert_id": alert_id,
                 "monitor_id": monitor_id,
                 "sent_at": {"$gte": cutoff},
-            })
+            }
+            doc = self.db.sent_alerts.find_one(query)
+            logger.info(
+                "[route-alerts] cooldown_check",
+                extra={
+                    "alert_id": alert_id,
+                    "monitor_id": monitor_id,
+                    "cutoff": cutoff.isoformat(),
+                    "found": bool(doc),
+                    "found_sent_at": doc.get("sent_at").isoformat() if doc and doc.get("sent_at") else None,
+                },
+            )
             return bool(doc)
         except Exception as exc:  # noqa: BLE001
             logger.warning("[route-alerts] failed recent alert lookup for %s: %s", monitor_id, exc)
@@ -616,7 +637,7 @@ class RouteAlertService:
             "sent_at": now,
         }
         query = {
-            "route_signature": doc["route_signature"],
+            "monitor_id": doc["monitor_id"],
             "alert_id": doc["alert_id"],
             "band": doc["band"],
             "route_id": doc["route_id"],
@@ -625,7 +646,7 @@ class RouteAlertService:
             return
         try:
             # Avoid Mongo path conflicts (code 40) by not setting the same field in multiple operators.
-            self.db.sent_alerts.update_one(
+            result = self.db.sent_alerts.update_one(
                 query,
                 {
                     "$setOnInsert": doc,
@@ -637,6 +658,21 @@ class RouteAlertService:
                     },
                 },
                 upsert=True,
+            )
+            logger.info(
+                "[route-alerts] record_sent",
+                extra={
+                    "alert_id": alert_id,
+                    "monitor_id": monitor_id,
+                    "route_id": route_id,
+                    "route_signature": route_signature,
+                    "band": band,
+                    "acknowledged": result.acknowledged,
+                    "matched": result.matched_count,
+                    "modified": result.modified_count,
+                    "upserted_id": str(result.upserted_id) if result.upserted_id else None,
+                    "sent_at": now.isoformat(),
+                },
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning(
@@ -1176,6 +1212,17 @@ class CriticalRouteAlertWorker:
                     point_union_ids.append(union_id)
                     stats["alerts_found"] += 1
                     # Enforce per-alert-id cooldown (6 hours) before any other checks
+                    logger.info(
+                        "[route-alerts] cooldown_precheck",
+                        extra={
+                            "run_id": run_label,
+                            "monitor_id": monitor_id,
+                            "alert_id": alert_id,
+                            "event": props.get("event"),
+                            "raw_id": alert.get("id"),
+                            "prop_id": props.get("id"),
+                        },
+                    )
                     if self.service.has_sent_recent_alert(alert_id, monitor_id, minutes=360):
                         stats["skipped"] += 1
                         stats["alerts_suppressed_already_sent"] += 1
