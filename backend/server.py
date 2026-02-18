@@ -1200,7 +1200,8 @@ async def get_noaa_weather(lat: float, lon: float) -> Optional[WeatherData]:
     point_url = f"https://api.weather.gov/points/{lat},{lon}"
 
     try:
-        async with httpx.AsyncClient(timeout=12.0) as client:
+        # NWS points can issue 301 redirects; enable follow_redirects so we land on the canonical URL.
+        async with httpx.AsyncClient(timeout=12.0, follow_redirects=True) as client:
             point_resp = await client.get(point_url, headers=NOAA_HEADERS)
             _noaa_cache_stats["nws_http_calls"] += 1
             if point_resp.status_code != 200:
