@@ -565,6 +565,22 @@ class RouteAlertService:
                 return True
         return False
 
+    def has_sent_recent_alert(self, alert_id: str, monitor_id: str, *, minutes: int) -> bool:
+        """Return True if this NWS alert id was sent to this monitor within the cooldown window."""
+        if not alert_id or not monitor_id:
+            return False
+        cutoff = self.now() - timedelta(minutes=minutes)
+        try:
+            doc = self.db.sent_alerts.find_one({
+                "alert_id": alert_id,
+                "monitor_id": monitor_id,
+                "sent_at": {"$gte": cutoff},
+            })
+            return bool(doc)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[route-alerts] failed recent alert lookup for %s: %s", monitor_id, exc)
+            return False
+
     def count_recent(self, monitor_id: str, minutes: int = 60, exclude_events: Optional[List[str]] = None) -> int:
         cutoff = self.now() - timedelta(minutes=minutes)
         query: Dict[str, Any] = {"monitor_id": monitor_id, "sent_at": {"$gte": cutoff}}
@@ -1156,6 +1172,11 @@ class CriticalRouteAlertWorker:
                 )
                 point_union_ids.append(union_id)
                 stats["alerts_found"] += 1
+                # Enforce per-alert-id cooldown (6 hours) before any other checks
+                if self.service.has_sent_recent_alert(alert_id, monitor_id, minutes=360):
+                    stats["skipped"] += 1
+                    stats["alerts_suppressed_already_sent"] += 1
+                    continue
                 if not self._is_critical(alert):
                     logger.info(
                         "[route-alerts] skipped_type",
