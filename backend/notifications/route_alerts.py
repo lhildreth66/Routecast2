@@ -1157,6 +1157,16 @@ class CriticalRouteAlertWorker:
                 point_union_ids.append(union_id)
                 stats["alerts_found"] += 1
                 if not self._is_critical(alert):
+                    logger.info(
+                        "[route-alerts] skipped_type",
+                        extra={
+                            "run_id": run_label,
+                            "monitor_id": monitor_id,
+                            "event": props.get("event"),
+                            "severity": props.get("severity"),
+                            "alert_id": union_id,
+                        },
+                    )
                     stats["skipped"] += 1
                     stats["skipped_type"] += 1
                     continue
@@ -1593,13 +1603,8 @@ class CriticalRouteAlertWorker:
     def _is_critical(self, alert: Dict[str, Any]) -> bool:
         props = alert.get("properties", {})
         event = props.get("event", "")
-        severity = (props.get("severity") or "").lower()
-        # Accept all NWS alerts except explicitly minor/unknown/test levels; do not filter by event type.
-        if not event:
-            return False
-        if severity in {"minor", "unknown", "test", "moderate"}:
-            return False
-        return True
+        # Allow all NWS events through; only drop when event is missing entirely.
+        return bool(event)
 
     def _band_for_distance(self, distance_miles: float) -> Optional[str]:
         if distance_miles <= 5.0:

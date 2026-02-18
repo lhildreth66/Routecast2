@@ -3871,7 +3871,8 @@ async def get_route_weather_alerts(route_id: str):
             return str(uuid.uuid4())
 
         nws_raw_count = 0
-        union_cards: Dict[str, HazardAlert] = {}
+        # Keep raw NWS features and attach computed distance/ETA; avoid synthetic card synthesis.
+        union_raw: Dict[str, Dict[str, Any]] = {}
 
         for idx, wp_weather in enumerate(hazard_waypoints_weather):
             wp_distance = wp_weather.waypoint.distance_from_start or 0.0
@@ -3886,40 +3887,53 @@ async def get_route_weather_alerts(route_id: str):
                     continue
                 nws_raw_count += 1
                 alert_id = _alert_union_id(alert)
-                if alert_id in union_cards:
-                    existing = union_cards[alert_id]
-                    if wp_distance < (existing.distance_miles or float("inf")):
-                        existing.distance_miles = wp_distance
-                        existing.eta_minutes = wp_eta
+                # Keep the closest distance/ETA for the same alert id.
+                if alert_id in union_raw:
+                    existing = union_raw[alert_id]
+                    if wp_distance < (existing.get("distance_miles") or float("inf")):
+                        existing["distance_miles"] = wp_distance
+                        existing["eta_minutes"] = wp_eta
                     continue
 
-                eta_mins = int((wp_distance / DEFAULT_ROUTE_SPEED_MPH) * 60) if wp_distance else wp_eta
-                event_name = alert.event or alert.headline or "Weather Alert"
-                headline = alert.headline or event_name
+                union_raw[alert_id] = {
+                    "alert": alert,
+                    "distance_miles": wp_distance,
+                    "eta_minutes": wp_eta,
+                }
 
-                union_cards[alert_id] = HazardAlert(
+        # Build returned cards directly from raw NWS alerts, preserving properties.
+        union_list: List[HazardAlert] = []
+        for alert_id, payload in union_raw.items():
+            raw_alert: WeatherAlert = payload.get("alert")
+            props = raw_alert.properties or raw_alert.model_dump()
+            event_name = props.get("event") or raw_alert.event or raw_alert.headline or "Weather Alert"
+            headline = props.get("headline") or raw_alert.headline or event_name
+            eta_mins = int((payload.get("distance_miles", 0.0) / DEFAULT_ROUTE_SPEED_MPH) * 60) if payload.get("distance_miles") else payload.get("eta_minutes")
+
+            union_list.append(
+                HazardAlert(
                     type="weather",
-                    severity="medium",
-                    distance_miles=wp_distance,
+                    severity=(props.get("severity") or raw_alert.severity or "Unknown"),
+                    distance_miles=payload.get("distance_miles"),
                     eta_minutes=eta_mins,
-                    message=event_name,
-                    recommendation=alert.instruction or "Use caution along your route.",
-                    countdown_text=f"{event_name} in {eta_mins} minutes" if eta_mins else event_name,
+                    message=f"{event_name} in {eta_mins} minutes" if eta_mins is not None else event_name,
+                    recommendation=raw_alert.instruction or "Use caution along your route.",
+                    countdown_text=f"{event_name} in {eta_mins} minutes" if eta_mins is not None else event_name,
                     event=event_name,
                     headline=headline,
-                    description=alert.description,
-                    full_description=alert.description,
-                    instruction=alert.instruction,
-                    areaDesc=alert.areas,
-                    onset=alert.onset or alert.effective,
-                    expires=alert.expires or alert.ends,
-                    properties=alert.properties or alert.model_dump(),
+                    description=props.get("description") or raw_alert.description,
+                    full_description=props.get("description") or raw_alert.description,
+                    instruction=raw_alert.instruction,
+                    areaDesc=props.get("areaDesc") or raw_alert.areas,
+                    onset=props.get("onset") or raw_alert.onset or raw_alert.effective,
+                    expires=props.get("expires") or raw_alert.expires or raw_alert.ends,
+                    properties=props,
                     alert_id=alert_id,
                     id=alert_id,
-                    alert_level=alert.severity,
+                    alert_level=props.get("severity") or raw_alert.severity,
                 )
+            )
 
-        union_list = list(union_cards.values())
         union_list.sort(key=lambda card: card.distance_miles if card.distance_miles is not None else float("inf"))
         returned_cards = union_list[:ALERTS_RETURN_LIMIT]
 
