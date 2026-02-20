@@ -47,16 +47,16 @@ const FALLBACK_PLANS: Plan[] = [
   {
     id: 'yearly',
     name: 'Yearly',
-    price: 99.0,
+    price: 59.99,
     currency: 'USD',
     interval: 'year',
     trial_days: 7,
+    savings: 'Save 50%',
     features: [
       'Everything in Monthly',
       'Best value annual plan',
       'Priority feature access',
     ],
-    savings: 'Save 17%',
   },
 ];
 
@@ -72,7 +72,7 @@ function normalizePlans(data: any): Plan[] | null {
 export default function SubscriptionScreen() {
   const { user, accessToken, refreshUser, isAuthenticated } = useAuth();
   const [plans, setPlans] = useState<Plan[]>([]);
-  const [selectedPlan, setSelectedPlan] = useState<string>('yearly');
+  const [selectedPlan, setSelectedPlan] = useState<string>('yearly'); // default yearly
   const [loading, setLoading] = useState(true);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [trialLoading, setTrialLoading] = useState(false);
@@ -80,6 +80,7 @@ export default function SubscriptionScreen() {
 
   useEffect(() => {
     void fetchPlans();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchPlans = async () => {
@@ -89,7 +90,7 @@ export default function SubscriptionScreen() {
     // Try both common route spellings.
     const candidates = [
       `${API_BASE}/api/subscriptions/plans`, // plural
-      `${API_BASE}/api/subscription/plans`,  // singular
+      `${API_BASE}/api/subscription/plans`, // singular
     ];
 
     try {
@@ -97,12 +98,18 @@ export default function SubscriptionScreen() {
         try {
           const resp = await axios.get(url);
           const parsed = normalizePlans(resp.data);
+
           if (parsed && parsed.length) {
             setPlans(parsed);
-            // Keep selectedPlan valid
-            if (!parsed.some((p) => p.id === selectedPlan)) {
+
+            // Default selection should be yearly if available.
+            if (parsed.some((p) => p.id === 'yearly')) {
+              setSelectedPlan('yearly');
+            } else if (!parsed.some((p) => p.id === selectedPlan)) {
+              // Otherwise keep selection valid
               setSelectedPlan(parsed[0].id);
             }
+
             return;
           }
         } catch {
@@ -112,13 +119,13 @@ export default function SubscriptionScreen() {
 
       // If backend plans endpoints don't exist yet, fall back so UI is not broken.
       setPlans(FALLBACK_PLANS);
-      if (!FALLBACK_PLANS.some((p) => p.id === selectedPlan)) {
-        setSelectedPlan('yearly');
-      }
+      setSelectedPlan('yearly');
     } catch (err) {
       console.log('Error fetching plans:', err);
+
       // Still show something usable
       setPlans(FALLBACK_PLANS);
+      setSelectedPlan('yearly');
       setError('');
     } finally {
       setLoading(false);
@@ -289,7 +296,10 @@ export default function SubscriptionScreen() {
               <Text style={styles.manageButtonText}>Manage Subscription</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={styles.continueButton} onPress={() => router.replace('/')}>
+            <TouchableOpacity
+              style={styles.continueButton}
+              onPress={() => router.replace('/')}
+            >
               <Text style={styles.continueButtonText}>Continue to App</Text>
             </TouchableOpacity>
           </View>
@@ -335,7 +345,11 @@ export default function SubscriptionScreen() {
                 disabled={trialLoading}
                 data-testid="start-trial-btn"
               >
-                {trialLoading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.trialButtonText}>Start Free Trial</Text>}
+                {trialLoading ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Text style={styles.trialButtonText}>Start Free Trial</Text>
+                )}
               </TouchableOpacity>
             </View>
           )}
@@ -411,13 +425,18 @@ export default function SubscriptionScreen() {
               <>
                 <Ionicons name="card" size={22} color="#1a1a1a" />
                 <Text style={styles.checkoutButtonText}>
-                  Subscribe - ${selected?.price ?? 0}/{selected?.interval ?? (selectedPlan === 'yearly' ? 'year' : 'month')}
+                  Subscribe - ${selected?.price ?? 0}/
+                  {selected?.interval ?? (selectedPlan === 'yearly' ? 'year' : 'month')}
                 </Text>
               </>
             )}
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.skipButton} onPress={() => router.replace('/')} data-testid="skip-subscription-btn">
+          <TouchableOpacity
+            style={styles.skipButton}
+            onPress={() => router.replace('/')}
+            data-testid="skip-subscription-btn"
+          >
             <Text style={styles.skipButtonText}>Continue with free version</Text>
           </TouchableOpacity>
 
