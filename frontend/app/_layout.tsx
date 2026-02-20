@@ -7,7 +7,7 @@ import { AuthProvider } from '../contexts/AuthContext';
 import { registerDevicePushTokenOnce } from './pushRegistration';
 import { addNotificationToHistory } from './notificationHistory';
 
-// Configure notifications (native only)
+// Configure notifications (NATIVE ONLY)
 if (Platform.OS !== 'web') {
   Notifications.setNotificationHandler({
     handleNotification: async () => ({
@@ -42,10 +42,12 @@ export default function RootLayout() {
   const router = useRouter();
 
   useEffect(() => {
-    // WEB: do nothing with expo-notifications (prevents crash)
-    if (Platform.OS === 'web') return;
+    // 🚫 WEB: completely skip expo-notifications
+    if (Platform.OS === 'web') {
+      console.log('[push-auto] skip on web platform');
+      return;
+    }
 
-    // Request notification permissions
     async function requestPermissions() {
       const { status } = await Notifications.requestPermissionsAsync();
       if (status !== 'granted') {
@@ -58,12 +60,19 @@ export default function RootLayout() {
     void registerDevicePushTokenOnce();
 
     const sub = Notifications.addNotificationReceivedListener((notification) => {
-      console.log('[notifications] received', notification.request.identifier, notification.request.content?.title);
+      console.log(
+        '[notifications] received',
+        notification.request.identifier,
+        notification.request.content?.title
+      );
       void addNotificationToHistory(notification);
     });
 
     const responseSub = Notifications.addNotificationResponseReceivedListener((response) => {
-      console.log('[notifications] tapped', response.notification?.request?.identifier);
+      console.log(
+        '[notifications] tapped',
+        response.notification?.request?.identifier
+      );
       void addNotificationToHistory(response.notification);
       setTimeout(() => {
         try {
@@ -74,11 +83,10 @@ export default function RootLayout() {
       }, 50);
     });
 
-    // Handle cold-start taps (app opened from killed state)
+    // Cold-start notification tap (native only)
     void (async () => {
       const last = await Notifications.getLastNotificationResponseAsync();
       if (last) {
-        console.log('[notifications] last response on launch', last.notification?.request?.identifier);
         void addNotificationToHistory(last.notification);
         setTimeout(() => {
           try {
@@ -108,7 +116,8 @@ export default function RootLayout() {
       >
         <Stack.Screen name="index" />
         <Stack.Screen name="route" />
-        {/* Boondockers Screens */}
+
+        {/* Boondockers */}
         <Stack.Screen name="boondockers" />
         <Stack.Screen name="camp-prep-checklist" />
         <Stack.Screen name="free-camping" />
@@ -121,7 +130,8 @@ export default function RootLayout() {
         <Stack.Screen name="wind-shelter" />
         <Stack.Screen name="connectivity" />
         <Stack.Screen name="campsite-index" />
-        {/* Tractor Trailer Screens */}
+
+        {/* Tractor Trailer */}
         <Stack.Screen name="tractor-trailer" />
         <Stack.Screen name="truck-stops" />
         <Stack.Screen name="weigh-stations" />
@@ -129,7 +139,8 @@ export default function RootLayout() {
         <Stack.Screen name="low-clearance" />
         <Stack.Screen name="truck-services" />
         <Stack.Screen name="truck-restrictions" />
-        {/* Shared/Supporting Screens */}
+
+        {/* Shared */}
         <Stack.Screen name="truckerAlerts" />
         <Stack.Screen name="radar-map" />
         <Stack.Screen name="weather-alerts" />
