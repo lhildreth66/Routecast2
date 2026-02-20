@@ -157,7 +157,7 @@ export default function SubscriptionScreen() {
       const origin =
         Platform.OS === 'web'
           ? window.location.origin
-          : 'https://app.routecastweather.com';
+          : 'https://routecastweather.com';
 
       const urls = [
         `${API_BASE}/api/subscriptions/checkout`,
