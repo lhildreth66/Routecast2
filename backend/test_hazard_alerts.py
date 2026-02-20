@@ -3,7 +3,7 @@ import datetime
 import pytest
 import polyline
 
-from backend.server import (
+from server import (
     analyze_route_conditions,
     derive_road_condition,
     build_condition_segments,
