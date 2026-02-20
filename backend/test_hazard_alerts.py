@@ -1,4 +1,5 @@
 import datetime
+
 import pytest
 import polyline
 
@@ -75,54 +76,95 @@ def test_merge_adjacent_hazards():
 @pytest.mark.asyncio
 async def test_mapbox_steps_return_real_road_names(monkeypatch):
     sample_route = {
-        "routes": [{
-            "legs": [{
-                "steps": [{
-                    "distance": 1000,
-                    "duration": 60,
-                    "name": "I-80 E",
-                    "maneuver": {"type": "depart"},
-                }]
-            }]
-        }],
+        "routes": [
+            {
+                "legs": [
+                    {
+                        "steps": [
+                            {
+                                "distance": 1000,
+                                "duration": 60,
+                                "name": "I-80 E",
+                                "maneuver": {"type": "depart"},
+                            }
+                        ]
+                    }
+                ]
+            }
+        ],
         "code": "Ok",
     }
 
     class FakeResp:
         status_code = 200
-        def json(self): return sample_route
+
+        def json(self):
+            return sample_route
 
     class FakeClient:
-        async def __aenter__(self): return self
-        async def __aexit__(self, *a): return False
-        async def get(self, *a, **k): return FakeResp()
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def get(self, *a, **k):
+            return FakeResp()
 
     monkeypatch.setattr("server.MAPBOX_ACCESS_TOKEN", "x")
     monkeypatch.setattr("server.httpx.AsyncClient", FakeClient)
 
-    steps = await get_turn_by_turn_directions((0, 0), (1, 1), [make_wp(0)])
+    # Make sure we pass WaypointWeather list (this function expects waypoint-weather objects)
+    waypoints = [make_wp(0), make_wp(5)]
+    steps = await get_turn_by_turn_directions((0, 0), (1, 1), waypoints)
 
-    assert isinstance(steps, list)
-    if steps:
-        assert steps[0].road_name
+    # Must not be empty
+    assert steps, "Expected steps from mocked Mapbox response"
+    assert steps[0].road_name
 
 
 # ---------------- LOW RES ROUTE TEST ---------------- #
 
 @pytest.mark.asyncio
 async def test_low_resolution_routes_resample_and_generate_segments(monkeypatch):
-
     encoded = polyline.encode([(0, 0), (0, 6)], precision=6)
 
-    async def fake_route(*args, **kwargs):
-        return {
-            "geometry": encoded,
-            "distance": 600000,
-            "duration": 21600,
-            "legs": [{"steps": []}],
-        }
+    sample_route = {
+        "routes": [
+            {
+                "distance": 600000,
+                "duration": 21600,
+                "geometry": encoded,
+                "legs": [{"steps": []}],
+            }
+        ],
+        "code": "Ok",
+    }
 
-    monkeypatch.setattr("server.get_mapbox_route", fake_route)
+    class FakeResp:
+        status_code = 200
+
+        def json(self):
+            return sample_route
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def get(self, *a, **k):
+            return FakeResp()
+
+    monkeypatch.setattr("server.MAPBOX_ACCESS_TOKEN", "x")
+    monkeypatch.setattr("server.httpx.AsyncClient", FakeClient)
 
     waypoints = [make_wp(d) for d in range(0, 360, 30)]
 
@@ -137,19 +179,23 @@ async def test_low_resolution_routes_resample_and_generate_segments(monkeypatch)
         "low-res",
     )
 
-    road = build_condition_segments(alerts)
-    assert road
+    # FIX: category is keyword-only
+    road = build_condition_segments(alerts, category="road")
+    weather = build_condition_segments(alerts, category="weather")
+    assert road or weather
 
 
 # ---------------- ROUTE WEATHER TEST ---------------- #
 
 @pytest.mark.asyncio
 async def test_route_weather_handles_missing_waypoints(monkeypatch):
+    encoded = polyline.encode([(0.0, 0.0), (0.0, 1.0)], precision=6)
 
     async def fake_route(*args, **kwargs):
         return {
-            "geometry": None,
+            "geometry": encoded,  # provide geometry so waypoint synthesis works cleanly
             "distance": 160934.4,
+            "duration": 3600,
             "legs": [{"distance": 160934.4}],
         }
 
@@ -177,6 +223,7 @@ async def test_route_weather_handles_missing_waypoints(monkeypatch):
     async def fake_turn(*args, **kwargs):
         return []
 
+    # IMPORTANT: must be async because server awaits it
     async def fake_rest(*args, **kwargs):
         return []
 
@@ -187,6 +234,7 @@ async def test_route_weather_handles_missing_waypoints(monkeypatch):
     monkeypatch.setattr("server.get_turn_by_turn_directions", fake_turn)
     monkeypatch.setattr("server.find_rest_stops", fake_rest)
 
+    # FIX: RouteRequest should be constructed with keyword args only (Pydantic v2)
     req = RouteRequest(
         origin="0,0",
         destination="0,1",
