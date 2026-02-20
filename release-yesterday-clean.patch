@@ -2222,3 +2222,1364 @@ new file mode 100644
 +        logger.error(f"Error getting route weight restrictions: {e}")
 +        return []
 
+diff --git a/backend/routers/admin.py b/backend/routers/admin.py
+new file mode 100644
+--- /dev/null
++++ b/backend/routers/admin.py
+@@ -0,0 +1,263 @@
++"""
++Admin Router for RouteCast
++Handles admin operations for user and subscription management
++"""
++from fastapi import APIRouter, HTTPException, Depends, Header, Request, Query
++from typing import Optional, List
++from datetime import datetime, timezone
++import os
++
++from models.user import (
++    UserResponse, AdminUserListResponse,
++    AdminGrantSubscriptionRequest, AdminRevokeSubscriptionRequest,
++    SubscriptionStatus, SubscriptionPlan
++)
++from services.subscription_service import grant_subscription, revoke_subscription
++from routers.auth import get_current_user, get_db
++
++router = APIRouter(prefix="/admin", tags=["Admin"])
++
++# Simple admin authentication - in production use proper RBAC
++ADMIN_API_KEY = os.environ.get('ADMIN_API_KEY', 'routecast-admin-key-2025')
++
++
++async def verify_admin(x_admin_key: Optional[str] = Header(None)):
++    """Verify admin API key"""
++    if not x_admin_key or x_admin_key != ADMIN_API_KEY:
++        raise HTTPException(status_code=403, detail="Admin access required")
++    return True
++
++
++@router.get("/users", response_model=AdminUserListResponse)
++async def list_users(
++    request: Request,
++    page: int = Query(1, ge=1),
++    per_page: int = Query(20, ge=1, le=100),
++    search: Optional[str] = None,
++    subscription_status: Optional[str] = None,
++    admin: bool = Depends(verify_admin)
++):
++    """List all users with pagination and filtering"""
++    db = get_db(request)
++    
++    # Build query
++    query = {}
++    if search:
++        query["$or"] = [
++            {"email": {"$regex": search, "$options": "i"}},
++            {"name": {"$regex": search, "$options": "i"}}
++        ]
++    if subscription_status:
++        query["subscription_status"] = subscription_status
++    
++    # Get total count
++    total = await db.users.count_documents(query)
++    
++    # Get paginated results
++    skip = (page - 1) * per_page
++    cursor = db.users.find(query, {"hashed_password": 0}).skip(skip).limit(per_page).sort("created_at", -1)
++    users = await cursor.to_list(length=per_page)
++    
++    # Format response
++    user_responses = []
++    for user in users:
++        user_responses.append(UserResponse(
++            user_id=user["user_id"],
++            email=user["email"],
++            name=user.get("name"),
++            email_verified=user.get("email_verified", False),
++            created_at=user["created_at"],
++            subscription_status=SubscriptionStatus(user.get("subscription_status", "inactive")),
++            subscription_plan=SubscriptionPlan(user.get("subscription_plan", "free")),
++            subscription_provider=user.get("subscription_provider"),
++            subscription_expiration=user.get("subscription_expiration"),
++            is_premium=user.get("subscription_status") in ["active", "trialing"]
++        ))
++    
++    return AdminUserListResponse(
++        users=user_responses,
++        total=total,
++        page=page,
++        per_page=per_page
++    )
++
++
++@router.get("/users/{user_id}")
++async def get_user_details(
++    user_id: str,
++    request: Request,
++    admin: bool = Depends(verify_admin)
++):
++    """Get detailed user information"""
++    db = get_db(request)
++    
++    user = await db.users.find_one({"user_id": user_id}, {"hashed_password": 0})
++    if not user:
++        raise HTTPException(status_code=404, detail="User not found")
++    
++    # Get subscription logs
++    logs_cursor = db.subscription_logs.find({"user_id": user_id}).sort("timestamp", -1).limit(20)
++    logs = await logs_cursor.to_list(length=20)
++    
++    # Get payment transactions
++    transactions_cursor = db.payment_transactions.find({"user_id": user_id}).sort("created_at", -1).limit(20)
++    transactions = await transactions_cursor.to_list(length=20)
++    
++    # Convert ObjectId to string for JSON serialization
++    for log in logs:
++        log["_id"] = str(log["_id"])
++    for tx in transactions:
++        tx["_id"] = str(tx["_id"])
++    
++    user["_id"] = str(user.get("_id", ""))
++    
++    return {
++        "user": user,
++        "subscription_logs": logs,
++        "payment_transactions": transactions
++    }
++
++
++@router.post("/users/{user_id}/grant-subscription")
++async def admin_grant_subscription(
++    user_id: str,
++    data: AdminGrantSubscriptionRequest,
++    request: Request,
++    admin: bool = Depends(verify_admin)
++):
++    """Grant subscription to a user"""
++    db = get_db(request)
++    
++    if data.user_id != user_id:
++        raise HTTPException(status_code=400, detail="User ID mismatch")
++    
++    # Verify user exists
++    user = await db.users.find_one({"user_id": user_id})
++    if not user:
++        raise HTTPException(status_code=404, detail="User not found")
++    
++    success = await grant_subscription(
++        db=db,
++        user_id=user_id,
++        plan=data.plan.value,
++        duration_days=data.duration_days,
++        reason=data.reason
++    )
++    
++    if not success:
++        raise HTTPException(status_code=500, detail="Failed to grant subscription")
++    
++    return {
++        "message": f"Subscription granted: {data.plan.value} for {data.duration_days} days",
++        "user_id": user_id
++    }
++
++
++@router.post("/users/{user_id}/revoke-subscription")
++async def admin_revoke_subscription(
++    user_id: str,
++    data: AdminRevokeSubscriptionRequest,
++    request: Request,
++    admin: bool = Depends(verify_admin)
++):
++    """Revoke subscription from a user"""
++    db = get_db(request)
++    
++    if data.user_id != user_id:
++        raise HTTPException(status_code=400, detail="User ID mismatch")
++    
++    # Verify user exists
++    user = await db.users.find_one({"user_id": user_id})
++    if not user:
++        raise HTTPException(status_code=404, detail="User not found")
++    
++    success = await revoke_subscription(
++        db=db,
++        user_id=user_id,
++        reason=data.reason
++    )
++    
++    if not success:
++        raise HTTPException(status_code=500, detail="Failed to revoke subscription")
++    
++    return {
++        "message": "Subscription revoked",
++        "user_id": user_id
++    }
++
++
++@router.get("/stats")
++async def get_admin_stats(
++    request: Request,
++    admin: bool = Depends(verify_admin)
++):
++    """Get overall platform statistics"""
++    db = get_db(request)
++    
++    now = datetime.now(timezone.utc)
++    
++    # Total users
++    total_users = await db.users.count_documents({})
++    
++    # Verified users
++    verified_users = await db.users.count_documents({"email_verified": True})
++    
++    # Subscription counts
++    active_subs = await db.users.count_documents({"subscription_status": "active"})
++    trialing_subs = await db.users.count_documents({"subscription_status": "trialing"})
++    
++    # By provider
++    stripe_subs = await db.users.count_documents({"subscription_provider": "stripe", "subscription_status": "active"})
++    apple_subs = await db.users.count_documents({"subscription_provider": "apple", "subscription_status": "active"})
++    google_subs = await db.users.count_documents({"subscription_provider": "google", "subscription_status": "active"})
++    admin_subs = await db.users.count_documents({"subscription_provider": "admin", "subscription_status": "active"})
++    
++    # By plan
++    monthly_subs = await db.users.count_documents({"subscription_plan": "monthly", "subscription_status": {"$in": ["active", "trialing"]}})
++    yearly_subs = await db.users.count_documents({"subscription_plan": "yearly", "subscription_status": {"$in": ["active", "trialing"]}})
++    
++    return {
++        "total_users": total_users,
++        "verified_users": verified_users,
++        "active_subscriptions": active_subs,
++        "trialing_users": trialing_subs,
++        "subscriptions_by_provider": {
++            "stripe": stripe_subs,
++            "apple": apple_subs,
++            "google": google_subs,
++            "admin": admin_subs
++        },
++        "subscriptions_by_plan": {
++            "monthly": monthly_subs,
++            "yearly": yearly_subs
++        },
++        "timestamp": now.isoformat()
++    }
++
++
++@router.get("/subscription-logs")
++async def get_subscription_logs(
++    request: Request,
++    page: int = Query(1, ge=1),
++    per_page: int = Query(50, ge=1, le=100),
++    admin: bool = Depends(verify_admin)
++):
++    """Get all subscription activity logs"""
++    db = get_db(request)
++    
++    total = await db.subscription_logs.count_documents({})
++    skip = (page - 1) * per_page
++    
++    cursor = db.subscription_logs.find({}).skip(skip).limit(per_page).sort("timestamp", -1)
++    logs = await cursor.to_list(length=per_page)
++    
++    # Convert ObjectId to string
++    for log in logs:
++        log["_id"] = str(log["_id"])
++    
++    return {
++        "logs": logs,
++        "total": total,
++        "page": page,
++        "per_page": per_page
++    }
+
+diff --git a/backend/routers/auth.py b/backend/routers/auth.py
+new file mode 100644
+--- /dev/null
++++ b/backend/routers/auth.py
+@@ -0,0 +1,335 @@
++"""
++Authentication Router for RouteCast
++Handles signup, login, email verification, password reset, and user profile
++"""
++from fastapi import APIRouter, HTTPException, Depends, Header, Request, BackgroundTasks
++from typing import Optional
++from datetime import datetime, timedelta, timezone
++import os
++
++from models.user import (
++    UserCreate, UserLogin, UserResponse, UserMeResponse,
++    TokenResponse, TokenRefreshRequest, PasswordResetRequest,
++    PasswordResetConfirm, EmailVerificationRequest, ChangePasswordRequest,
++    SubscriptionStatus, SubscriptionPlan,
++    get_user_entitlements, user_is_premium
++)
++from services.auth_service import (
++    create_tokens, verify_token, get_password_hash,
++    verify_password, get_user_by_email, get_user_by_id,
++    create_user, update_user, generate_verification_token,
++    store_verification_token, verify_and_consume_token,
++    authenticate_user
++)
++from services.email_service import (
++    send_verification_email, send_password_reset_email, send_welcome_email
++)
++
++router = APIRouter(prefix="/auth", tags=["Authentication"])
++
++
++async def get_current_user(authorization: Optional[str] = Header(None)):
++    """Dependency to get current authenticated user"""
++    if not authorization or not authorization.startswith("Bearer "):
++        raise HTTPException(status_code=401, detail="Not authenticated")
++    
++    token = authorization.split(" ")[1]
++    payload = verify_token(token, "access")
++    
++    if not payload:
++        raise HTTPException(status_code=401, detail="Invalid or expired token")
++    
++    return payload
++
++
++async def get_current_user_optional(authorization: Optional[str] = Header(None)):
++    """Optional authentication - returns None if not authenticated"""
++    if not authorization or not authorization.startswith("Bearer "):
++        return None
++    
++    token = authorization.split(" ")[1]
++    payload = verify_token(token, "access")
++    return payload
++
++
++def get_db(request: Request):
++    """Get database from app state"""
++    return request.app.state.db
++
++
++@router.post("/signup", response_model=TokenResponse)
++async def signup(
++    user_data: UserCreate,
++    background_tasks: BackgroundTasks,
++    request: Request
++):
++    """Register a new user"""
++    db = get_db(request)
++    
++    # Check if user already exists
++    existing_user = await get_user_by_email(db, user_data.email)
++    if existing_user:
++        raise HTTPException(status_code=400, detail="Email already registered")
++    
++    # Create user
++    user = await create_user(db, user_data.email, user_data.password, user_data.name)
++    
++    # Generate verification token
++    verification_token = generate_verification_token()
++    await store_verification_token(db, user["user_id"], verification_token, "email_verification", 24)
++    
++    # Send verification email in background
++    background_tasks.add_task(
++        send_verification_email,
++        user_data.email,
++        verification_token,
++        user_data.name
++    )
++    
++    # Generate tokens
++    access_token, refresh_token, expires_in = create_tokens(user["user_id"], user["email"])
++    
++    return TokenResponse(
++        access_token=access_token,
++        refresh_token=refresh_token,
++        expires_in=expires_in
++    )
++
++
++@router.post("/login", response_model=TokenResponse)
++async def login(user_data: UserLogin, request: Request):
++    """Login with email and password"""
++    db = get_db(request)
++    
++    user = await authenticate_user(db, user_data.email, user_data.password)
++    if not user:
++        raise HTTPException(status_code=401, detail="Invalid email or password")
++    
++    # Generate tokens
++    access_token, refresh_token, expires_in = create_tokens(user["user_id"], user["email"])
++    
++    return TokenResponse(
++        access_token=access_token,
++        refresh_token=refresh_token,
++        expires_in=expires_in
++    )
++
++
++@router.post("/refresh", response_model=TokenResponse)
++async def refresh_token(token_data: TokenRefreshRequest, request: Request):
++    """Refresh access token using refresh token"""
++    db = get_db(request)
++    
++    payload = verify_token(token_data.refresh_token, "refresh")
++    if not payload:
++        raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
++    
++    user_id = payload.get("sub")
++    email = payload.get("email")
++    
++    # Verify user still exists
++    user = await get_user_by_id(db, user_id)
++    if not user:
++        raise HTTPException(status_code=401, detail="User not found")
++    
++    # Generate new tokens
++    access_token, refresh_token, expires_in = create_tokens(user_id, email)
++    
++    return TokenResponse(
++        access_token=access_token,
++        refresh_token=refresh_token,
++        expires_in=expires_in
++    )
++
++
++@router.post("/verify-email")
++async def verify_email(
++    data: EmailVerificationRequest,
++    background_tasks: BackgroundTasks,
++    request: Request
++):
++    """Verify email address with token"""
++    db = get_db(request)
++    
++    user_id = await verify_and_consume_token(db, data.token, "email_verification")
++    if not user_id:
++        raise HTTPException(status_code=400, detail="Invalid or expired verification token")
++    
++    # Mark email as verified
++    user = await get_user_by_id(db, user_id)
++    await update_user(db, user_id, {"email_verified": True})
++    
++    # Send welcome email
++    background_tasks.add_task(
++        send_welcome_email,
++        user["email"],
++        user.get("name")
++    )
++    
++    return {"message": "Email verified successfully"}
++
++
++@router.post("/resend-verification")
++async def resend_verification(
++    background_tasks: BackgroundTasks,
++    request: Request,
++    current_user: dict = Depends(get_current_user)
++):
++    """Resend email verification link"""
++    db = get_db(request)
++    
++    user_id = current_user.get("sub")
++    user = await get_user_by_id(db, user_id)
++    
++    if not user:
++        raise HTTPException(status_code=404, detail="User not found")
++    
++    if user.get("email_verified"):
++        raise HTTPException(status_code=400, detail="Email already verified")
++    
++    # Generate new verification token
++    verification_token = generate_verification_token()
++    await store_verification_token(db, user_id, verification_token, "email_verification", 24)
++    
++    # Send verification email
++    background_tasks.add_task(
++        send_verification_email,
++        user["email"],
++        verification_token,
++        user.get("name")
++    )
++    
++    return {"message": "Verification email sent"}
++
++
++@router.post("/forgot-password")
++async def forgot_password(
++    data: PasswordResetRequest,
++    background_tasks: BackgroundTasks,
++    request: Request
++):
++    """Request password reset link"""
++    db = get_db(request)
++    
++    user = await get_user_by_email(db, data.email)
++    
++    # Always return success to prevent email enumeration
++    if user:
++        # Generate reset token
++        reset_token = generate_verification_token()
++        await store_verification_token(db, user["user_id"], reset_token, "password_reset", 1)  # 1 hour expiry
++        
++        # Send reset email
++        background_tasks.add_task(
++            send_password_reset_email,
++            user["email"],
++            reset_token,
++            user.get("name")
++        )
++    
++    return {"message": "If that email exists, a password reset link has been sent"}
++
++
++@router.post("/reset-password")
++async def reset_password(data: PasswordResetConfirm, request: Request):
++    """Reset password with token"""
++    db = get_db(request)
++    
++    user_id = await verify_and_consume_token(db, data.token, "password_reset")
++    if not user_id:
++        raise HTTPException(status_code=400, detail="Invalid or expired reset token")
++    
++    # Update password
++    hashed_password = get_password_hash(data.new_password)
++    await update_user(db, user_id, {"hashed_password": hashed_password})
++    
++    return {"message": "Password reset successfully"}
++
++
++@router.post("/change-password")
++async def change_password(
++    data: ChangePasswordRequest,
++    request: Request,
++    current_user: dict = Depends(get_current_user)
++):
++    """Change password for authenticated user"""
++    db = get_db(request)
++    
++    user_id = current_user.get("sub")
++    user = await get_user_by_id(db, user_id)
++    
++    if not user:
++        raise HTTPException(status_code=404, detail="User not found")
++    
++    # Verify current password
++    if not verify_password(data.current_password, user["hashed_password"]):
++        raise HTTPException(status_code=400, detail="Current password is incorrect")
++    
++    # Update password
++    hashed_password = get_password_hash(data.new_password)
++    await update_user(db, user_id, {"hashed_password": hashed_password})
++    
++    return {"message": "Password changed successfully"}
++
++
++@router.get("/me", response_model=UserMeResponse)
++async def get_me(request: Request, current_user: dict = Depends(get_current_user)):
++    """Get current user profile and subscription status"""
++    db = get_db(request)
++    
++    user_id = current_user.get("sub")
++    user = await get_user_by_id(db, user_id)
++    
++    if not user:
++        raise HTTPException(status_code=404, detail="User not found")
++    
++    # Check subscription status
++    from services.subscription_service import check_subscription_status
++    sub_status = await check_subscription_status(db, user_id)
++    
++    # Calculate trial availability
++    trial_available = not user.get("trial_used", False) and sub_status["status"] == "inactive"
++    
++    # Calculate trial days remaining
++    trial_days_remaining = None
++    if sub_status["status"] == "trialing" and user.get("trial_end"):
++        trial_end = user["trial_end"]
++        if isinstance(trial_end, datetime):
++            # Make sure trial_end is timezone-aware
++            if trial_end.tzinfo is None:
++                trial_end = trial_end.replace(tzinfo=timezone.utc)
++            remaining = (trial_end - datetime.now(timezone.utc)).days
++            trial_days_remaining = max(0, remaining)
++    
++    # Get entitlements based on subscription
++    class MockUser:
++        def __init__(self, user_dict, sub_status):
++            self.subscription_status = SubscriptionStatus(sub_status["status"]) if sub_status["status"] in [s.value for s in SubscriptionStatus] else SubscriptionStatus.INACTIVE
++            self.subscription_plan = SubscriptionPlan(sub_status["plan"]) if sub_status["plan"] in [p.value for p in SubscriptionPlan] else SubscriptionPlan.FREE
++    
++    mock_user = MockUser(user, sub_status)
++    entitlements = get_user_entitlements(mock_user)
++    is_premium = user_is_premium(mock_user)
++    
++    return UserMeResponse(
++        user_id=user["user_id"],
++        email=user["email"],
++        name=user.get("name"),
++        email_verified=user.get("email_verified", False),
++        created_at=user["created_at"],
++        subscription_status=SubscriptionStatus(sub_status["status"]) if sub_status["status"] in [s.value for s in SubscriptionStatus] else SubscriptionStatus.INACTIVE,
++        subscription_plan=SubscriptionPlan(sub_status["plan"]) if sub_status["plan"] in [p.value for p in SubscriptionPlan] else SubscriptionPlan.FREE,
++        subscription_provider=sub_status.get("provider"),
++        subscription_expiration=sub_status.get("expiration"),
++        is_premium=is_premium,
++        entitlements=entitlements,
++        trial_available=trial_available,
++        trial_days_remaining=trial_days_remaining
++    )
++
++
++@router.post("/logout")
++async def logout(current_user: dict = Depends(get_current_user)):
++    """Logout user (client should discard tokens)"""
++    # In a more advanced implementation, you could blacklist the token
++    return {"message": "Logged out successfully"}
+
+diff --git a/backend/routers/push.py b/backend/routers/push.py
+new file mode 100644
+--- /dev/null
++++ b/backend/routers/push.py
+@@ -0,0 +1,217 @@
++"""
++Push Notification Router for RouteCast
++Handles push token registration and route monitoring.
++"""
++
++from fastapi import APIRouter, HTTPException, Depends, Header
++from pydantic import BaseModel
++from typing import Optional, Dict, List
++from datetime import datetime
++import logging
++
++from services.push_notification_service import PushNotificationService, RouteMonitorService
++from routers.auth import get_current_user_optional, get_current_user
++
++logger = logging.getLogger(__name__)
++
++router = APIRouter(prefix="/push", tags=["Push Notifications"])
++
++
++# Request/Response Models
++class RegisterTokenRequest(BaseModel):
++    token: str  # Expo push token
++    platform: str = "unknown"  # ios, android, web
++    device_info: Optional[Dict] = None
++
++
++class CreateMonitorRequest(BaseModel):
++    route_id: str
++    origin: str
++    destination: str
++    departure_time: datetime
++    alert_preferences: Optional[Dict] = None
++
++
++class MonitorResponse(BaseModel):
++    id: str
++    route_id: str
++    origin: str
++    destination: str
++    departure_time: datetime
++    status: str
++    alerts_sent: int
++
++
++# Dependency to get services
++async def get_push_service(db=None):
++    from server import db as app_db
++    return PushNotificationService(db or app_db)
++
++
++async def get_monitor_service(db=None):
++    from server import db as app_db
++    push_service = PushNotificationService(db or app_db)
++    return RouteMonitorService(db or app_db, push_service)
++
++
++@router.post("/tokens")
++async def register_push_token(
++    request: RegisterTokenRequest,
++    user: Optional[dict] = Depends(get_current_user_optional)
++):
++    """
++    Register a push notification token.
++    
++    Works for both authenticated and anonymous users.
++    Anonymous users get a generated ID.
++    """
++    from server import db
++    
++    user_id = user.get("sub") if user else f"anon_{request.token[-12:]}"
++    
++    push_service = PushNotificationService(db)
++    success = await push_service.register_push_token(
++        user_id=user_id,
++        push_token=request.token,
++        platform=request.platform,
++        device_info=request.device_info
++    )
++    
++    if success:
++        return {"success": True, "user_id": user_id}
++    else:
++        raise HTTPException(status_code=400, detail="Failed to register push token")
++
++
++@router.delete("/tokens")
++async def unregister_push_token(
++    token: str,
++    user: dict = Depends(get_current_user)
++):
++    """Unregister a push token (requires auth)."""
++    from server import db
++    
++    push_service = PushNotificationService(db)
++    success = await push_service.unregister_push_token(
++        user_id=user["sub"],
++        push_token=token
++    )
++    
++    return {"success": success}
++
++
++@router.post("/monitors", response_model=dict)
++async def create_route_monitor(
++    request: CreateMonitorRequest,
++    user: dict = Depends(get_current_user)
++):
++    """
++    Create a route weather monitor.
++    
++    Premium feature - checks user subscription status.
++    """
++    from server import db
++    
++    # Fetch full user from database to check subscription
++    user_record = await db.users.find_one({"user_id": user["sub"]})
++    
++    if not user_record:
++        raise HTTPException(status_code=404, detail="User not found")
++    
++    # Check subscription status
++    sub_status = user_record.get("subscription_status", "inactive")
++    if sub_status not in ["active", "trialing"]:
++        raise HTTPException(
++            status_code=403,
++            detail="Route monitoring requires a premium subscription"
++        )
++    
++    # Check user's monitor limit
++    push_service = PushNotificationService(db)
++    monitor_service = RouteMonitorService(db, push_service)
++    existing = await monitor_service.get_user_monitors(user["sub"])
++    
++    # Free trial: 3 monitors, Premium: 10 monitors
++    max_monitors = 3 if sub_status == "trialing" else 10
++    
++    if len(existing) >= max_monitors:
++        raise HTTPException(
++            status_code=400,
++            detail=f"Maximum of {max_monitors} active monitors allowed"
++        )
++    
++    # Create the monitor
++    monitor_id = await monitor_service.create_route_monitor(
++        user_id=user["sub"],
++        route_id=request.route_id,
++        origin=request.origin,
++        destination=request.destination,
++        departure_time=request.departure_time,
++        alert_preferences=request.alert_preferences
++    )
++    
++    return {
++        "success": True,
++        "monitor_id": monitor_id,
++        "message": f"Route monitor created. You'll receive alerts starting 24 hours before departure."
++    }
++
++
++@router.get("/monitors")
++async def list_route_monitors(
++    user: dict = Depends(get_current_user)
++):
++    """List all active route monitors for the current user."""
++    from server import db
++    
++    push_service = PushNotificationService(db)
++    monitor_service = RouteMonitorService(db, push_service)
++    
++    monitors = await monitor_service.get_user_monitors(user["sub"])
++    
++    return {
++        "monitors": monitors,
++        "total": len(monitors)
++    }
++
++
++@router.delete("/monitors/{monitor_id}")
++async def cancel_route_monitor(
++    monitor_id: str,
++    user: dict = Depends(get_current_user)
++):
++    """Cancel a route monitor."""
++    from server import db
++    
++    push_service = PushNotificationService(db)
++    monitor_service = RouteMonitorService(db, push_service)
++    
++    success = await monitor_service.cancel_monitor(
++        user_id=user["sub"],
++        monitor_id=monitor_id
++    )
++    
++    if success:
++        return {"success": True, "message": "Monitor cancelled"}
++    else:
++        raise HTTPException(status_code=404, detail="Monitor not found")
++
++
++@router.post("/test")
++async def send_test_notification(
++    user: dict = Depends(get_current_user)
++):
++    """Send a test notification to the current user's devices."""
++    from server import db
++    
++    push_service = PushNotificationService(db)
++    
++    result = await push_service.send_to_user(
++        user_id=user["sub"],
++        title="Test Notification",
++        body="This is a test notification from RouteCast!",
++        data={"type": "test"},
++        channel_id="general"
++    )
++    
++    return result
+
+diff --git a/backend/routers/subscription.py b/backend/routers/subscription.py
+new file mode 100644
+--- /dev/null
++++ b/backend/routers/subscription.py
+@@ -0,0 +1,342 @@
++"""
++Subscription Router for RouteCast
++Handles Stripe checkout, webhooks, and subscription management
++"""
++from fastapi import APIRouter, HTTPException, Depends, Header, Request
++from typing import Optional
++from datetime import datetime, timezone
++import os
++import logging
++
++from models.user import (
++    CreateCheckoutRequest, CheckoutResponse, SubscriptionInfo,
++    AppleReceiptVerifyRequest, GoogleReceiptVerifyRequest, ReceiptVerifyResponse,
++    SubscriptionStatus, SubscriptionPlan, SubscriptionProvider
++)
++from services.subscription_service import (
++    check_subscription_status, start_trial, activate_subscription,
++    verify_apple_receipt, verify_google_receipt, handle_stripe_subscription_event,
++    SUBSCRIPTION_PRICES
++)
++from services.email_service import send_subscription_confirmation_email
++from routers.auth import get_current_user, get_db
++
++logger = logging.getLogger(__name__)
++
++router = APIRouter(prefix="/subscription", tags=["Subscription"])
++
++# Stripe integration
++STRIPE_API_KEY = os.environ.get('STRIPE_API_KEY', 'sk_test_emergent')
++
++
++@router.get("/status", response_model=SubscriptionInfo)
++async def get_subscription_status(
++    request: Request,
++    current_user: dict = Depends(get_current_user)
++):
++    """Get current subscription status"""
++    db = get_db(request)
++    user_id = current_user.get("sub")
++    
++    status = await check_subscription_status(db, user_id)
++    
++    return SubscriptionInfo(
++        status=SubscriptionStatus(status["status"]) if status["status"] in [s.value for s in SubscriptionStatus] else SubscriptionStatus.INACTIVE,
++        plan=SubscriptionPlan(status["plan"]) if status["plan"] in [p.value for p in SubscriptionPlan] else SubscriptionPlan.FREE,
++        provider=status.get("provider"),
++        expiration=status.get("expiration"),
++        is_active=status["is_premium"],
++        can_access_premium=status["is_premium"]
++    )
++
++
++@router.post("/start-trial")
++async def start_free_trial(
++    request: Request,
++    current_user: dict = Depends(get_current_user)
++):
++    """Start a 7-day free trial"""
++    db = get_db(request)
++    user_id = current_user.get("sub")
++    
++    success, message = await start_trial(db, user_id)
++    
++    if not success:
++        raise HTTPException(status_code=400, detail=message)
++    
++    return {"message": message, "trial_days": 7}
++
++
++@router.post("/checkout", response_model=CheckoutResponse)
++async def create_checkout_session(
++    data: CreateCheckoutRequest,
++    request: Request,
++    current_user: dict = Depends(get_current_user)
++):
++    """Create a Stripe checkout session for subscription"""
++    db = get_db(request)
++    user_id = current_user.get("sub")
++    email = current_user.get("email")
++    
++    # Validate plan
++    if data.plan not in [SubscriptionPlan.MONTHLY, SubscriptionPlan.YEARLY]:
++        raise HTTPException(status_code=400, detail="Invalid plan")
++    
++    plan_key = data.plan.value
++    price_config = SUBSCRIPTION_PRICES.get(plan_key)
++    
++    if not price_config:
++        raise HTTPException(status_code=400, detail="Plan not found")
++    
++    try:
++        from emergentintegrations.payments.stripe.checkout import (
++            StripeCheckout, CheckoutSessionRequest
++        )
++        
++        # Build URLs
++        success_url = f"{data.origin_url}/subscription/success?session_id={{CHECKOUT_SESSION_ID}}"
++        cancel_url = f"{data.origin_url}/subscription/cancel"
++        
++        # Get webhook URL
++        api_url = os.environ.get('API_URL', data.origin_url.replace('app.', 'api.'))
++        webhook_url = f"{api_url}/api/webhook/stripe"
++        
++        # Initialize Stripe
++        stripe_checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
++        
++        # Create checkout session
++        checkout_request = CheckoutSessionRequest(
++            amount=float(price_config["amount"]),
++            currency="usd",
++            success_url=success_url,
++            cancel_url=cancel_url,
++            metadata={
++                "user_id": user_id,
++                "plan": plan_key,
++                "email": email
++            }
++        )
++        
++        session = await stripe_checkout.create_checkout_session(checkout_request)
++        
++        # Store transaction record
++        await db.payment_transactions.insert_one({
++            "session_id": session.session_id,
++            "user_id": user_id,
++            "email": email,
++            "plan": plan_key,
++            "amount": price_config["amount"],
++            "currency": "usd",
++            "payment_status": "pending",
++            "created_at": datetime.now(timezone.utc)
++        })
++        
++        return CheckoutResponse(
++            checkout_url=session.url,
++            session_id=session.session_id
++        )
++        
++    except Exception as e:
++        logger.error(f"Stripe checkout error: {e}")
++        raise HTTPException(status_code=500, detail="Failed to create checkout session")
++
++
++@router.get("/checkout/status/{session_id}")
++async def get_checkout_status(
++    session_id: str,
++    request: Request,
++    current_user: dict = Depends(get_current_user)
++):
++    """Get checkout session status and activate subscription if paid"""
++    db = get_db(request)
++    user_id = current_user.get("sub")
++    
++    try:
++        from emergentintegrations.payments.stripe.checkout import StripeCheckout
++        
++        stripe_checkout = StripeCheckout(api_key=STRIPE_API_KEY)
++        status = await stripe_checkout.get_checkout_status(session_id)
++        
++        # Get transaction record
++        transaction = await db.payment_transactions.find_one({"session_id": session_id})
++        
++        if not transaction:
++            raise HTTPException(status_code=404, detail="Transaction not found")
++        
++        if transaction["user_id"] != user_id:
++            raise HTTPException(status_code=403, detail="Not authorized")
++        
++        # Update transaction status
++        now = datetime.now(timezone.utc)
++        await db.payment_transactions.update_one(
++            {"session_id": session_id},
++            {"$set": {
++                "payment_status": status.payment_status,
++                "updated_at": now
++            }}
++        )
++        
++        # If payment successful and not already activated
++        if status.payment_status == "paid" and transaction["payment_status"] != "paid":
++            plan = transaction["plan"]
++            
++            # Activate subscription
++            duration_days = 365 if plan == "yearly" else 30
++            await activate_subscription(
++                db=db,
++                user_id=user_id,
++                plan=plan,
++                provider="stripe",
++                duration_days=duration_days
++            )
++            
++            # Send confirmation email
++            user = await db.users.find_one({"user_id": user_id})
++            if user:
++                try:
++                    send_subscription_confirmation_email(
++                        user["email"],
++                        plan,
++                        user.get("name")
++                    )
++                except:
++                    pass  # Don't fail if email fails
++        
++        return {
++            "status": status.status,
++            "payment_status": status.payment_status,
++            "amount_total": status.amount_total,
++            "currency": status.currency
++        }
++        
++    except HTTPException:
++        raise
++    except Exception as e:
++        logger.error(f"Checkout status error: {e}")
++        raise HTTPException(status_code=500, detail="Failed to get checkout status")
++
++
++@router.post("/verify/apple", response_model=ReceiptVerifyResponse)
++async def verify_apple_purchase(
++    data: AppleReceiptVerifyRequest,
++    request: Request,
++    current_user: dict = Depends(get_current_user)
++):
++    """Verify Apple In-App Purchase receipt"""
++    db = get_db(request)
++    user_id = current_user.get("sub")
++    
++    result = await verify_apple_receipt(data.receipt_data, data.product_id)
++    
++    if result["valid"]:
++        # Determine plan from product_id
++        plan = "yearly" if "yearly" in data.product_id.lower() else "monthly"
++        
++        await activate_subscription(
++            db=db,
++            user_id=user_id,
++            plan=plan,
++            provider="apple",
++            apple_transaction_id=result.get("transaction_id")
++        )
++    
++    return ReceiptVerifyResponse(
++        valid=result["valid"],
++        subscription_status=SubscriptionStatus(result["subscription_status"]) if result["subscription_status"] in [s.value for s in SubscriptionStatus] else SubscriptionStatus.INACTIVE,
++        expiration=result.get("expiration"),
++        message=result["message"]
++    )
++
++
++@router.post("/verify/google", response_model=ReceiptVerifyResponse)
++async def verify_google_purchase(
++    data: GoogleReceiptVerifyRequest,
++    request: Request,
++    current_user: dict = Depends(get_current_user)
++):
++    """Verify Google Play purchase"""
++    db = get_db(request)
++    user_id = current_user.get("sub")
++    
++    result = await verify_google_receipt(data.purchase_token, data.product_id, data.package_name)
++    
++    if result["valid"]:
++        # Determine plan from product_id
++        plan = "yearly" if "yearly" in data.product_id.lower() else "monthly"
++        
++        await activate_subscription(
++            db=db,
++            user_id=user_id,
++            plan=plan,
++            provider="google",
++            google_purchase_token=data.purchase_token
++        )
++    
++    return ReceiptVerifyResponse(
++        valid=result["valid"],
++        subscription_status=SubscriptionStatus(result["subscription_status"]) if result["subscription_status"] in [s.value for s in SubscriptionStatus] else SubscriptionStatus.INACTIVE,
++        expiration=result.get("expiration"),
++        message=result["message"]
++    )
++
++
++@router.get("/portal")
++async def get_customer_portal(
++    request: Request,
++    current_user: dict = Depends(get_current_user)
++):
++    """Get Stripe customer portal URL for managing subscription"""
++    db = get_db(request)
++    user_id = current_user.get("sub")
++    
++    user = await db.users.find_one({"user_id": user_id})
++    
++    if not user or not user.get("stripe_customer_id"):
++        raise HTTPException(status_code=400, detail="No Stripe subscription found")
++    
++    # In production, you would create a Stripe portal session
++    # For now, return a placeholder
++    return {
++        "message": "Customer portal not yet configured",
++        "portal_url": None
++    }
++
++
++@router.get("/plans")
++async def get_subscription_plans():
++    """Get available subscription plans"""
++    return {
++        "plans": [
++            {
++                "id": "monthly",
++                "name": "Monthly",
++                "price": SUBSCRIPTION_PRICES["monthly"]["amount"],
++                "currency": "usd",
++                "interval": "month",
++                "trial_days": SUBSCRIPTION_PRICES["monthly"]["trial_days"],
++                "features": [
++                    "Unlimited route monitoring",
++                    "Push weather alerts",
++                    "AI-powered recommendations",
++                    "Advanced trucker features",
++                    "Boondocking tools",
++                    "Export routes"
++                ]
++            },
++            {
++                "id": "yearly",
++                "name": "Yearly",
++                "price": SUBSCRIPTION_PRICES["yearly"]["amount"],
++                "currency": "usd",
++                "interval": "year",
++                "trial_days": SUBSCRIPTION_PRICES["yearly"]["trial_days"],
++                "savings": "Save $60/year",
++                "features": [
++                    "Everything in Monthly",
++                    "Priority support",
++                    "2 months free"
++                ]
++            }
++        ],
++        "trial_days": 7
++    }
+
+diff --git a/backend/routers/webhooks.py b/backend/routers/webhooks.py
+new file mode 100644
+--- /dev/null
++++ b/backend/routers/webhooks.py
+@@ -0,0 +1,174 @@
++"""
++Webhook Router for RouteCast
++Handles incoming webhooks from Stripe, Apple, and Google
++"""
++from fastapi import APIRouter, HTTPException, Request, Header
++from typing import Optional
++from datetime import datetime, timezone
++import os
++import json
++import logging
++
++from services.subscription_service import handle_stripe_subscription_event
++
++logger = logging.getLogger(__name__)
++
++router = APIRouter(prefix="/webhook", tags=["Webhooks"])
++
++STRIPE_API_KEY = os.environ.get('STRIPE_API_KEY', 'sk_test_emergent')
++STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET', '')
++
++
++@router.post("/stripe")
++async def stripe_webhook(
++    request: Request,
++    stripe_signature: Optional[str] = Header(None, alias="Stripe-Signature")
++):
++    """Handle Stripe webhook events"""
++    db = request.app.state.db
++    
++    # Get raw body
++    body = await request.body()
++    
++    try:
++        # In production, verify webhook signature
++        # For now, parse the payload directly
++        payload = json.loads(body)
++        
++        event_type = payload.get("type", "")
++        data = payload.get("data", {}).get("object", {})
++        
++        logger.info(f"Stripe webhook received: {event_type}")
++        
++        # Handle subscription events
++        if event_type.startswith("customer.subscription"):
++            customer_id = data.get("customer")
++            if customer_id:
++                await handle_stripe_subscription_event(
++                    db=db,
++                    event_type=event_type,
++                    subscription_data=data,
++                    customer_id=customer_id
++                )
++        
++        # Handle checkout completed
++        elif event_type == "checkout.session.completed":
++            session_id = data.get("id")
++            payment_status = data.get("payment_status")
++            
++            if session_id and payment_status == "paid":
++                # Update transaction record
++                metadata = data.get("metadata", {})
++                user_id = metadata.get("user_id")
++                plan = metadata.get("plan")
++                
++                if user_id and plan:
++                    # Store Stripe customer ID
++                    customer_id = data.get("customer")
++                    if customer_id:
++                        await db.users.update_one(
++                            {"user_id": user_id},
++                            {"$set": {
++                                "stripe_customer_id": customer_id,
++                                "updated_at": datetime.now(timezone.utc)
++                            }}
++                        )
++                    
++                    # Activate subscription
++                    from services.subscription_service import activate_subscription
++                    duration_days = 365 if plan == "yearly" else 30
++                    await activate_subscription(
++                        db=db,
++                        user_id=user_id,
++                        plan=plan,
++                        provider="stripe",
++                        duration_days=duration_days,
++                        stripe_customer_id=customer_id
++                    )
++                    
++                    logger.info(f"Subscription activated for user {user_id}: {plan}")
++        
++        # Handle invoice events
++        elif event_type.startswith("invoice"):
++            customer_id = data.get("customer")
++            if customer_id:
++                await handle_stripe_subscription_event(
++                    db=db,
++                    event_type=event_type,
++                    subscription_data=data,
++                    customer_id=customer_id
++                )
++        
++        return {"received": True}
++        
++    except json.JSONDecodeError:
++        logger.error("Invalid JSON in Stripe webhook")
++        raise HTTPException(status_code=400, detail="Invalid JSON")
++    except Exception as e:
++        logger.error(f"Stripe webhook error: {e}")
++        # Return 200 to prevent Stripe from retrying
++        return {"received": True, "error": str(e)}
++
++
++@router.post("/apple")
++async def apple_webhook(request: Request):
++    """
++    Handle Apple App Store Server Notifications (v2)
++    This receives subscription status updates from Apple
++    """
++    db = request.app.state.db
++    
++    try:
++        body = await request.body()
++        payload = json.loads(body)
++        
++        logger.info(f"Apple webhook received")
++        
++        # TODO: Implement Apple Server Notification handling
++        # This would decode the signedPayload JWT and process subscription events
++        
++        # Scaffold for Apple notification types:
++        # - SUBSCRIBED
++        # - DID_RENEW
++        # - DID_CHANGE_RENEWAL_PREF
++        # - DID_FAIL_TO_RENEW
++        # - EXPIRED
++        # - REFUND
++        
++        return {"received": True}
++        
++    except Exception as e:
++        logger.error(f"Apple webhook error: {e}")
++        return {"received": True, "error": str(e)}
++
++
++@router.post("/google")
++async def google_webhook(request: Request):
++    """
++    Handle Google Play Real-time Developer Notifications (RTDN)
++    This receives subscription status updates from Google Play
++    """
++    db = request.app.state.db
++    
++    try:
++        body = await request.body()
++        payload = json.loads(body)
++        
++        logger.info(f"Google webhook received")
++        
++        # TODO: Implement Google Play RTDN handling
++        # The payload contains a base64-encoded notification
++        
++        # Scaffold for Google notification types:
++        # - SUBSCRIPTION_PURCHASED
++        # - SUBSCRIPTION_RENEWED
++        # - SUBSCRIPTION_CANCELED
++        # - SUBSCRIPTION_EXPIRED
++        # - SUBSCRIPTION_PAUSED
++        # - SUBSCRIPTION_RESTARTED
++        
++        return {"received": True}
++        
++    except Exception as e:
++        logger.error(f"Google webhook error: {e}")
++        return {"received": True, "error": str(e)}
+
