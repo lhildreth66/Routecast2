@@ -279,19 +279,11 @@ NOAA_HEADERS = {
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "https://routecastweather.com",
-        "https://www.routecastweather.com",
-    ],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[
-        "https://routecastweather.com",
-        "https://www.routecastweather.com"
-    ],
+allow_origins=[
+    "https://routecastweather.com",
+    "https://www.routecastweather.com",
+    "https://app.routecastweather.com",
+],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
