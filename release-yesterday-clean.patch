@@ -1,0 +1,12 @@
+Subject: [PATCH] Deploy: auth/subscriptions, bridge clearance, weight restrictions, push notifications
+
+This patch includes:
+- Backend auth/subscription system (JWT, Stripe, email verification)
+- Bridge height alerts (OSM/Overpass integration)
+- Weight restriction service (OSM/Overpass integration)
+- Push notification system (Expo push, route monitors)
+- Frontend auth UI (login, signup, account, subscription pages)
+- Render deployment configuration
+
+Files: 26 total
+---
