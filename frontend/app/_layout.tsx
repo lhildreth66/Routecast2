@@ -3,17 +3,20 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
+import { AuthProvider } from '../contexts/AuthContext';
 import { registerDevicePushTokenOnce } from './pushRegistration';
 import { addNotificationToHistory } from './notificationHistory';
 
-// Configure notifications
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
+// Configure notifications (native only)
+if (Platform.OS !== 'web') {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+    }),
+  });
+}
 
 async function ensureAndroidChannel() {
   if (Platform.OS !== 'android') return;
@@ -39,30 +42,29 @@ export default function RootLayout() {
   const router = useRouter();
 
   useEffect(() => {
+    // WEB: do nothing with expo-notifications (prevents crash)
+    if (Platform.OS === 'web') return;
+
     // Request notification permissions
     async function requestPermissions() {
-      if (Platform.OS !== 'web') {
-        const { status } = await Notifications.requestPermissionsAsync();
-        if (status !== 'granted') {
-          console.log('Notification permissions not granted');
-        }
+      const { status } = await Notifications.requestPermissionsAsync();
+      if (status !== 'granted') {
+        console.log('Notification permissions not granted');
       }
     }
-    requestPermissions();
-    ensureAndroidChannel();
-    registerDevicePushTokenOnce();
+
+    void requestPermissions();
+    void ensureAndroidChannel();
+    void registerDevicePushTokenOnce();
 
     const sub = Notifications.addNotificationReceivedListener((notification) => {
       console.log('[notifications] received', notification.request.identifier, notification.request.content?.title);
-      // fire-and-forget persist to history
       void addNotificationToHistory(notification);
     });
 
     const responseSub = Notifications.addNotificationResponseReceivedListener((response) => {
-      // Persist on tap (covers cases where receive listener might not run)
       console.log('[notifications] tapped', response.notification?.request?.identifier);
       void addNotificationToHistory(response.notification);
-      // Small delay helps when app is cold-started and navigation not ready yet
       setTimeout(() => {
         try {
           router.push('/notifications' as any);
@@ -95,7 +97,7 @@ export default function RootLayout() {
   }, [router]);
 
   return (
-    <>
+    <AuthProvider>
       <StatusBar style="light" />
       <Stack
         screenOptions={{
@@ -134,6 +136,6 @@ export default function RootLayout() {
         <Stack.Screen name="user-guide" />
         <Stack.Screen name="notifications" />
       </Stack>
-    </>
+    </AuthProvider>
   );
 }
