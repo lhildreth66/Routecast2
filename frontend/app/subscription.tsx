@@ -143,11 +143,7 @@ export default function SubscriptionScreen() {
       let ok = false;
       for (const url of urls) {
         try {
-          await axios.post(
-            url,
-            {},
-            { headers: { Authorization: `Bearer ${accessToken}` } }
-          );
+          await axios.post(url, {}, { headers: { Authorization: `Bearer ${accessToken}` } });
           ok = true;
           break;
         } catch {
@@ -156,14 +152,24 @@ export default function SubscriptionScreen() {
       }
 
       if (!ok) {
-        setError('Billing/trial is not configured yet.');
+        const msg = 'Trial is not available yet. You can still use the free version.';
+        setError(msg);
+        if (Platform.OS !== 'web') {
+          Alert.alert('Trial coming soon', msg);
+        }
         return;
       }
 
       await refreshUser();
       router.replace('/');
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to start trial');
+      const msg =
+        err.response?.data?.detail ||
+        'Trial is not available yet. You can still use the free version.';
+      setError(msg);
+      if (Platform.OS !== 'web') {
+        Alert.alert('Trial coming soon', 'You can still use the free version.');
+      }
     } finally {
       setTrialLoading(false);
     }
@@ -204,9 +210,10 @@ export default function SubscriptionScreen() {
       }
 
       if (!response?.data?.checkout_url) {
-        setError('Billing is not configured yet. (Stripe checkout not available)');
+        const msg = 'Billing is not configured yet. You can still use the free version.';
+        setError(msg);
         if (Platform.OS !== 'web') {
-          Alert.alert('Not ready yet', 'Billing is not configured yet.');
+          Alert.alert('Not ready yet', msg);
         }
         return;
       }
@@ -239,6 +246,7 @@ export default function SubscriptionScreen() {
     );
   }
 
+  // Already premium - show success state
   if (isPremium && !isTrialing) {
     return (
       <View style={styles.container}>
@@ -315,6 +323,12 @@ export default function SubscriptionScreen() {
             <Text style={styles.subtitle}>Unlock all features and drive with confidence</Text>
           </View>
 
+          {/* Always-visible trial info (even if backend trial flags aren't wired yet) */}
+          <View style={styles.trialInfoAlways}>
+            <Text style={styles.trialInfoTitle}>Free for 7 days</Text>
+            <Text style={styles.trialInfoSub}>No credit card required (for now)</Text>
+          </View>
+
           {canStartTrial && (
             <View style={styles.trialBanner}>
               <View style={styles.trialBannerContent}>
@@ -374,6 +388,8 @@ export default function SubscriptionScreen() {
                     <Text style={styles.planInterval}>/{plan.interval}</Text>
                   </View>
                 </View>
+
+                <Text style={styles.planTrialText}>7-day free trial • No card required</Text>
 
                 <View style={styles.planFeatures}>
                   {plan.features.map((feature, index) => (
@@ -446,6 +462,12 @@ const styles = StyleSheet.create({
   iconContainer: { width: 72, height: 72, borderRadius: 20, backgroundColor: '#eab308', justifyContent: 'center', alignItems: 'center', marginBottom: 20 },
   title: { fontSize: 28, fontWeight: '700', color: '#ffffff', marginBottom: 8 },
   subtitle: { fontSize: 15, color: '#a1a1aa', textAlign: 'center' },
+
+  // Always-visible trial copy (guardrail)
+  trialInfoAlways: { backgroundColor: '#14532d', borderRadius: 12, padding: 14, marginBottom: 16 },
+  trialInfoTitle: { color: '#22c55e', fontSize: 16, fontWeight: '800' },
+  trialInfoSub: { color: '#86efac', fontSize: 13, marginTop: 4 },
+
   trialBanner: { backgroundColor: '#14532d', borderRadius: 12, padding: 16, marginBottom: 24 },
   trialBannerContent: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 },
   trialBannerText: { flex: 1 },
@@ -453,21 +475,26 @@ const styles = StyleSheet.create({
   trialBannerSubtitle: { color: '#86efac', fontSize: 13, marginTop: 2 },
   trialButton: { backgroundColor: '#22c55e', borderRadius: 8, paddingVertical: 12, alignItems: 'center' },
   trialButtonText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+
   activeTrialBanner: { backgroundColor: '#422006', borderRadius: 12, padding: 16, marginBottom: 24, flexDirection: 'row', alignItems: 'center', gap: 12 },
   activeTrialText: { flex: 1 },
   activeTrialTitle: { color: '#eab308', fontSize: 16, fontWeight: '700' },
   activeTrialSubtitle: { color: '#fcd34d', fontSize: 13, marginTop: 2 },
+
   sectionTitle: { color: '#a1a1aa', fontSize: 13, fontWeight: '600', letterSpacing: 0.5, marginBottom: 12, textTransform: 'uppercase' },
   plansContainer: { gap: 12, marginBottom: 20 },
   planCard: { backgroundColor: '#27272a', borderRadius: 12, padding: 16, borderWidth: 2, borderColor: 'transparent', position: 'relative' },
   planCardSelected: { borderColor: '#eab308', backgroundColor: '#1c1917' },
   savingsBadge: { position: 'absolute', top: -10, right: 12, backgroundColor: '#22c55e', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
   savingsText: { color: '#fff', fontSize: 11, fontWeight: '700' },
-  planHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  planHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   planName: { color: '#fff', fontSize: 18, fontWeight: '700' },
   planPriceContainer: { flexDirection: 'row', alignItems: 'baseline' },
   planPrice: { color: '#eab308', fontSize: 24, fontWeight: '700' },
   planInterval: { color: '#6b7280', fontSize: 14 },
+
+  planTrialText: { color: '#86efac', fontSize: 12, marginBottom: 14 },
+
   planFeatures: { gap: 8 },
   featureRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   featureText: { color: '#d4d4d8', fontSize: 13 },
