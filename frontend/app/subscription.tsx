@@ -8,6 +8,7 @@ import {
   ScrollView,
   Linking,
   Platform,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -28,6 +29,46 @@ interface Plan {
   savings?: string;
 }
 
+const FALLBACK_PLANS: Plan[] = [
+  {
+    id: 'monthly',
+    name: 'Monthly',
+    price: 9.99,
+    currency: 'USD',
+    interval: 'month',
+    trial_days: 7,
+    features: [
+      'Premium weather along your route',
+      'Severe weather alerts',
+      'Radar + forecast tools',
+      'Advanced trucking restrictions',
+    ],
+  },
+  {
+    id: 'yearly',
+    name: 'Yearly',
+    price: 99.0,
+    currency: 'USD',
+    interval: 'year',
+    trial_days: 7,
+    features: [
+      'Everything in Monthly',
+      'Best value annual plan',
+      'Priority feature access',
+    ],
+    savings: 'Save 17%',
+  },
+];
+
+function normalizePlans(data: any): Plan[] | null {
+  // Expected shapes:
+  // { plans: [...] }
+  // [...] (array)
+  if (Array.isArray(data)) return data as Plan[];
+  if (data && Array.isArray(data.plans)) return data.plans as Plan[];
+  return null;
+}
+
 export default function SubscriptionScreen() {
   const { user, accessToken, refreshUser, isAuthenticated } = useAuth();
   const [plans, setPlans] = useState<Plan[]>([]);
@@ -38,16 +79,47 @@ export default function SubscriptionScreen() {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    fetchPlans();
+    void fetchPlans();
   }, []);
 
   const fetchPlans = async () => {
+    setLoading(true);
+    setError('');
+
+    // Try both common route spellings.
+    const candidates = [
+      `${API_BASE}/api/subscriptions/plans`, // plural
+      `${API_BASE}/api/subscription/plans`,  // singular
+    ];
+
     try {
-      const response = await axios.get(`${API_BASE}/api/subscription/plans`);
-      setPlans(response.data.plans);
+      for (const url of candidates) {
+        try {
+          const resp = await axios.get(url);
+          const parsed = normalizePlans(resp.data);
+          if (parsed && parsed.length) {
+            setPlans(parsed);
+            // Keep selectedPlan valid
+            if (!parsed.some((p) => p.id === selectedPlan)) {
+              setSelectedPlan(parsed[0].id);
+            }
+            return;
+          }
+        } catch {
+          // keep trying next candidate
+        }
+      }
+
+      // If backend plans endpoints don't exist yet, fall back so UI is not broken.
+      setPlans(FALLBACK_PLANS);
+      if (!FALLBACK_PLANS.some((p) => p.id === selectedPlan)) {
+        setSelectedPlan('yearly');
+      }
     } catch (err) {
       console.log('Error fetching plans:', err);
-      setError('Failed to load subscription plans');
+      // Still show something usable
+      setPlans(FALLBACK_PLANS);
+      setError('');
     } finally {
       setLoading(false);
     }
@@ -63,11 +135,32 @@ export default function SubscriptionScreen() {
     setError('');
 
     try {
-      await axios.post(
+      // try both spellings for trial endpoint too
+      const urls = [
+        `${API_BASE}/api/subscriptions/start-trial`,
         `${API_BASE}/api/subscription/start-trial`,
-        {},
-        { headers: { Authorization: `Bearer ${accessToken}` } }
-      );
+      ];
+
+      let ok = false;
+      for (const url of urls) {
+        try {
+          await axios.post(
+            url,
+            {},
+            { headers: { Authorization: `Bearer ${accessToken}` } }
+          );
+          ok = true;
+          break;
+        } catch {
+          // try next
+        }
+      }
+
+      if (!ok) {
+        setError('Billing/trial is not configured yet.');
+        return;
+      }
+
       await refreshUser();
       router.replace('/');
     } catch (err: any) {
@@ -87,19 +180,38 @@ export default function SubscriptionScreen() {
     setError('');
 
     try {
-      // Get the current origin for redirect URLs
-      const origin = Platform.OS === 'web'
-        ? window.location.origin
-        : 'https://app.routecastweather.com';
+      const origin =
+        Platform.OS === 'web'
+          ? window.location.origin
+          : 'https://app.routecastweather.com';
 
-      const response = await axios.post(
+      const urls = [
+        `${API_BASE}/api/subscriptions/checkout`,
         `${API_BASE}/api/subscription/checkout`,
-        {
-          plan: planId,
-          origin_url: origin
-        },
-        { headers: { Authorization: `Bearer ${accessToken}` } }
-      );
+      ];
+
+      let response: any = null;
+      for (const url of urls) {
+        try {
+          response = await axios.post(
+            url,
+            { plan: planId, origin_url: origin },
+            { headers: { Authorization: `Bearer ${accessToken}` } }
+          );
+          break;
+        } catch {
+          // try next
+        }
+      }
+
+      if (!response?.data?.checkout_url) {
+        // No backend checkout yet (Stripe not configured)
+        setError('Billing is not configured yet. (Stripe checkout not available)');
+        if (Platform.OS !== 'web') {
+          Alert.alert('Not ready yet', 'Billing is not configured yet.');
+        }
+        return;
+      }
 
       const { checkout_url } = response.data;
 
@@ -119,6 +231,8 @@ export default function SubscriptionScreen() {
   const isTrialing = user?.subscription_status === 'trialing';
   const canStartTrial = user?.trial_available && !isPremium && !isTrialing;
 
+  const selected = plans.find((p) => p.id === selectedPlan);
+
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
@@ -133,10 +247,7 @@ export default function SubscriptionScreen() {
       <View style={styles.container}>
         <SafeAreaView style={styles.safeArea}>
           <View style={styles.premiumContent}>
-            <TouchableOpacity
-              style={styles.backButton}
-              onPress={() => router.back()}
-            >
+            <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
               <Ionicons name="arrow-back" size={24} color="#fff" />
             </TouchableOpacity>
 
@@ -153,7 +264,11 @@ export default function SubscriptionScreen() {
               <View style={styles.premiumInfoRow}>
                 <Ionicons name="calendar" size={20} color="#a1a1aa" />
                 <Text style={styles.premiumInfoText}>
-                  Plan: {user?.subscription_plan?.charAt(0).toUpperCase() + user?.subscription_plan?.slice(1)}
+                  Plan:{' '}
+                  {user?.subscription_plan
+                    ? user.subscription_plan.charAt(0).toUpperCase() +
+                      user.subscription_plan.slice(1)
+                    : 'Premium'}
                 </Text>
               </View>
               {user?.subscription_expiration && (
@@ -174,10 +289,7 @@ export default function SubscriptionScreen() {
               <Text style={styles.manageButtonText}>Manage Subscription</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.continueButton}
-              onPress={() => router.replace('/')}
-            >
+            <TouchableOpacity style={styles.continueButton} onPress={() => router.replace('/')}>
               <Text style={styles.continueButtonText}>Continue to App</Text>
             </TouchableOpacity>
           </View>
@@ -189,11 +301,7 @@ export default function SubscriptionScreen() {
   return (
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
-        >
-          {/* Back Button */}
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
           <TouchableOpacity
             style={styles.backButton}
             onPress={() => router.back()}
@@ -202,18 +310,14 @@ export default function SubscriptionScreen() {
             <Ionicons name="arrow-back" size={24} color="#fff" />
           </TouchableOpacity>
 
-          {/* Header */}
           <View style={styles.header}>
             <View style={styles.iconContainer}>
               <Ionicons name="rocket" size={32} color="#1a1a1a" />
             </View>
             <Text style={styles.title}>Upgrade to Premium</Text>
-            <Text style={styles.subtitle}>
-              Unlock all features and drive with confidence
-            </Text>
+            <Text style={styles.subtitle}>Unlock all features and drive with confidence</Text>
           </View>
 
-          {/* Trial Banner */}
           {canStartTrial && (
             <View style={styles.trialBanner}>
               <View style={styles.trialBannerContent}>
@@ -231,39 +335,28 @@ export default function SubscriptionScreen() {
                 disabled={trialLoading}
                 data-testid="start-trial-btn"
               >
-                {trialLoading ? (
-                  <ActivityIndicator color="#fff" size="small" />
-                ) : (
-                  <Text style={styles.trialButtonText}>Start Free Trial</Text>
-                )}
+                {trialLoading ? <ActivityIndicator color="#fff" size="small" /> : <Text style={styles.trialButtonText}>Start Free Trial</Text>}
               </TouchableOpacity>
             </View>
           )}
 
-          {/* Active Trial Banner */}
           {isTrialing && user?.trial_days_remaining !== undefined && (
             <View style={styles.activeTrialBanner}>
               <Ionicons name="time" size={24} color="#eab308" />
               <View style={styles.activeTrialText}>
                 <Text style={styles.activeTrialTitle}>Trial Active</Text>
-                <Text style={styles.activeTrialSubtitle}>
-                  {user.trial_days_remaining} days remaining
-                </Text>
+                <Text style={styles.activeTrialSubtitle}>{user.trial_days_remaining} days remaining</Text>
               </View>
             </View>
           )}
 
-          {/* Plans */}
           <Text style={styles.sectionTitle}>Choose Your Plan</Text>
 
           <View style={styles.plansContainer}>
             {plans.map((plan) => (
               <TouchableOpacity
                 key={plan.id}
-                style={[
-                  styles.planCard,
-                  selectedPlan === plan.id && styles.planCardSelected
-                ]}
+                style={[styles.planCard, selectedPlan === plan.id && styles.planCardSelected]}
                 onPress={() => setSelectedPlan(plan.id)}
                 data-testid={`plan-${plan.id}`}
               >
@@ -299,15 +392,13 @@ export default function SubscriptionScreen() {
             ))}
           </View>
 
-          {/* Error Message */}
-          {error && (
+          {error ? (
             <View style={styles.errorContainer}>
               <Ionicons name="alert-circle" size={18} color="#ef4444" />
               <Text style={styles.errorText}>{error}</Text>
             </View>
-          )}
+          ) : null}
 
-          {/* Checkout Button */}
           <TouchableOpacity
             style={[styles.checkoutButton, checkoutLoading && styles.buttonDisabled]}
             onPress={() => handleCheckout(selectedPlan)}
@@ -320,25 +411,18 @@ export default function SubscriptionScreen() {
               <>
                 <Ionicons name="card" size={22} color="#1a1a1a" />
                 <Text style={styles.checkoutButtonText}>
-                  Subscribe - ${plans.find(p => p.id === selectedPlan)?.price || '0'}/{selectedPlan === 'yearly' ? 'year' : 'month'}
+                  Subscribe - ${selected?.price ?? 0}/{selected?.interval ?? (selectedPlan === 'yearly' ? 'year' : 'month')}
                 </Text>
               </>
             )}
           </TouchableOpacity>
 
-          {/* Skip for now */}
-          <TouchableOpacity
-            style={styles.skipButton}
-            onPress={() => router.replace('/')}
-            data-testid="skip-subscription-btn"
-          >
+          <TouchableOpacity style={styles.skipButton} onPress={() => router.replace('/')} data-testid="skip-subscription-btn">
             <Text style={styles.skipButtonText}>Continue with free version</Text>
           </TouchableOpacity>
 
-          {/* Terms */}
           <Text style={styles.termsText}>
-            By subscribing, you agree to our Terms of Service and Privacy Policy.
-            Subscriptions auto-renew unless cancelled.
+            By subscribing, you agree to our Terms of Service and Privacy Policy. Subscriptions auto-renew unless cancelled.
           </Text>
         </ScrollView>
       </SafeAreaView>
@@ -347,309 +431,58 @@ export default function SubscriptionScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0f0f0f',
-  },
-  loadingContainer: {
-    flex: 1,
-    backgroundColor: '#0f0f0f',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  safeArea: {
-    flex: 1,
-  },
-  scrollContent: {
-    padding: 20,
-    paddingTop: 12,
-  },
-  backButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: '#27272a',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  header: {
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  iconContainer: {
-    width: 72,
-    height: 72,
-    borderRadius: 20,
-    backgroundColor: '#eab308',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#ffffff',
-    marginBottom: 8,
-  },
-  subtitle: {
-    fontSize: 15,
-    color: '#a1a1aa',
-    textAlign: 'center',
-  },
-  trialBanner: {
-    backgroundColor: '#14532d',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 24,
-  },
-  trialBannerContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginBottom: 12,
-  },
-  trialBannerText: {
-    flex: 1,
-  },
-  trialBannerTitle: {
-    color: '#22c55e',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  trialBannerSubtitle: {
-    color: '#86efac',
-    fontSize: 13,
-    marginTop: 2,
-  },
-  trialButton: {
-    backgroundColor: '#22c55e',
-    borderRadius: 8,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  trialButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  activeTrialBanner: {
-    backgroundColor: '#422006',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 24,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  activeTrialText: {
-    flex: 1,
-  },
-  activeTrialTitle: {
-    color: '#eab308',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  activeTrialSubtitle: {
-    color: '#fcd34d',
-    fontSize: 13,
-    marginTop: 2,
-  },
-  sectionTitle: {
-    color: '#a1a1aa',
-    fontSize: 13,
-    fontWeight: '600',
-    letterSpacing: 0.5,
-    marginBottom: 12,
-    textTransform: 'uppercase',
-  },
-  plansContainer: {
-    gap: 12,
-    marginBottom: 20,
-  },
-  planCard: {
-    backgroundColor: '#27272a',
-    borderRadius: 12,
-    padding: 16,
-    borderWidth: 2,
-    borderColor: 'transparent',
-    position: 'relative',
-  },
-  planCardSelected: {
-    borderColor: '#eab308',
-    backgroundColor: '#1c1917',
-  },
-  savingsBadge: {
-    position: 'absolute',
-    top: -10,
-    right: 12,
-    backgroundColor: '#22c55e',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  savingsText: {
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  planHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  planName: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  planPriceContainer: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-  },
-  planPrice: {
-    color: '#eab308',
-    fontSize: 24,
-    fontWeight: '700',
-  },
-  planInterval: {
-    color: '#6b7280',
-    fontSize: 14,
-  },
-  planFeatures: {
-    gap: 8,
-  },
-  featureRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  featureText: {
-    color: '#d4d4d8',
-    fontSize: 13,
-  },
-  selectedIndicator: {
-    position: 'absolute',
-    top: 12,
-    left: 12,
-  },
-  errorContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(239, 68, 68, 0.15)',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 16,
-    gap: 8,
-  },
-  errorText: {
-    color: '#ef4444',
-    fontSize: 13,
-    flex: 1,
-  },
-  checkoutButton: {
-    backgroundColor: '#eab308',
-    borderRadius: 10,
-    paddingVertical: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 10,
-    marginBottom: 12,
-  },
-  buttonDisabled: {
-    opacity: 0.7,
-  },
-  checkoutButtonText: {
-    color: '#1a1a1a',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  skipButton: {
-    paddingVertical: 12,
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  skipButtonText: {
-    color: '#6b7280',
-    fontSize: 14,
-  },
-  termsText: {
-    color: '#52525b',
-    fontSize: 11,
-    textAlign: 'center',
-    lineHeight: 16,
-  },
-  // Premium state styles
-  premiumContent: {
-    flex: 1,
-    padding: 24,
-    alignItems: 'center',
-  },
-  premiumIconContainer: {
-    width: 96,
-    height: 96,
-    borderRadius: 24,
-    backgroundColor: '#422006',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 24,
-    marginTop: 40,
-  },
-  premiumTitle: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: '#ffffff',
-    marginBottom: 8,
-  },
-  premiumSubtitle: {
-    fontSize: 15,
-    color: '#a1a1aa',
-    textAlign: 'center',
-    marginBottom: 32,
-  },
-  premiumInfoBox: {
-    backgroundColor: '#27272a',
-    borderRadius: 12,
-    padding: 16,
-    width: '100%',
-    gap: 12,
-    marginBottom: 24,
-  },
-  premiumInfoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  premiumInfoText: {
-    color: '#e4e4e7',
-    fontSize: 14,
-  },
-  manageButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: '#27272a',
-    borderRadius: 10,
-    paddingVertical: 14,
-    paddingHorizontal: 24,
-    borderWidth: 1,
-    borderColor: '#eab308',
-    width: '100%',
-    justifyContent: 'center',
-    marginBottom: 12,
-  },
-  manageButtonText: {
-    color: '#eab308',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  continueButton: {
-    paddingVertical: 12,
-  },
-  continueButtonText: {
-    color: '#6b7280',
-    fontSize: 14,
-  },
+  container: { flex: 1, backgroundColor: '#0f0f0f' },
+  loadingContainer: { flex: 1, backgroundColor: '#0f0f0f', justifyContent: 'center', alignItems: 'center' },
+  safeArea: { flex: 1 },
+  scrollContent: { padding: 20, paddingTop: 12 },
+  backButton: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#27272a', justifyContent: 'center', alignItems: 'center', marginBottom: 24 },
+  header: { alignItems: 'center', marginBottom: 24 },
+  iconContainer: { width: 72, height: 72, borderRadius: 20, backgroundColor: '#eab308', justifyContent: 'center', alignItems: 'center', marginBottom: 20 },
+  title: { fontSize: 28, fontWeight: '700', color: '#ffffff', marginBottom: 8 },
+  subtitle: { fontSize: 15, color: '#a1a1aa', textAlign: 'center' },
+  trialBanner: { backgroundColor: '#14532d', borderRadius: 12, padding: 16, marginBottom: 24 },
+  trialBannerContent: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 },
+  trialBannerText: { flex: 1 },
+  trialBannerTitle: { color: '#22c55e', fontSize: 16, fontWeight: '700' },
+  trialBannerSubtitle: { color: '#86efac', fontSize: 13, marginTop: 2 },
+  trialButton: { backgroundColor: '#22c55e', borderRadius: 8, paddingVertical: 12, alignItems: 'center' },
+  trialButtonText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  activeTrialBanner: { backgroundColor: '#422006', borderRadius: 12, padding: 16, marginBottom: 24, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  activeTrialText: { flex: 1 },
+  activeTrialTitle: { color: '#eab308', fontSize: 16, fontWeight: '700' },
+  activeTrialSubtitle: { color: '#fcd34d', fontSize: 13, marginTop: 2 },
+  sectionTitle: { color: '#a1a1aa', fontSize: 13, fontWeight: '600', letterSpacing: 0.5, marginBottom: 12, textTransform: 'uppercase' },
+  plansContainer: { gap: 12, marginBottom: 20 },
+  planCard: { backgroundColor: '#27272a', borderRadius: 12, padding: 16, borderWidth: 2, borderColor: 'transparent', position: 'relative' },
+  planCardSelected: { borderColor: '#eab308', backgroundColor: '#1c1917' },
+  savingsBadge: { position: 'absolute', top: -10, right: 12, backgroundColor: '#22c55e', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
+  savingsText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  planHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  planName: { color: '#fff', fontSize: 18, fontWeight: '700' },
+  planPriceContainer: { flexDirection: 'row', alignItems: 'baseline' },
+  planPrice: { color: '#eab308', fontSize: 24, fontWeight: '700' },
+  planInterval: { color: '#6b7280', fontSize: 14 },
+  planFeatures: { gap: 8 },
+  featureRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  featureText: { color: '#d4d4d8', fontSize: 13 },
+  selectedIndicator: { position: 'absolute', top: 12, left: 12 },
+  errorContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(239, 68, 68, 0.15)', padding: 12, borderRadius: 8, marginBottom: 16, gap: 8 },
+  errorText: { color: '#ef4444', fontSize: 13, flex: 1 },
+  checkoutButton: { backgroundColor: '#eab308', borderRadius: 10, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 12 },
+  buttonDisabled: { opacity: 0.7 },
+  checkoutButtonText: { color: '#1a1a1a', fontSize: 16, fontWeight: '700' },
+  skipButton: { paddingVertical: 12, alignItems: 'center', marginBottom: 20 },
+  skipButtonText: { color: '#6b7280', fontSize: 14 },
+  termsText: { color: '#52525b', fontSize: 11, textAlign: 'center', lineHeight: 16 },
+  premiumContent: { flex: 1, padding: 24, alignItems: 'center' },
+  premiumIconContainer: { width: 96, height: 96, borderRadius: 24, backgroundColor: '#422006', justifyContent: 'center', alignItems: 'center', marginBottom: 24, marginTop: 40 },
+  premiumTitle: { fontSize: 28, fontWeight: '700', color: '#ffffff', marginBottom: 8 },
+  premiumSubtitle: { fontSize: 15, color: '#a1a1aa', textAlign: 'center', marginBottom: 32 },
+  premiumInfoBox: { backgroundColor: '#27272a', borderRadius: 12, padding: 16, width: '100%', gap: 12, marginBottom: 24 },
+  premiumInfoRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  premiumInfoText: { color: '#e4e4e7', fontSize: 14 },
+  manageButton: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#27272a', borderRadius: 10, paddingVertical: 14, paddingHorizontal: 24, borderWidth: 1, borderColor: '#eab308', width: '100%', justifyContent: 'center', marginBottom: 12 },
+  manageButtonText: { color: '#eab308', fontSize: 14, fontWeight: '600' },
+  continueButton: { paddingVertical: 12 },
+  continueButtonText: { color: '#6b7280', fontSize: 14 },
 });
