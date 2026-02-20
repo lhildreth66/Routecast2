@@ -4064,3 +4064,3078 @@ new file mode 100644
 +  return context;
 +}
 
+diff --git a/frontend/app/login.tsx b/frontend/app/login.tsx
+new file mode 100644
+--- /dev/null
++++ b/frontend/app/login.tsx
+@@ -0,0 +1,313 @@
++import React, { useState } from 'react';
++import {
++  View,
++  Text,
++  StyleSheet,
++  TextInput,
++  TouchableOpacity,
++  ActivityIndicator,
++  KeyboardAvoidingView,
++  Platform,
++  ScrollView,
++} from 'react-native';
++import { SafeAreaView } from 'react-native-safe-area-context';
++import { Ionicons } from '@expo/vector-icons';
++import { router } from 'expo-router';
++import { useAuth } from '../contexts/AuthContext';
++
++export default function LoginScreen() {
++  const { login } = useAuth();
++  const [email, setEmail] = useState('');
++  const [password, setPassword] = useState('');
++  const [showPassword, setShowPassword] = useState(false);
++  const [loading, setLoading] = useState(false);
++  const [error, setError] = useState('');
++
++  const handleLogin = async () => {
++    if (!email.trim() || !password.trim()) {
++      setError('Please enter both email and password');
++      return;
++    }
++
++    setLoading(true);
++    setError('');
++
++    const result = await login(email.trim(), password);
++    
++    setLoading(false);
++    
++    if (result.success) {
++      router.replace('/');
++    } else {
++      setError(result.error || 'Login failed');
++    }
++  };
++
++  return (
++    <View style={styles.container}>
++      <SafeAreaView style={styles.safeArea}>
++        <KeyboardAvoidingView
++          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
++          style={styles.keyboardView}
++        >
++          <ScrollView
++            contentContainerStyle={styles.scrollContent}
++            keyboardShouldPersistTaps="handled"
++            showsVerticalScrollIndicator={false}
++          >
++            {/* Back Button */}
++            <TouchableOpacity
++              style={styles.backButton}
++              onPress={() => router.back()}
++              data-testid="login-back-btn"
++            >
++              <Ionicons name="arrow-back" size={24} color="#fff" />
++            </TouchableOpacity>
++
++            {/* Header */}
++            <View style={styles.header}>
++              <View style={styles.iconContainer}>
++                <Ionicons name="person" size={32} color="#1a1a1a" />
++              </View>
++              <Text style={styles.title}>Welcome Back</Text>
++              <Text style={styles.subtitle}>Sign in to access your account</Text>
++            </View>
++
++            {/* Login Form */}
++            <View style={styles.form}>
++              {/* Email Input */}
++              <View style={styles.inputSection}>
++                <Text style={styles.inputLabel}>EMAIL</Text>
++                <View style={styles.inputWrapper}>
++                  <Ionicons name="mail-outline" size={20} color="#a1a1aa" style={styles.inputIcon} />
++                  <TextInput
++                    style={styles.input}
++                    placeholder="Enter your email"
++                    placeholderTextColor="#6b7280"
++                    value={email}
++                    onChangeText={setEmail}
++                    keyboardType="email-address"
++                    autoCapitalize="none"
++                    autoCorrect={false}
++                    data-testid="login-email-input"
++                  />
++                </View>
++              </View>
++
++              {/* Password Input */}
++              <View style={styles.inputSection}>
++                <Text style={styles.inputLabel}>PASSWORD</Text>
++                <View style={styles.inputWrapper}>
++                  <Ionicons name="lock-closed-outline" size={20} color="#a1a1aa" style={styles.inputIcon} />
++                  <TextInput
++                    style={styles.input}
++                    placeholder="Enter your password"
++                    placeholderTextColor="#6b7280"
++                    value={password}
++                    onChangeText={setPassword}
++                    secureTextEntry={!showPassword}
++                    autoCapitalize="none"
++                    data-testid="login-password-input"
++                  />
++                  <TouchableOpacity
++                    onPress={() => setShowPassword(!showPassword)}
++                    style={styles.eyeButton}
++                  >
++                    <Ionicons
++                      name={showPassword ? 'eye-off-outline' : 'eye-outline'}
++                      size={20}
++                      color="#6b7280"
++                    />
++                  </TouchableOpacity>
++                </View>
++              </View>
++
++              {/* Forgot Password */}
++              <TouchableOpacity
++                style={styles.forgotPassword}
++                onPress={() => router.push('/forgot-password')}
++                data-testid="forgot-password-link"
++              >
++                <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
++              </TouchableOpacity>
++
++              {/* Error Message */}
++              {error ? (
++                <View style={styles.errorContainer}>
++                  <Ionicons name="alert-circle" size={18} color="#ef4444" />
++                  <Text style={styles.errorText}>{error}</Text>
++                </View>
++              ) : null}
++
++              {/* Login Button */}
++              <TouchableOpacity
++                style={[styles.button, loading && styles.buttonDisabled]}
++                onPress={handleLogin}
++                disabled={loading}
++                data-testid="login-submit-btn"
++              >
++                {loading ? (
++                  <ActivityIndicator color="#1a1a1a" size="small" />
++                ) : (
++                  <>
++                    <Ionicons name="log-in-outline" size={22} color="#1a1a1a" />
++                    <Text style={styles.buttonText}>SIGN IN</Text>
++                  </>
++                )}
++              </TouchableOpacity>
++
++              {/* Sign Up Link */}
++              <View style={styles.signupContainer}>
++                <Text style={styles.signupText}>Don't have an account? </Text>
++                <TouchableOpacity onPress={() => router.push('/signup')} data-testid="signup-link">
++                  <Text style={styles.signupLink}>Sign Up</Text>
++                </TouchableOpacity>
++              </View>
++            </View>
++          </ScrollView>
++        </KeyboardAvoidingView>
++      </SafeAreaView>
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  container: {
++    flex: 1,
++    backgroundColor: '#0f0f0f',
++  },
++  safeArea: {
++    flex: 1,
++  },
++  keyboardView: {
++    flex: 1,
++  },
++  scrollContent: {
++    padding: 20,
++    paddingTop: 12,
++  },
++  backButton: {
++    width: 44,
++    height: 44,
++    borderRadius: 12,
++    backgroundColor: '#27272a',
++    justifyContent: 'center',
++    alignItems: 'center',
++    marginBottom: 24,
++  },
++  header: {
++    alignItems: 'center',
++    marginBottom: 32,
++  },
++  iconContainer: {
++    width: 72,
++    height: 72,
++    borderRadius: 20,
++    backgroundColor: '#eab308',
++    justifyContent: 'center',
++    alignItems: 'center',
++    marginBottom: 20,
++  },
++  title: {
++    fontSize: 28,
++    fontWeight: '700',
++    color: '#ffffff',
++    marginBottom: 8,
++  },
++  subtitle: {
++    fontSize: 15,
++    color: '#a1a1aa',
++  },
++  form: {
++    backgroundColor: '#27272a',
++    borderRadius: 16,
++    padding: 20,
++  },
++  inputSection: {
++    marginBottom: 16,
++  },
++  inputLabel: {
++    fontSize: 11,
++    fontWeight: '600',
++    color: '#a1a1aa',
++    letterSpacing: 1,
++    marginBottom: 8,
++  },
++  inputWrapper: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    backgroundColor: '#3f3f46',
++    borderRadius: 10,
++    borderWidth: 1,
++    borderColor: '#52525b',
++    paddingHorizontal: 12,
++  },
++  inputIcon: {
++    marginRight: 10,
++  },
++  input: {
++    flex: 1,
++    fontSize: 15,
++    color: '#ffffff',
++    paddingVertical: 14,
++    fontWeight: '500',
++  },
++  eyeButton: {
++    padding: 8,
++  },
++  forgotPassword: {
++    alignSelf: 'flex-end',
++    marginBottom: 20,
++  },
++  forgotPasswordText: {
++    color: '#eab308',
++    fontSize: 13,
++    fontWeight: '500',
++  },
++  errorContainer: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    backgroundColor: 'rgba(239, 68, 68, 0.15)',
++    padding: 12,
++    borderRadius: 8,
++    marginBottom: 16,
++    gap: 8,
++  },
++  errorText: {
++    color: '#ef4444',
++    fontSize: 13,
++    flex: 1,
++  },
++  button: {
++    backgroundColor: '#eab308',
++    borderRadius: 10,
++    paddingVertical: 16,
++    flexDirection: 'row',
++    alignItems: 'center',
++    justifyContent: 'center',
++    gap: 10,
++  },
++  buttonDisabled: {
++    opacity: 0.7,
++  },
++  buttonText: {
++    color: '#1a1a1a',
++    fontSize: 15,
++    fontWeight: '700',
++    letterSpacing: 0.5,
++  },
++  signupContainer: {
++    flexDirection: 'row',
++    justifyContent: 'center',
++    marginTop: 20,
++  },
++  signupText: {
++    color: '#a1a1aa',
++    fontSize: 14,
++  },
++  signupLink: {
++    color: '#eab308',
++    fontSize: 14,
++    fontWeight: '600',
++  },
++});
+
+diff --git a/frontend/app/signup.tsx b/frontend/app/signup.tsx
+new file mode 100644
+--- /dev/null
++++ b/frontend/app/signup.tsx
+@@ -0,0 +1,385 @@
++import React, { useState } from 'react';
++import {
++  View,
++  Text,
++  StyleSheet,
++  TextInput,
++  TouchableOpacity,
++  ActivityIndicator,
++  KeyboardAvoidingView,
++  Platform,
++  ScrollView,
++} from 'react-native';
++import { SafeAreaView } from 'react-native-safe-area-context';
++import { Ionicons } from '@expo/vector-icons';
++import { router } from 'expo-router';
++import { useAuth } from '../contexts/AuthContext';
++
++export default function SignupScreen() {
++  const { signup } = useAuth();
++  const [name, setName] = useState('');
++  const [email, setEmail] = useState('');
++  const [password, setPassword] = useState('');
++  const [confirmPassword, setConfirmPassword] = useState('');
++  const [showPassword, setShowPassword] = useState(false);
++  const [loading, setLoading] = useState(false);
++  const [error, setError] = useState('');
++
++  const validatePassword = (pass: string): string | null => {
++    if (pass.length < 8) return 'Password must be at least 8 characters';
++    if (!/[A-Z]/.test(pass)) return 'Password must contain an uppercase letter';
++    if (!/[a-z]/.test(pass)) return 'Password must contain a lowercase letter';
++    if (!/[0-9]/.test(pass)) return 'Password must contain a number';
++    return null;
++  };
++
++  const handleSignup = async () => {
++    setError('');
++
++    if (!email.trim() || !password.trim()) {
++      setError('Please fill in all required fields');
++      return;
++    }
++
++    if (!email.includes('@')) {
++      setError('Please enter a valid email address');
++      return;
++    }
++
++    const passwordError = validatePassword(password);
++    if (passwordError) {
++      setError(passwordError);
++      return;
++    }
++
++    if (password !== confirmPassword) {
++      setError('Passwords do not match');
++      return;
++    }
++
++    setLoading(true);
++
++    const result = await signup(email.trim(), password, name.trim() || undefined);
++    
++    setLoading(false);
++    
++    if (result.success) {
++      router.replace('/verify-email');
++    } else {
++      setError(result.error || 'Signup failed');
++    }
++  };
++
++  return (
++    <View style={styles.container}>
++      <SafeAreaView style={styles.safeArea}>
++        <KeyboardAvoidingView
++          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
++          style={styles.keyboardView}
++        >
++          <ScrollView
++            contentContainerStyle={styles.scrollContent}
++            keyboardShouldPersistTaps="handled"
++            showsVerticalScrollIndicator={false}
++          >
++            {/* Back Button */}
++            <TouchableOpacity
++              style={styles.backButton}
++              onPress={() => router.back()}
++              data-testid="signup-back-btn"
++            >
++              <Ionicons name="arrow-back" size={24} color="#fff" />
++            </TouchableOpacity>
++
++            {/* Header */}
++            <View style={styles.header}>
++              <View style={styles.iconContainer}>
++                <Ionicons name="person-add" size={32} color="#1a1a1a" />
++              </View>
++              <Text style={styles.title}>Create Account</Text>
++              <Text style={styles.subtitle}>Start your 7-day free trial</Text>
++            </View>
++
++            {/* Signup Form */}
++            <View style={styles.form}>
++              {/* Name Input (Optional) */}
++              <View style={styles.inputSection}>
++                <Text style={styles.inputLabel}>NAME (OPTIONAL)</Text>
++                <View style={styles.inputWrapper}>
++                  <Ionicons name="person-outline" size={20} color="#a1a1aa" style={styles.inputIcon} />
++                  <TextInput
++                    style={styles.input}
++                    placeholder="Enter your name"
++                    placeholderTextColor="#6b7280"
++                    value={name}
++                    onChangeText={setName}
++                    autoCapitalize="words"
++                    data-testid="signup-name-input"
++                  />
++                </View>
++              </View>
++
++              {/* Email Input */}
++              <View style={styles.inputSection}>
++                <Text style={styles.inputLabel}>EMAIL *</Text>
++                <View style={styles.inputWrapper}>
++                  <Ionicons name="mail-outline" size={20} color="#a1a1aa" style={styles.inputIcon} />
++                  <TextInput
++                    style={styles.input}
++                    placeholder="Enter your email"
++                    placeholderTextColor="#6b7280"
++                    value={email}
++                    onChangeText={setEmail}
++                    keyboardType="email-address"
++                    autoCapitalize="none"
++                    autoCorrect={false}
++                    data-testid="signup-email-input"
++                  />
++                </View>
++              </View>
++
++              {/* Password Input */}
++              <View style={styles.inputSection}>
++                <Text style={styles.inputLabel}>PASSWORD *</Text>
++                <View style={styles.inputWrapper}>
++                  <Ionicons name="lock-closed-outline" size={20} color="#a1a1aa" style={styles.inputIcon} />
++                  <TextInput
++                    style={styles.input}
++                    placeholder="Create a password"
++                    placeholderTextColor="#6b7280"
++                    value={password}
++                    onChangeText={setPassword}
++                    secureTextEntry={!showPassword}
++                    autoCapitalize="none"
++                    data-testid="signup-password-input"
++                  />
++                  <TouchableOpacity
++                    onPress={() => setShowPassword(!showPassword)}
++                    style={styles.eyeButton}
++                  >
++                    <Ionicons
++                      name={showPassword ? 'eye-off-outline' : 'eye-outline'}
++                      size={20}
++                      color="#6b7280"
++                    />
++                  </TouchableOpacity>
++                </View>
++                <Text style={styles.passwordHint}>
++                  8+ characters, uppercase, lowercase, and number
++                </Text>
++              </View>
++
++              {/* Confirm Password Input */}
++              <View style={styles.inputSection}>
++                <Text style={styles.inputLabel}>CONFIRM PASSWORD *</Text>
++                <View style={styles.inputWrapper}>
++                  <Ionicons name="lock-closed-outline" size={20} color="#a1a1aa" style={styles.inputIcon} />
++                  <TextInput
++                    style={styles.input}
++                    placeholder="Confirm your password"
++                    placeholderTextColor="#6b7280"
++                    value={confirmPassword}
++                    onChangeText={setConfirmPassword}
++                    secureTextEntry={!showPassword}
++                    autoCapitalize="none"
++                    data-testid="signup-confirm-password-input"
++                  />
++                </View>
++              </View>
++
++              {/* Error Message */}
++              {error ? (
++                <View style={styles.errorContainer}>
++                  <Ionicons name="alert-circle" size={18} color="#ef4444" />
++                  <Text style={styles.errorText}>{error}</Text>
++                </View>
++              ) : null}
++
++              {/* Signup Button */}
++              <TouchableOpacity
++                style={[styles.button, loading && styles.buttonDisabled]}
++                onPress={handleSignup}
++                disabled={loading}
++                data-testid="signup-submit-btn"
++              >
++                {loading ? (
++                  <ActivityIndicator color="#1a1a1a" size="small" />
++                ) : (
++                  <>
++                    <Ionicons name="rocket-outline" size={22} color="#1a1a1a" />
++                    <Text style={styles.buttonText}>CREATE ACCOUNT</Text>
++                  </>
++                )}
++              </TouchableOpacity>
++
++              {/* Trial Info */}
++              <View style={styles.trialInfo}>
++                <Ionicons name="gift-outline" size={18} color="#22c55e" />
++                <Text style={styles.trialText}>
++                  7-day free trial included. No credit card required.
++                </Text>
++              </View>
++
++              {/* Login Link */}
++              <View style={styles.loginContainer}>
++                <Text style={styles.loginText}>Already have an account? </Text>
++                <TouchableOpacity onPress={() => router.push('/login')} data-testid="login-link">
++                  <Text style={styles.loginLink}>Sign In</Text>
++                </TouchableOpacity>
++              </View>
++            </View>
++          </ScrollView>
++        </KeyboardAvoidingView>
++      </SafeAreaView>
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  container: {
++    flex: 1,
++    backgroundColor: '#0f0f0f',
++  },
++  safeArea: {
++    flex: 1,
++  },
++  keyboardView: {
++    flex: 1,
++  },
++  scrollContent: {
++    padding: 20,
++    paddingTop: 12,
++  },
++  backButton: {
++    width: 44,
++    height: 44,
++    borderRadius: 12,
++    backgroundColor: '#27272a',
++    justifyContent: 'center',
++    alignItems: 'center',
++    marginBottom: 24,
++  },
++  header: {
++    alignItems: 'center',
++    marginBottom: 32,
++  },
++  iconContainer: {
++    width: 72,
++    height: 72,
++    borderRadius: 20,
++    backgroundColor: '#eab308',
++    justifyContent: 'center',
++    alignItems: 'center',
++    marginBottom: 20,
++  },
++  title: {
++    fontSize: 28,
++    fontWeight: '700',
++    color: '#ffffff',
++    marginBottom: 8,
++  },
++  subtitle: {
++    fontSize: 15,
++    color: '#22c55e',
++    fontWeight: '500',
++  },
++  form: {
++    backgroundColor: '#27272a',
++    borderRadius: 16,
++    padding: 20,
++  },
++  inputSection: {
++    marginBottom: 16,
++  },
++  inputLabel: {
++    fontSize: 11,
++    fontWeight: '600',
++    color: '#a1a1aa',
++    letterSpacing: 1,
++    marginBottom: 8,
++  },
++  inputWrapper: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    backgroundColor: '#3f3f46',
++    borderRadius: 10,
++    borderWidth: 1,
++    borderColor: '#52525b',
++    paddingHorizontal: 12,
++  },
++  inputIcon: {
++    marginRight: 10,
++  },
++  input: {
++    flex: 1,
++    fontSize: 15,
++    color: '#ffffff',
++    paddingVertical: 14,
++    fontWeight: '500',
++  },
++  eyeButton: {
++    padding: 8,
++  },
++  passwordHint: {
++    color: '#6b7280',
++    fontSize: 11,
++    marginTop: 6,
++  },
++  errorContainer: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    backgroundColor: 'rgba(239, 68, 68, 0.15)',
++    padding: 12,
++    borderRadius: 8,
++    marginBottom: 16,
++    gap: 8,
++  },
++  errorText: {
++    color: '#ef4444',
++    fontSize: 13,
++    flex: 1,
++  },
++  button: {
++    backgroundColor: '#eab308',
++    borderRadius: 10,
++    paddingVertical: 16,
++    flexDirection: 'row',
++    alignItems: 'center',
++    justifyContent: 'center',
++    gap: 10,
++  },
++  buttonDisabled: {
++    opacity: 0.7,
++  },
++  buttonText: {
++    color: '#1a1a1a',
++    fontSize: 15,
++    fontWeight: '700',
++    letterSpacing: 0.5,
++  },
++  trialInfo: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    justifyContent: 'center',
++    marginTop: 16,
++    gap: 8,
++  },
++  trialText: {
++    color: '#a1a1aa',
++    fontSize: 12,
++  },
++  loginContainer: {
++    flexDirection: 'row',
++    justifyContent: 'center',
++    marginTop: 20,
++  },
++  loginText: {
++    color: '#a1a1aa',
++    fontSize: 14,
++  },
++  loginLink: {
++    color: '#eab308',
++    fontSize: 14,
++    fontWeight: '600',
++  },
++});
+
+diff --git a/frontend/app/verify-email.tsx b/frontend/app/verify-email.tsx
+new file mode 100644
+--- /dev/null
++++ b/frontend/app/verify-email.tsx
+@@ -0,0 +1,285 @@
++import React, { useState, useEffect } from 'react';
++import {
++  View,
++  Text,
++  StyleSheet,
++  TouchableOpacity,
++  ActivityIndicator,
++} from 'react-native';
++import { SafeAreaView } from 'react-native-safe-area-context';
++import { Ionicons } from '@expo/vector-icons';
++import { router } from 'expo-router';
++import { useAuth } from '../contexts/AuthContext';
++import axios from 'axios';
++
++const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
++
++export default function VerifyEmailScreen() {
++  const { user, accessToken, refreshUser } = useAuth();
++  const [resending, setResending] = useState(false);
++  const [resendSuccess, setResendSuccess] = useState(false);
++  const [error, setError] = useState('');
++  const [countdown, setCountdown] = useState(0);
++
++  useEffect(() => {
++    // Poll for email verification status
++    const interval = setInterval(() => {
++      if (accessToken) {
++        refreshUser();
++      }
++    }, 5000); // Check every 5 seconds
++
++    return () => clearInterval(interval);
++  }, [accessToken]);
++
++  useEffect(() => {
++    // Redirect when email is verified
++    if (user?.email_verified) {
++      router.replace('/subscription');
++    }
++  }, [user?.email_verified]);
++
++  useEffect(() => {
++    // Countdown timer for resend button
++    if (countdown > 0) {
++      const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
++      return () => clearTimeout(timer);
++    }
++  }, [countdown]);
++
++  const handleResendEmail = async () => {
++    if (countdown > 0) return;
++
++    setResending(true);
++    setError('');
++    setResendSuccess(false);
++
++    try {
++      await axios.post(
++        `${API_BASE}/api/auth/resend-verification`,
++        {},
++        { headers: { Authorization: `Bearer ${accessToken}` } }
++      );
++      setResendSuccess(true);
++      setCountdown(60); // 60 second cooldown
++    } catch (err: any) {
++      setError(err.response?.data?.detail || 'Failed to resend email');
++    } finally {
++      setResending(false);
++    }
++  };
++
++  const handleSkip = () => {
++    router.replace('/subscription');
++  };
++
++  return (
++    <View style={styles.container}>
++      <SafeAreaView style={styles.safeArea}>
++        <View style={styles.content}>
++          {/* Icon */}
++          <View style={styles.iconContainer}>
++            <Ionicons name="mail-unread" size={48} color="#eab308" />
++          </View>
++
++          {/* Title */}
++          <Text style={styles.title}>Verify Your Email</Text>
++          <Text style={styles.subtitle}>
++            We've sent a verification link to
++          </Text>
++          <Text style={styles.email}>{user?.email || 'your email'}</Text>
++
++          {/* Instructions */}
++          <View style={styles.instructionsBox}>
++            <View style={styles.instructionRow}>
++              <Ionicons name="checkmark-circle" size={20} color="#22c55e" />
++              <Text style={styles.instructionText}>Check your inbox</Text>
++            </View>
++            <View style={styles.instructionRow}>
++              <Ionicons name="checkmark-circle" size={20} color="#22c55e" />
++              <Text style={styles.instructionText}>Click the verification link</Text>
++            </View>
++            <View style={styles.instructionRow}>
++              <Ionicons name="checkmark-circle" size={20} color="#22c55e" />
++              <Text style={styles.instructionText}>Return here to continue</Text>
++            </View>
++          </View>
++
++          {/* Status Messages */}
++          {resendSuccess && (
++            <View style={styles.successContainer}>
++              <Ionicons name="checkmark-circle" size={18} color="#22c55e" />
++              <Text style={styles.successText}>Verification email sent!</Text>
++            </View>
++          )}
++
++          {error && (
++            <View style={styles.errorContainer}>
++              <Ionicons name="alert-circle" size={18} color="#ef4444" />
++              <Text style={styles.errorText}>{error}</Text>
++            </View>
++          )}
++
++          {/* Resend Button */}
++          <TouchableOpacity
++            style={[styles.resendButton, countdown > 0 && styles.resendButtonDisabled]}
++            onPress={handleResendEmail}
++            disabled={resending || countdown > 0}
++            data-testid="resend-email-btn"
++          >
++            {resending ? (
++              <ActivityIndicator color="#eab308" size="small" />
++            ) : (
++              <>
++                <Ionicons name="refresh" size={18} color="#eab308" />
++                <Text style={styles.resendButtonText}>
++                  {countdown > 0 ? `Resend in ${countdown}s` : 'Resend Email'}
++                </Text>
++              </>
++            )}
++          </TouchableOpacity>
++
++          {/* Skip for now */}
++          <TouchableOpacity
++            style={styles.skipButton}
++            onPress={handleSkip}
++            data-testid="skip-verification-btn"
++          >
++            <Text style={styles.skipButtonText}>Skip for now</Text>
++          </TouchableOpacity>
++
++          {/* Help Text */}
++          <Text style={styles.helpText}>
++            Didn't receive the email? Check your spam folder or try resending.
++          </Text>
++        </View>
++      </SafeAreaView>
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  container: {
++    flex: 1,
++    backgroundColor: '#0f0f0f',
++  },
++  safeArea: {
++    flex: 1,
++  },
++  content: {
++    flex: 1,
++    padding: 24,
++    alignItems: 'center',
++    justifyContent: 'center',
++  },
++  iconContainer: {
++    width: 96,
++    height: 96,
++    borderRadius: 24,
++    backgroundColor: '#27272a',
++    justifyContent: 'center',
++    alignItems: 'center',
++    marginBottom: 24,
++  },
++  title: {
++    fontSize: 28,
++    fontWeight: '700',
++    color: '#ffffff',
++    marginBottom: 12,
++    textAlign: 'center',
++  },
++  subtitle: {
++    fontSize: 15,
++    color: '#a1a1aa',
++    textAlign: 'center',
++  },
++  email: {
++    fontSize: 16,
++    color: '#eab308',
++    fontWeight: '600',
++    marginBottom: 32,
++  },
++  instructionsBox: {
++    backgroundColor: '#27272a',
++    borderRadius: 12,
++    padding: 20,
++    width: '100%',
++    marginBottom: 24,
++    gap: 16,
++  },
++  instructionRow: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    gap: 12,
++  },
++  instructionText: {
++    color: '#e4e4e7',
++    fontSize: 14,
++  },
++  successContainer: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    backgroundColor: 'rgba(34, 197, 94, 0.15)',
++    padding: 12,
++    borderRadius: 8,
++    marginBottom: 16,
++    gap: 8,
++    width: '100%',
++  },
++  successText: {
++    color: '#22c55e',
++    fontSize: 13,
++  },
++  errorContainer: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    backgroundColor: 'rgba(239, 68, 68, 0.15)',
++    padding: 12,
++    borderRadius: 8,
++    marginBottom: 16,
++    gap: 8,
++    width: '100%',
++  },
++  errorText: {
++    color: '#ef4444',
++    fontSize: 13,
++    flex: 1,
++  },
++  resendButton: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    justifyContent: 'center',
++    gap: 8,
++    backgroundColor: '#27272a',
++    borderRadius: 10,
++    paddingVertical: 14,
++    paddingHorizontal: 24,
++    borderWidth: 1,
++    borderColor: '#eab308',
++    width: '100%',
++    marginBottom: 12,
++  },
++  resendButtonDisabled: {
++    borderColor: '#52525b',
++    opacity: 0.6,
++  },
++  resendButtonText: {
++    color: '#eab308',
++    fontSize: 14,
++    fontWeight: '600',
++  },
++  skipButton: {
++    paddingVertical: 12,
++    marginBottom: 24,
++  },
++  skipButtonText: {
++    color: '#6b7280',
++    fontSize: 14,
++  },
++  helpText: {
++    color: '#52525b',
++    fontSize: 12,
++    textAlign: 'center',
++    paddingHorizontal: 20,
++  },
++});
+
+diff --git a/frontend/app/forgot-password.tsx b/frontend/app/forgot-password.tsx
+new file mode 100644
+--- /dev/null
++++ b/frontend/app/forgot-password.tsx
+@@ -0,0 +1,369 @@
++import React, { useState } from 'react';
++import {
++  View,
++  Text,
++  StyleSheet,
++  TextInput,
++  TouchableOpacity,
++  ActivityIndicator,
++  KeyboardAvoidingView,
++  Platform,
++  ScrollView,
++} from 'react-native';
++import { SafeAreaView } from 'react-native-safe-area-context';
++import { Ionicons } from '@expo/vector-icons';
++import { router } from 'expo-router';
++import axios from 'axios';
++
++const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
++
++export default function ForgotPasswordScreen() {
++  const [email, setEmail] = useState('');
++  const [loading, setLoading] = useState(false);
++  const [error, setError] = useState('');
++  const [success, setSuccess] = useState(false);
++
++  const handleSubmit = async () => {
++    if (!email.trim()) {
++      setError('Please enter your email address');
++      return;
++    }
++
++    if (!email.includes('@')) {
++      setError('Please enter a valid email address');
++      return;
++    }
++
++    setLoading(true);
++    setError('');
++
++    try {
++      await axios.post(`${API_BASE}/api/auth/forgot-password`, {
++        email: email.trim()
++      });
++      setSuccess(true);
++    } catch (err: any) {
++      // Don't reveal if email exists or not for security
++      setSuccess(true);
++    } finally {
++      setLoading(false);
++    }
++  };
++
++  if (success) {
++    return (
++      <View style={styles.container}>
++        <SafeAreaView style={styles.safeArea}>
++          <View style={styles.successContent}>
++            {/* Back Button */}
++            <TouchableOpacity
++              style={styles.backButton}
++              onPress={() => router.back()}
++            >
++              <Ionicons name="arrow-back" size={24} color="#fff" />
++            </TouchableOpacity>
++
++            <View style={styles.successIconContainer}>
++              <Ionicons name="mail-outline" size={48} color="#22c55e" />
++            </View>
++
++            <Text style={styles.successTitle}>Check Your Email</Text>
++            <Text style={styles.successSubtitle}>
++              If an account exists for {email}, you'll receive a password reset link shortly.
++            </Text>
++
++            <View style={styles.instructionsBox}>
++              <View style={styles.instructionRow}>
++                <Ionicons name="time-outline" size={18} color="#a1a1aa" />
++                <Text style={styles.instructionText}>Link expires in 1 hour</Text>
++              </View>
++              <View style={styles.instructionRow}>
++                <Ionicons name="folder-outline" size={18} color="#a1a1aa" />
++                <Text style={styles.instructionText}>Check your spam folder</Text>
++              </View>
++            </View>
++
++            <TouchableOpacity
++              style={styles.button}
++              onPress={() => router.push('/login')}
++              data-testid="back-to-login-btn"
++            >
++              <Ionicons name="arrow-back" size={20} color="#1a1a1a" />
++              <Text style={styles.buttonText}>BACK TO LOGIN</Text>
++            </TouchableOpacity>
++          </View>
++        </SafeAreaView>
++      </View>
++    );
++  }
++
++  return (
++    <View style={styles.container}>
++      <SafeAreaView style={styles.safeArea}>
++        <KeyboardAvoidingView
++          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
++          style={styles.keyboardView}
++        >
++          <ScrollView
++            contentContainerStyle={styles.scrollContent}
++            keyboardShouldPersistTaps="handled"
++            showsVerticalScrollIndicator={false}
++          >
++            {/* Back Button */}
++            <TouchableOpacity
++              style={styles.backButton}
++              onPress={() => router.back()}
++              data-testid="forgot-password-back-btn"
++            >
++              <Ionicons name="arrow-back" size={24} color="#fff" />
++            </TouchableOpacity>
++
++            {/* Header */}
++            <View style={styles.header}>
++              <View style={styles.iconContainer}>
++                <Ionicons name="key" size={32} color="#1a1a1a" />
++              </View>
++              <Text style={styles.title}>Forgot Password?</Text>
++              <Text style={styles.subtitle}>
++                Enter your email and we'll send you a reset link
++              </Text>
++            </View>
++
++            {/* Form */}
++            <View style={styles.form}>
++              {/* Email Input */}
++              <View style={styles.inputSection}>
++                <Text style={styles.inputLabel}>EMAIL ADDRESS</Text>
++                <View style={styles.inputWrapper}>
++                  <Ionicons name="mail-outline" size={20} color="#a1a1aa" style={styles.inputIcon} />
++                  <TextInput
++                    style={styles.input}
++                    placeholder="Enter your email"
++                    placeholderTextColor="#6b7280"
++                    value={email}
++                    onChangeText={setEmail}
++                    keyboardType="email-address"
++                    autoCapitalize="none"
++                    autoCorrect={false}
++                    data-testid="forgot-password-email-input"
++                  />
++                </View>
++              </View>
++
++              {/* Error Message */}
++              {error ? (
++                <View style={styles.errorContainer}>
++                  <Ionicons name="alert-circle" size={18} color="#ef4444" />
++                  <Text style={styles.errorText}>{error}</Text>
++                </View>
++              ) : null}
++
++              {/* Submit Button */}
++              <TouchableOpacity
++                style={[styles.button, loading && styles.buttonDisabled]}
++                onPress={handleSubmit}
++                disabled={loading}
++                data-testid="forgot-password-submit-btn"
++              >
++                {loading ? (
++                  <ActivityIndicator color="#1a1a1a" size="small" />
++                ) : (
++                  <>
++                    <Ionicons name="send" size={20} color="#1a1a1a" />
++                    <Text style={styles.buttonText}>SEND RESET LINK</Text>
++                  </>
++                )}
++              </TouchableOpacity>
++
++              {/* Back to Login */}
++              <TouchableOpacity
++                style={styles.loginLink}
++                onPress={() => router.push('/login')}
++              >
++                <Ionicons name="arrow-back" size={16} color="#a1a1aa" />
++                <Text style={styles.loginLinkText}>Back to Login</Text>
++              </TouchableOpacity>
++            </View>
++          </ScrollView>
++        </KeyboardAvoidingView>
++      </SafeAreaView>
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  container: {
++    flex: 1,
++    backgroundColor: '#0f0f0f',
++  },
++  safeArea: {
++    flex: 1,
++  },
++  keyboardView: {
++    flex: 1,
++  },
++  scrollContent: {
++    padding: 20,
++    paddingTop: 12,
++  },
++  backButton: {
++    width: 44,
++    height: 44,
++    borderRadius: 12,
++    backgroundColor: '#27272a',
++    justifyContent: 'center',
++    alignItems: 'center',
++    marginBottom: 24,
++  },
++  header: {
++    alignItems: 'center',
++    marginBottom: 32,
++  },
++  iconContainer: {
++    width: 72,
++    height: 72,
++    borderRadius: 20,
++    backgroundColor: '#eab308',
++    justifyContent: 'center',
++    alignItems: 'center',
++    marginBottom: 20,
++  },
++  title: {
++    fontSize: 28,
++    fontWeight: '700',
++    color: '#ffffff',
++    marginBottom: 8,
++  },
++  subtitle: {
++    fontSize: 15,
++    color: '#a1a1aa',
++    textAlign: 'center',
++    paddingHorizontal: 20,
++  },
++  form: {
++    backgroundColor: '#27272a',
++    borderRadius: 16,
++    padding: 20,
++  },
++  inputSection: {
++    marginBottom: 20,
++  },
++  inputLabel: {
++    fontSize: 11,
++    fontWeight: '600',
++    color: '#a1a1aa',
++    letterSpacing: 1,
++    marginBottom: 8,
++  },
++  inputWrapper: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    backgroundColor: '#3f3f46',
++    borderRadius: 10,
++    borderWidth: 1,
++    borderColor: '#52525b',
++    paddingHorizontal: 12,
++  },
++  inputIcon: {
++    marginRight: 10,
++  },
++  input: {
++    flex: 1,
++    fontSize: 15,
++    color: '#ffffff',
++    paddingVertical: 14,
++    fontWeight: '500',
++  },
++  errorContainer: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    backgroundColor: 'rgba(239, 68, 68, 0.15)',
++    padding: 12,
++    borderRadius: 8,
++    marginBottom: 16,
++    gap: 8,
++  },
++  errorText: {
++    color: '#ef4444',
++    fontSize: 13,
++    flex: 1,
++  },
++  button: {
++    backgroundColor: '#eab308',
++    borderRadius: 10,
++    paddingVertical: 16,
++    flexDirection: 'row',
++    alignItems: 'center',
++    justifyContent: 'center',
++    gap: 10,
++  },
++  buttonDisabled: {
++    opacity: 0.7,
++  },
++  buttonText: {
++    color: '#1a1a1a',
++    fontSize: 15,
++    fontWeight: '700',
++    letterSpacing: 0.5,
++  },
++  loginLink: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    justifyContent: 'center',
++    marginTop: 20,
++    gap: 6,
++  },
++  loginLinkText: {
++    color: '#a1a1aa',
++    fontSize: 14,
++  },
++  // Success state styles
++  successContent: {
++    flex: 1,
++    padding: 24,
++    alignItems: 'center',
++    justifyContent: 'flex-start',
++    paddingTop: 12,
++  },
++  successIconContainer: {
++    width: 96,
++    height: 96,
++    borderRadius: 24,
++    backgroundColor: '#14532d',
++    justifyContent: 'center',
++    alignItems: 'center',
++    marginBottom: 24,
++    marginTop: 60,
++  },
++  successTitle: {
++    fontSize: 28,
++    fontWeight: '700',
++    color: '#ffffff',
++    marginBottom: 12,
++    textAlign: 'center',
++  },
++  successSubtitle: {
++    fontSize: 15,
++    color: '#a1a1aa',
++    textAlign: 'center',
++    paddingHorizontal: 20,
++    marginBottom: 32,
++  },
++  instructionsBox: {
++    backgroundColor: '#27272a',
++    borderRadius: 12,
++    padding: 16,
++    width: '100%',
++    marginBottom: 32,
++    gap: 12,
++  },
++  instructionRow: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    gap: 10,
++  },
++  instructionText: {
++    color: '#a1a1aa',
++    fontSize: 14,
++  },
++});
+
+diff --git a/frontend/app/reset-password.tsx b/frontend/app/reset-password.tsx
+new file mode 100644
+--- /dev/null
++++ b/frontend/app/reset-password.tsx
+@@ -0,0 +1,389 @@
++import React, { useState, useEffect } from 'react';
++import {
++  View,
++  Text,
++  StyleSheet,
++  TextInput,
++  TouchableOpacity,
++  ActivityIndicator,
++  KeyboardAvoidingView,
++  Platform,
++  ScrollView,
++} from 'react-native';
++import { SafeAreaView } from 'react-native-safe-area-context';
++import { Ionicons } from '@expo/vector-icons';
++import { router, useLocalSearchParams } from 'expo-router';
++import axios from 'axios';
++
++const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
++
++export default function ResetPasswordScreen() {
++  const { token } = useLocalSearchParams<{ token: string }>();
++  const [password, setPassword] = useState('');
++  const [confirmPassword, setConfirmPassword] = useState('');
++  const [showPassword, setShowPassword] = useState(false);
++  const [loading, setLoading] = useState(false);
++  const [error, setError] = useState('');
++  const [success, setSuccess] = useState(false);
++
++  const validatePassword = (pass: string): string | null => {
++    if (pass.length < 8) return 'Password must be at least 8 characters';
++    if (!/[A-Z]/.test(pass)) return 'Password must contain an uppercase letter';
++    if (!/[a-z]/.test(pass)) return 'Password must contain a lowercase letter';
++    if (!/[0-9]/.test(pass)) return 'Password must contain a number';
++    return null;
++  };
++
++  const handleSubmit = async () => {
++    setError('');
++
++    if (!password.trim()) {
++      setError('Please enter a new password');
++      return;
++    }
++
++    const passwordError = validatePassword(password);
++    if (passwordError) {
++      setError(passwordError);
++      return;
++    }
++
++    if (password !== confirmPassword) {
++      setError('Passwords do not match');
++      return;
++    }
++
++    setLoading(true);
++
++    try {
++      await axios.post(`${API_BASE}/api/auth/reset-password`, {
++        token,
++        new_password: password
++      });
++      setSuccess(true);
++    } catch (err: any) {
++      setError(err.response?.data?.detail || 'Failed to reset password. Link may be expired.');
++    } finally {
++      setLoading(false);
++    }
++  };
++
++  if (success) {
++    return (
++      <View style={styles.container}>
++        <SafeAreaView style={styles.safeArea}>
++          <View style={styles.successContent}>
++            <View style={styles.successIconContainer}>
++              <Ionicons name="checkmark-circle" size={64} color="#22c55e" />
++            </View>
++
++            <Text style={styles.successTitle}>Password Reset!</Text>
++            <Text style={styles.successSubtitle}>
++              Your password has been successfully reset. You can now sign in with your new password.
++            </Text>
++
++            <TouchableOpacity
++              style={styles.button}
++              onPress={() => router.replace('/login')}
++              data-testid="go-to-login-btn"
++            >
++              <Ionicons name="log-in-outline" size={22} color="#1a1a1a" />
++              <Text style={styles.buttonText}>SIGN IN</Text>
++            </TouchableOpacity>
++          </View>
++        </SafeAreaView>
++      </View>
++    );
++  }
++
++  if (!token) {
++    return (
++      <View style={styles.container}>
++        <SafeAreaView style={styles.safeArea}>
++          <View style={styles.errorContent}>
++            <View style={styles.errorIconContainer}>
++              <Ionicons name="alert-circle" size={64} color="#ef4444" />
++            </View>
++
++            <Text style={styles.errorTitle}>Invalid Link</Text>
++            <Text style={styles.errorSubtitle}>
++              This password reset link is invalid or has expired. Please request a new one.
++            </Text>
++
++            <TouchableOpacity
++              style={styles.button}
++              onPress={() => router.replace('/forgot-password')}
++            >
++              <Ionicons name="refresh" size={20} color="#1a1a1a" />
++              <Text style={styles.buttonText}>REQUEST NEW LINK</Text>
++            </TouchableOpacity>
++          </View>
++        </SafeAreaView>
++      </View>
++    );
++  }
++
++  return (
++    <View style={styles.container}>
++      <SafeAreaView style={styles.safeArea}>
++        <KeyboardAvoidingView
++          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
++          style={styles.keyboardView}
++        >
++          <ScrollView
++            contentContainerStyle={styles.scrollContent}
++            keyboardShouldPersistTaps="handled"
++            showsVerticalScrollIndicator={false}
++          >
++            {/* Header */}
++            <View style={styles.header}>
++              <View style={styles.iconContainer}>
++                <Ionicons name="lock-open" size={32} color="#1a1a1a" />
++              </View>
++              <Text style={styles.title}>Reset Password</Text>
++              <Text style={styles.subtitle}>Enter your new password below</Text>
++            </View>
++
++            {/* Form */}
++            <View style={styles.form}>
++              {/* New Password */}
++              <View style={styles.inputSection}>
++                <Text style={styles.inputLabel}>NEW PASSWORD</Text>
++                <View style={styles.inputWrapper}>
++                  <Ionicons name="lock-closed-outline" size={20} color="#a1a1aa" style={styles.inputIcon} />
++                  <TextInput
++                    style={styles.input}
++                    placeholder="Enter new password"
++                    placeholderTextColor="#6b7280"
++                    value={password}
++                    onChangeText={setPassword}
++                    secureTextEntry={!showPassword}
++                    autoCapitalize="none"
++                    data-testid="reset-password-input"
++                  />
++                  <TouchableOpacity
++                    onPress={() => setShowPassword(!showPassword)}
++                    style={styles.eyeButton}
++                  >
++                    <Ionicons
++                      name={showPassword ? 'eye-off-outline' : 'eye-outline'}
++                      size={20}
++                      color="#6b7280"
++                    />
++                  </TouchableOpacity>
++                </View>
++                <Text style={styles.passwordHint}>
++                  8+ characters, uppercase, lowercase, and number
++                </Text>
++              </View>
++
++              {/* Confirm Password */}
++              <View style={styles.inputSection}>
++                <Text style={styles.inputLabel}>CONFIRM PASSWORD</Text>
++                <View style={styles.inputWrapper}>
++                  <Ionicons name="lock-closed-outline" size={20} color="#a1a1aa" style={styles.inputIcon} />
++                  <TextInput
++                    style={styles.input}
++                    placeholder="Confirm new password"
++                    placeholderTextColor="#6b7280"
++                    value={confirmPassword}
++                    onChangeText={setConfirmPassword}
++                    secureTextEntry={!showPassword}
++                    autoCapitalize="none"
++                    data-testid="reset-confirm-password-input"
++                  />
++                </View>
++              </View>
++
++              {/* Error Message */}
++              {error ? (
++                <View style={styles.errorContainer}>
++                  <Ionicons name="alert-circle" size={18} color="#ef4444" />
++                  <Text style={styles.errorText}>{error}</Text>
++                </View>
++              ) : null}
++
++              {/* Submit Button */}
++              <TouchableOpacity
++                style={[styles.button, loading && styles.buttonDisabled]}
++                onPress={handleSubmit}
++                disabled={loading}
++                data-testid="reset-password-submit-btn"
++              >
++                {loading ? (
++                  <ActivityIndicator color="#1a1a1a" size="small" />
++                ) : (
++                  <>
++                    <Ionicons name="checkmark-circle" size={22} color="#1a1a1a" />
++                    <Text style={styles.buttonText}>RESET PASSWORD</Text>
++                  </>
++                )}
++              </TouchableOpacity>
++            </View>
++          </ScrollView>
++        </KeyboardAvoidingView>
++      </SafeAreaView>
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  container: {
++    flex: 1,
++    backgroundColor: '#0f0f0f',
++  },
++  safeArea: {
++    flex: 1,
++  },
++  keyboardView: {
++    flex: 1,
++  },
++  scrollContent: {
++    padding: 20,
++    paddingTop: 40,
++  },
++  header: {
++    alignItems: 'center',
++    marginBottom: 32,
++  },
++  iconContainer: {
++    width: 72,
++    height: 72,
++    borderRadius: 20,
++    backgroundColor: '#eab308',
++    justifyContent: 'center',
++    alignItems: 'center',
++    marginBottom: 20,
++  },
++  title: {
++    fontSize: 28,
++    fontWeight: '700',
++    color: '#ffffff',
++    marginBottom: 8,
++  },
++  subtitle: {
++    fontSize: 15,
++    color: '#a1a1aa',
++  },
++  form: {
++    backgroundColor: '#27272a',
++    borderRadius: 16,
++    padding: 20,
++  },
++  inputSection: {
++    marginBottom: 16,
++  },
++  inputLabel: {
++    fontSize: 11,
++    fontWeight: '600',
++    color: '#a1a1aa',
++    letterSpacing: 1,
++    marginBottom: 8,
++  },
++  inputWrapper: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    backgroundColor: '#3f3f46',
++    borderRadius: 10,
++    borderWidth: 1,
++    borderColor: '#52525b',
++    paddingHorizontal: 12,
++  },
++  inputIcon: {
++    marginRight: 10,
++  },
++  input: {
++    flex: 1,
++    fontSize: 15,
++    color: '#ffffff',
++    paddingVertical: 14,
++    fontWeight: '500',
++  },
++  eyeButton: {
++    padding: 8,
++  },
++  passwordHint: {
++    color: '#6b7280',
++    fontSize: 11,
++    marginTop: 6,
++  },
++  errorContainer: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    backgroundColor: 'rgba(239, 68, 68, 0.15)',
++    padding: 12,
++    borderRadius: 8,
++    marginBottom: 16,
++    gap: 8,
++  },
++  errorText: {
++    color: '#ef4444',
++    fontSize: 13,
++    flex: 1,
++  },
++  button: {
++    backgroundColor: '#eab308',
++    borderRadius: 10,
++    paddingVertical: 16,
++    flexDirection: 'row',
++    alignItems: 'center',
++    justifyContent: 'center',
++    gap: 10,
++  },
++  buttonDisabled: {
++    opacity: 0.7,
++  },
++  buttonText: {
++    color: '#1a1a1a',
++    fontSize: 15,
++    fontWeight: '700',
++    letterSpacing: 0.5,
++  },
++  // Success/Error state styles
++  successContent: {
++    flex: 1,
++    padding: 24,
++    alignItems: 'center',
++    justifyContent: 'center',
++  },
++  successIconContainer: {
++    marginBottom: 24,
++  },
++  successTitle: {
++    fontSize: 28,
++    fontWeight: '700',
++    color: '#ffffff',
++    marginBottom: 12,
++    textAlign: 'center',
++  },
++  successSubtitle: {
++    fontSize: 15,
++    color: '#a1a1aa',
++    textAlign: 'center',
++    paddingHorizontal: 20,
++    marginBottom: 32,
++  },
++  errorContent: {
++    flex: 1,
++    padding: 24,
++    alignItems: 'center',
++    justifyContent: 'center',
++  },
++  errorIconContainer: {
++    marginBottom: 24,
++  },
++  errorTitle: {
++    fontSize: 28,
++    fontWeight: '700',
++    color: '#ffffff',
++    marginBottom: 12,
++    textAlign: 'center',
++  },
++  errorSubtitle: {
++    fontSize: 15,
++    color: '#a1a1aa',
++    textAlign: 'center',
++    paddingHorizontal: 20,
++    marginBottom: 32,
++  },
++});
+
+diff --git a/frontend/app/subscription.tsx b/frontend/app/subscription.tsx
+new file mode 100644
+--- /dev/null
++++ b/frontend/app/subscription.tsx
+@@ -0,0 +1,655 @@
++import React, { useState, useEffect } from 'react';
++import {
++  View,
++  Text,
++  StyleSheet,
++  TouchableOpacity,
++  ActivityIndicator,
++  ScrollView,
++  Linking,
++  Platform,
++} from 'react-native';
++import { SafeAreaView } from 'react-native-safe-area-context';
++import { Ionicons } from '@expo/vector-icons';
++import { router } from 'expo-router';
++import { useAuth } from '../contexts/AuthContext';
++import axios from 'axios';
++
++const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
++
++interface Plan {
++  id: string;
++  name: string;
++  price: number;
++  currency: string;
++  interval: string;
++  trial_days: number;
++  features: string[];
++  savings?: string;
++}
++
++export default function SubscriptionScreen() {
++  const { user, accessToken, refreshUser, isAuthenticated } = useAuth();
++  const [plans, setPlans] = useState<Plan[]>([]);
++  const [selectedPlan, setSelectedPlan] = useState<string>('yearly');
++  const [loading, setLoading] = useState(true);
++  const [checkoutLoading, setCheckoutLoading] = useState(false);
++  const [trialLoading, setTrialLoading] = useState(false);
++  const [error, setError] = useState('');
++
++  useEffect(() => {
++    fetchPlans();
++  }, []);
++
++  const fetchPlans = async () => {
++    try {
++      const response = await axios.get(`${API_BASE}/api/subscription/plans`);
++      setPlans(response.data.plans);
++    } catch (err) {
++      console.log('Error fetching plans:', err);
++      setError('Failed to load subscription plans');
++    } finally {
++      setLoading(false);
++    }
++  };
++
++  const handleStartTrial = async () => {
++    if (!isAuthenticated) {
++      router.push('/signup');
++      return;
++    }
++
++    setTrialLoading(true);
++    setError('');
++
++    try {
++      await axios.post(
++        `${API_BASE}/api/subscription/start-trial`,
++        {},
++        { headers: { Authorization: `Bearer ${accessToken}` } }
++      );
++      await refreshUser();
++      router.replace('/');
++    } catch (err: any) {
++      setError(err.response?.data?.detail || 'Failed to start trial');
++    } finally {
++      setTrialLoading(false);
++    }
++  };
++
++  const handleCheckout = async (planId: string) => {
++    if (!isAuthenticated) {
++      router.push('/signup');
++      return;
++    }
++
++    setCheckoutLoading(true);
++    setError('');
++
++    try {
++      // Get the current origin for redirect URLs
++      const origin = Platform.OS === 'web' 
++        ? window.location.origin 
++        : 'https://app.routecastweather.com';
++
++      const response = await axios.post(
++        `${API_BASE}/api/subscription/checkout`,
++        { 
++          plan: planId,
++          origin_url: origin
++        },
++        { headers: { Authorization: `Bearer ${accessToken}` } }
++      );
++
++      const { checkout_url } = response.data;
++
++      if (Platform.OS === 'web') {
++        window.location.href = checkout_url;
++      } else {
++        await Linking.openURL(checkout_url);
++      }
++    } catch (err: any) {
++      setError(err.response?.data?.detail || 'Failed to start checkout');
++    } finally {
++      setCheckoutLoading(false);
++    }
++  };
++
++  const isPremium = user?.is_premium;
++  const isTrialing = user?.subscription_status === 'trialing';
++  const canStartTrial = user?.trial_available && !isPremium && !isTrialing;
++
++  if (loading) {
++    return (
++      <View style={styles.loadingContainer}>
++        <ActivityIndicator size="large" color="#eab308" />
++      </View>
++    );
++  }
++
++  // Already premium - show success state
++  if (isPremium && !isTrialing) {
++    return (
++      <View style={styles.container}>
++        <SafeAreaView style={styles.safeArea}>
++          <View style={styles.premiumContent}>
++            <TouchableOpacity
++              style={styles.backButton}
++              onPress={() => router.back()}
++            >
++              <Ionicons name="arrow-back" size={24} color="#fff" />
++            </TouchableOpacity>
++
++            <View style={styles.premiumIconContainer}>
++              <Ionicons name="star" size={48} color="#eab308" />
++            </View>
++
++            <Text style={styles.premiumTitle}>You're Premium!</Text>
++            <Text style={styles.premiumSubtitle}>
++              You have full access to all Routecast features
++            </Text>
++
++            <View style={styles.premiumInfoBox}>
++              <View style={styles.premiumInfoRow}>
++                <Ionicons name="calendar" size={20} color="#a1a1aa" />
++                <Text style={styles.premiumInfoText}>
++                  Plan: {user?.subscription_plan?.charAt(0).toUpperCase() + user?.subscription_plan?.slice(1)}
++                </Text>
++              </View>
++              {user?.subscription_expiration && (
++                <View style={styles.premiumInfoRow}>
++                  <Ionicons name="time" size={20} color="#a1a1aa" />
++                  <Text style={styles.premiumInfoText}>
++                    Renews: {new Date(user.subscription_expiration).toLocaleDateString()}
++                  </Text>
++                </View>
++              )}
++            </View>
++
++            <TouchableOpacity
++              style={styles.manageButton}
++              onPress={() => router.push('/account')}
++            >
++              <Ionicons name="settings-outline" size={20} color="#eab308" />
++              <Text style={styles.manageButtonText}>Manage Subscription</Text>
++            </TouchableOpacity>
++
++            <TouchableOpacity
++              style={styles.continueButton}
++              onPress={() => router.replace('/')}
++            >
++              <Text style={styles.continueButtonText}>Continue to App</Text>
++            </TouchableOpacity>
++          </View>
++        </SafeAreaView>
++      </View>
++    );
++  }
++
++  return (
++    <View style={styles.container}>
++      <SafeAreaView style={styles.safeArea}>
++        <ScrollView
++          contentContainerStyle={styles.scrollContent}
++          showsVerticalScrollIndicator={false}
++        >
++          {/* Back Button */}
++          <TouchableOpacity
++            style={styles.backButton}
++            onPress={() => router.back()}
++            data-testid="subscription-back-btn"
++          >
++            <Ionicons name="arrow-back" size={24} color="#fff" />
++          </TouchableOpacity>
++
++          {/* Header */}
++          <View style={styles.header}>
++            <View style={styles.iconContainer}>
++              <Ionicons name="rocket" size={32} color="#1a1a1a" />
++            </View>
++            <Text style={styles.title}>Upgrade to Premium</Text>
++            <Text style={styles.subtitle}>
++              Unlock all features and drive with confidence
++            </Text>
++          </View>
++
++          {/* Trial Banner */}
++          {canStartTrial && (
++            <View style={styles.trialBanner}>
++              <View style={styles.trialBannerContent}>
++                <Ionicons name="gift" size={24} color="#22c55e" />
++                <View style={styles.trialBannerText}>
++                  <Text style={styles.trialBannerTitle}>7-Day Free Trial</Text>
++                  <Text style={styles.trialBannerSubtitle}>
++                    Try all premium features free. No credit card required.
++                  </Text>
++                </View>
++              </View>
++              <TouchableOpacity
++                style={[styles.trialButton, trialLoading && styles.buttonDisabled]}
++                onPress={handleStartTrial}
++                disabled={trialLoading}
++                data-testid="start-trial-btn"
++              >
++                {trialLoading ? (
++                  <ActivityIndicator color="#fff" size="small" />
++                ) : (
++                  <Text style={styles.trialButtonText}>Start Free Trial</Text>
++                )}
++              </TouchableOpacity>
++            </View>
++          )}
++
++          {/* Active Trial Banner */}
++          {isTrialing && user?.trial_days_remaining !== undefined && (
++            <View style={styles.activeTrialBanner}>
++              <Ionicons name="time" size={24} color="#eab308" />
++              <View style={styles.activeTrialText}>
++                <Text style={styles.activeTrialTitle}>Trial Active</Text>
++                <Text style={styles.activeTrialSubtitle}>
++                  {user.trial_days_remaining} days remaining
++                </Text>
++              </View>
++            </View>
++          )}
++
++          {/* Plans */}
++          <Text style={styles.sectionTitle}>Choose Your Plan</Text>
++          
++          <View style={styles.plansContainer}>
++            {plans.map((plan) => (
++              <TouchableOpacity
++                key={plan.id}
++                style={[
++                  styles.planCard,
++                  selectedPlan === plan.id && styles.planCardSelected
++                ]}
++                onPress={() => setSelectedPlan(plan.id)}
++                data-testid={`plan-${plan.id}`}
++              >
++                {plan.savings && (
++                  <View style={styles.savingsBadge}>
++                    <Text style={styles.savingsText}>{plan.savings}</Text>
++                  </View>
++                )}
++                
++                <View style={styles.planHeader}>
++                  <Text style={styles.planName}>{plan.name}</Text>
++                  <View style={styles.planPriceContainer}>
++                    <Text style={styles.planPrice}>${plan.price}</Text>
++                    <Text style={styles.planInterval}>/{plan.interval}</Text>
++                  </View>
++                </View>
++
++                <View style={styles.planFeatures}>
++                  {plan.features.map((feature, index) => (
++                    <View key={index} style={styles.featureRow}>
++                      <Ionicons name="checkmark-circle" size={18} color="#22c55e" />
++                      <Text style={styles.featureText}>{feature}</Text>
++                    </View>
++                  ))}
++                </View>
++
++                {selectedPlan === plan.id && (
++                  <View style={styles.selectedIndicator}>
++                    <Ionicons name="checkmark-circle" size={24} color="#eab308" />
++                  </View>
++                )}
++              </TouchableOpacity>
++            ))}
++          </View>
++
++          {/* Error Message */}
++          {error && (
++            <View style={styles.errorContainer}>
++              <Ionicons name="alert-circle" size={18} color="#ef4444" />
++              <Text style={styles.errorText}>{error}</Text>
++            </View>
++          )}
++
++          {/* Checkout Button */}
++          <TouchableOpacity
++            style={[styles.checkoutButton, checkoutLoading && styles.buttonDisabled]}
++            onPress={() => handleCheckout(selectedPlan)}
++            disabled={checkoutLoading}
++            data-testid="checkout-btn"
++          >
++            {checkoutLoading ? (
++              <ActivityIndicator color="#1a1a1a" size="small" />
++            ) : (
++              <>
++                <Ionicons name="card" size={22} color="#1a1a1a" />
++                <Text style={styles.checkoutButtonText}>
++                  Subscribe - ${plans.find(p => p.id === selectedPlan)?.price || '0'}/{selectedPlan === 'yearly' ? 'year' : 'month'}
++                </Text>
++              </>
++            )}
++          </TouchableOpacity>
++
++          {/* Skip for now */}
++          <TouchableOpacity
++            style={styles.skipButton}
++            onPress={() => router.replace('/')}
++            data-testid="skip-subscription-btn"
++          >
++            <Text style={styles.skipButtonText}>Continue with free version</Text>
++          </TouchableOpacity>
++
++          {/* Terms */}
++          <Text style={styles.termsText}>
++            By subscribing, you agree to our Terms of Service and Privacy Policy.
++            Subscriptions auto-renew unless cancelled.
++          </Text>
++        </ScrollView>
++      </SafeAreaView>
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  container: {
++    flex: 1,
++    backgroundColor: '#0f0f0f',
++  },
++  loadingContainer: {
++    flex: 1,
++    backgroundColor: '#0f0f0f',
++    justifyContent: 'center',
++    alignItems: 'center',
++  },
++  safeArea: {
++    flex: 1,
++  },
++  scrollContent: {
++    padding: 20,
++    paddingTop: 12,
++  },
++  backButton: {
++    width: 44,
++    height: 44,
++    borderRadius: 12,
++    backgroundColor: '#27272a',
++    justifyContent: 'center',
++    alignItems: 'center',
++    marginBottom: 24,
++  },
++  header: {
++    alignItems: 'center',
++    marginBottom: 24,
++  },
++  iconContainer: {
++    width: 72,
++    height: 72,
++    borderRadius: 20,
++    backgroundColor: '#eab308',
++    justifyContent: 'center',
++    alignItems: 'center',
++    marginBottom: 20,
++  },
++  title: {
++    fontSize: 28,
++    fontWeight: '700',
++    color: '#ffffff',
++    marginBottom: 8,
++  },
++  subtitle: {
++    fontSize: 15,
++    color: '#a1a1aa',
++    textAlign: 'center',
++  },
++  trialBanner: {
++    backgroundColor: '#14532d',
++    borderRadius: 12,
++    padding: 16,
++    marginBottom: 24,
++  },
++  trialBannerContent: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    gap: 12,
++    marginBottom: 12,
++  },
++  trialBannerText: {
++    flex: 1,
++  },
++  trialBannerTitle: {
++    color: '#22c55e',
++    fontSize: 16,
++    fontWeight: '700',
++  },
++  trialBannerSubtitle: {
++    color: '#86efac',
++    fontSize: 13,
++    marginTop: 2,
++  },
++  trialButton: {
++    backgroundColor: '#22c55e',
++    borderRadius: 8,
++    paddingVertical: 12,
++    alignItems: 'center',
++  },
++  trialButtonText: {
++    color: '#fff',
++    fontSize: 14,
++    fontWeight: '700',
++  },
++  activeTrialBanner: {
++    backgroundColor: '#422006',
++    borderRadius: 12,
++    padding: 16,
++    marginBottom: 24,
++    flexDirection: 'row',
++    alignItems: 'center',
++    gap: 12,
++  },
++  activeTrialText: {
++    flex: 1,
++  },
++  activeTrialTitle: {
++    color: '#eab308',
++    fontSize: 16,
++    fontWeight: '700',
++  },
++  activeTrialSubtitle: {
++    color: '#fcd34d',
++    fontSize: 13,
++    marginTop: 2,
++  },
++  sectionTitle: {
++    color: '#a1a1aa',
++    fontSize: 13,
++    fontWeight: '600',
++    letterSpacing: 0.5,
++    marginBottom: 12,
++    textTransform: 'uppercase',
++  },
++  plansContainer: {
++    gap: 12,
++    marginBottom: 20,
++  },
++  planCard: {
++    backgroundColor: '#27272a',
++    borderRadius: 12,
++    padding: 16,
++    borderWidth: 2,
++    borderColor: 'transparent',
++    position: 'relative',
++  },
++  planCardSelected: {
++    borderColor: '#eab308',
++    backgroundColor: '#1c1917',
++  },
++  savingsBadge: {
++    position: 'absolute',
++    top: -10,
++    right: 12,
++    backgroundColor: '#22c55e',
++    paddingHorizontal: 10,
++    paddingVertical: 4,
++    borderRadius: 12,
++  },
++  savingsText: {
++    color: '#fff',
++    fontSize: 11,
++    fontWeight: '700',
++  },
++  planHeader: {
++    flexDirection: 'row',
++    justifyContent: 'space-between',
++    alignItems: 'center',
++    marginBottom: 16,
++  },
++  planName: {
++    color: '#fff',
++    fontSize: 18,
++    fontWeight: '700',
++  },
++  planPriceContainer: {
++    flexDirection: 'row',
++    alignItems: 'baseline',
++  },
++  planPrice: {
++    color: '#eab308',
++    fontSize: 24,
++    fontWeight: '700',
++  },
++  planInterval: {
++    color: '#6b7280',
++    fontSize: 14,
++  },
++  planFeatures: {
++    gap: 8,
++  },
++  featureRow: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    gap: 8,
++  },
++  featureText: {
++    color: '#d4d4d8',
++    fontSize: 13,
++  },
++  selectedIndicator: {
++    position: 'absolute',
++    top: 12,
++    left: 12,
++  },
++  errorContainer: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    backgroundColor: 'rgba(239, 68, 68, 0.15)',
++    padding: 12,
++    borderRadius: 8,
++    marginBottom: 16,
++    gap: 8,
++  },
++  errorText: {
++    color: '#ef4444',
++    fontSize: 13,
++    flex: 1,
++  },
++  checkoutButton: {
++    backgroundColor: '#eab308',
++    borderRadius: 10,
++    paddingVertical: 16,
++    flexDirection: 'row',
++    alignItems: 'center',
++    justifyContent: 'center',
++    gap: 10,
++    marginBottom: 12,
++  },
++  buttonDisabled: {
++    opacity: 0.7,
++  },
++  checkoutButtonText: {
++    color: '#1a1a1a',
++    fontSize: 16,
++    fontWeight: '700',
++  },
++  skipButton: {
++    paddingVertical: 12,
++    alignItems: 'center',
++    marginBottom: 20,
++  },
++  skipButtonText: {
++    color: '#6b7280',
++    fontSize: 14,
++  },
++  termsText: {
++    color: '#52525b',
++    fontSize: 11,
++    textAlign: 'center',
++    lineHeight: 16,
++  },
++  // Premium state styles
++  premiumContent: {
++    flex: 1,
++    padding: 24,
++    alignItems: 'center',
++  },
++  premiumIconContainer: {
++    width: 96,
++    height: 96,
++    borderRadius: 24,
++    backgroundColor: '#422006',
++    justifyContent: 'center',
++    alignItems: 'center',
++    marginBottom: 24,
++    marginTop: 40,
++  },
++  premiumTitle: {
++    fontSize: 28,
++    fontWeight: '700',
++    color: '#ffffff',
++    marginBottom: 8,
++  },
++  premiumSubtitle: {
++    fontSize: 15,
++    color: '#a1a1aa',
++    textAlign: 'center',
++    marginBottom: 32,
++  },
++  premiumInfoBox: {
++    backgroundColor: '#27272a',
++    borderRadius: 12,
++    padding: 16,
++    width: '100%',
++    gap: 12,
++    marginBottom: 24,
++  },
++  premiumInfoRow: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    gap: 10,
++  },
++  premiumInfoText: {
++    color: '#e4e4e7',
++    fontSize: 14,
++  },
++  manageButton: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    gap: 8,
++    backgroundColor: '#27272a',
++    borderRadius: 10,
++    paddingVertical: 14,
++    paddingHorizontal: 24,
++    borderWidth: 1,
++    borderColor: '#eab308',
++    width: '100%',
++    justifyContent: 'center',
++    marginBottom: 12,
++  },
++  manageButtonText: {
++    color: '#eab308',
++    fontSize: 14,
++    fontWeight: '600',
++  },
++  continueButton: {
++    paddingVertical: 12,
++  },
++  continueButtonText: {
++    color: '#6b7280',
++    fontSize: 14,
++  },
++});
+
+diff --git a/frontend/app/account.tsx b/frontend/app/account.tsx
+new file mode 100644
+--- /dev/null
++++ b/frontend/app/account.tsx
+@@ -0,0 +1,637 @@
++import React, { useState } from 'react';
++import {
++  View,
++  Text,
++  StyleSheet,
++  TouchableOpacity,
++  ActivityIndicator,
++  ScrollView,
++  Alert,
++  Linking,
++  Platform,
++} from 'react-native';
++import { SafeAreaView } from 'react-native-safe-area-context';
++import { Ionicons } from '@expo/vector-icons';
++import { router } from 'expo-router';
++import { useAuth } from '../contexts/AuthContext';
++import axios from 'axios';
++
++const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
++
++export default function AccountScreen() {
++  const { user, accessToken, logout, refreshUser } = useAuth();
++  const [loading, setLoading] = useState(false);
++  const [error, setError] = useState('');
++
++  const handleManageSubscription = async () => {
++    if (!user?.subscription_provider || user.subscription_provider !== 'stripe') {
++      Alert.alert(
++        'Subscription Management',
++        'Please manage your subscription through the platform where you subscribed (App Store or Google Play).'
++      );
++      return;
++    }
++
++    setLoading(true);
++    setError('');
++
++    try {
++      const response = await axios.get(
++        `${API_BASE}/api/subscription/portal`,
++        { headers: { Authorization: `Bearer ${accessToken}` } }
++      );
++
++      if (response.data.portal_url) {
++        if (Platform.OS === 'web') {
++          window.location.href = response.data.portal_url;
++        } else {
++          await Linking.openURL(response.data.portal_url);
++        }
++      } else {
++        Alert.alert(
++          'Coming Soon',
++          'The customer portal is being configured. Please contact support for subscription changes.'
++        );
++      }
++    } catch (err: any) {
++      setError(err.response?.data?.detail || 'Failed to open subscription portal');
++    } finally {
++      setLoading(false);
++    }
++  };
++
++  const handleLogout = () => {
++    Alert.alert(
++      'Sign Out',
++      'Are you sure you want to sign out?',
++      [
++        { text: 'Cancel', style: 'cancel' },
++        { 
++          text: 'Sign Out', 
++          style: 'destructive',
++          onPress: async () => {
++            await logout();
++            router.replace('/');
++          }
++        }
++      ]
++    );
++  };
++
++  const getSubscriptionBadge = () => {
++    if (!user) return null;
++    
++    if (user.is_premium) {
++      if (user.subscription_status === 'trialing') {
++        return { label: 'TRIAL', color: '#eab308', bgColor: '#422006' };
++      }
++      return { label: 'PREMIUM', color: '#22c55e', bgColor: '#14532d' };
++    }
++    return { label: 'FREE', color: '#6b7280', bgColor: '#27272a' };
++  };
++
++  const badge = getSubscriptionBadge();
++
++  const formatDate = (dateString?: string) => {
++    if (!dateString) return 'N/A';
++    return new Date(dateString).toLocaleDateString('en-US', {
++      year: 'numeric',
++      month: 'long',
++      day: 'numeric'
++    });
++  };
++
++  if (!user) {
++    return (
++      <View style={styles.container}>
++        <SafeAreaView style={styles.safeArea}>
++          <View style={styles.notLoggedIn}>
++            <TouchableOpacity
++              style={styles.backButton}
++              onPress={() => router.back()}
++            >
++              <Ionicons name="arrow-back" size={24} color="#fff" />
++            </TouchableOpacity>
++
++            <View style={styles.notLoggedInContent}>
++              <Ionicons name="person-circle-outline" size={80} color="#52525b" />
++              <Text style={styles.notLoggedInTitle}>Not Signed In</Text>
++              <Text style={styles.notLoggedInSubtitle}>
++                Sign in to manage your account and subscription
++              </Text>
++
++              <TouchableOpacity
++                style={styles.signInButton}
++                onPress={() => router.push('/login')}
++                data-testid="account-login-btn"
++              >
++                <Ionicons name="log-in-outline" size={22} color="#1a1a1a" />
++                <Text style={styles.signInButtonText}>SIGN IN</Text>
++              </TouchableOpacity>
++
++              <TouchableOpacity
++                style={styles.signUpButton}
++                onPress={() => router.push('/signup')}
++                data-testid="account-signup-btn"
++              >
++                <Text style={styles.signUpButtonText}>Create Account</Text>
++              </TouchableOpacity>
++            </View>
++          </View>
++        </SafeAreaView>
++      </View>
++    );
++  }
++
++  return (
++    <View style={styles.container}>
++      <SafeAreaView style={styles.safeArea}>
++        <ScrollView
++          contentContainerStyle={styles.scrollContent}
++          showsVerticalScrollIndicator={false}
++        >
++          {/* Back Button */}
++          <TouchableOpacity
++            style={styles.backButton}
++            onPress={() => router.back()}
++            data-testid="account-back-btn"
++          >
++            <Ionicons name="arrow-back" size={24} color="#fff" />
++          </TouchableOpacity>
++
++          {/* Header */}
++          <View style={styles.header}>
++            <View style={styles.avatarContainer}>
++              <Ionicons name="person" size={40} color="#eab308" />
++            </View>
++            <Text style={styles.userName}>{user.name || 'Routecast User'}</Text>
++            <Text style={styles.userEmail}>{user.email}</Text>
++            {badge && (
++              <View style={[styles.badge, { backgroundColor: badge.bgColor }]}>
++                <Text style={[styles.badgeText, { color: badge.color }]}>{badge.label}</Text>
++              </View>
++            )}
++          </View>
++
++          {/* Subscription Section */}
++          <View style={styles.section}>
++            <Text style={styles.sectionTitle}>SUBSCRIPTION</Text>
++            <View style={styles.card}>
++              <View style={styles.cardRow}>
++                <View style={styles.cardRowLeft}>
++                  <Ionicons name="card" size={22} color="#a1a1aa" />
++                  <Text style={styles.cardRowLabel}>Plan</Text>
++                </View>
++                <Text style={styles.cardRowValue}>
++                  {user.subscription_plan.charAt(0).toUpperCase() + user.subscription_plan.slice(1)}
++                </Text>
++              </View>
++
++              <View style={styles.cardDivider} />
++
++              <View style={styles.cardRow}>
++                <View style={styles.cardRowLeft}>
++                  <Ionicons name="pulse" size={22} color="#a1a1aa" />
++                  <Text style={styles.cardRowLabel}>Status</Text>
++                </View>
++                <View style={styles.statusContainer}>
++                  <View style={[
++                    styles.statusDot,
++                    { backgroundColor: user.is_premium ? '#22c55e' : '#6b7280' }
++                  ]} />
++                  <Text style={[
++                    styles.cardRowValue,
++                    { color: user.is_premium ? '#22c55e' : '#a1a1aa' }
++                  ]}>
++                    {user.subscription_status.charAt(0).toUpperCase() + user.subscription_status.slice(1)}
++                  </Text>
++                </View>
++              </View>
++
++              {user.subscription_expiration && (
++                <>
++                  <View style={styles.cardDivider} />
++                  <View style={styles.cardRow}>
++                    <View style={styles.cardRowLeft}>
++                      <Ionicons name="calendar" size={22} color="#a1a1aa" />
++                      <Text style={styles.cardRowLabel}>
++                        {user.subscription_status === 'trialing' ? 'Trial Ends' : 'Renews'}
++                      </Text>
++                    </View>
++                    <Text style={styles.cardRowValue}>
++                      {formatDate(user.subscription_expiration)}
++                    </Text>
++                  </View>
++                </>
++              )}
++
++              {user.trial_days_remaining !== undefined && user.trial_days_remaining !== null && (
++                <>
++                  <View style={styles.cardDivider} />
++                  <View style={styles.trialRemaining}>
++                    <Ionicons name="time" size={18} color="#eab308" />
++                    <Text style={styles.trialRemainingText}>
++                      {user.trial_days_remaining} days remaining in trial
++                    </Text>
++                  </View>
++                </>
++              )}
++            </View>
++
++            {/* Subscription Actions */}
++            {!user.is_premium && (
++              <TouchableOpacity
++                style={styles.upgradeButton}
++                onPress={() => router.push('/subscription')}
++                data-testid="upgrade-btn"
++              >
++                <Ionicons name="rocket" size={20} color="#1a1a1a" />
++                <Text style={styles.upgradeButtonText}>Upgrade to Premium</Text>
++              </TouchableOpacity>
++            )}
++
++            {user.is_premium && user.subscription_provider === 'stripe' && (
++              <TouchableOpacity
++                style={[styles.manageButton, loading && styles.buttonDisabled]}
++                onPress={handleManageSubscription}
++                disabled={loading}
++                data-testid="manage-subscription-btn"
++              >
++                {loading ? (
++                  <ActivityIndicator color="#eab308" size="small" />
++                ) : (
++                  <>
++                    <Ionicons name="settings-outline" size={20} color="#eab308" />
++                    <Text style={styles.manageButtonText}>Manage Subscription</Text>
++                  </>
++                )}
++              </TouchableOpacity>
++            )}
++          </View>
++
++          {/* Account Section */}
++          <View style={styles.section}>
++            <Text style={styles.sectionTitle}>ACCOUNT</Text>
++            <View style={styles.card}>
++              <TouchableOpacity style={styles.menuItem}>
++                <View style={styles.menuItemLeft}>
++                  <Ionicons name="mail" size={22} color="#a1a1aa" />
++                  <Text style={styles.menuItemText}>Email</Text>
++                </View>
++                <View style={styles.menuItemRight}>
++                  {user.email_verified ? (
++                    <View style={styles.verifiedBadge}>
++                      <Ionicons name="checkmark-circle" size={16} color="#22c55e" />
++                      <Text style={styles.verifiedText}>Verified</Text>
++                    </View>
++                  ) : (
++                    <TouchableOpacity
++                      style={styles.verifyButton}
++                      onPress={() => router.push('/verify-email')}
++                    >
++                      <Text style={styles.verifyButtonText}>Verify</Text>
++                    </TouchableOpacity>
++                  )}
++                </View>
++              </TouchableOpacity>
++
++              <View style={styles.cardDivider} />
++
++              <TouchableOpacity style={styles.menuItem}>
++                <View style={styles.menuItemLeft}>
++                  <Ionicons name="calendar-outline" size={22} color="#a1a1aa" />
++                  <Text style={styles.menuItemText}>Member Since</Text>
++                </View>
++                <Text style={styles.menuItemValue}>
++                  {formatDate(user.created_at)}
++                </Text>
++              </TouchableOpacity>
++            </View>
++          </View>
++
++          {/* Features Section */}
++          <View style={styles.section}>
++            <Text style={styles.sectionTitle}>YOUR FEATURES</Text>
++            <View style={styles.card}>
++              {user.entitlements.map((entitlement, index) => (
++                <React.Fragment key={entitlement}>
++                  {index > 0 && <View style={styles.cardDivider} />}
++                  <View style={styles.entitlementRow}>
++                    <Ionicons name="checkmark-circle" size={20} color="#22c55e" />
++                    <Text style={styles.entitlementText}>
++                      {entitlement.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
++                    </Text>
++                  </View>
++                </React.Fragment>
++              ))}
++            </View>
++          </View>
++
++          {/* Error Message */}
++          {error && (
++            <View style={styles.errorContainer}>
++              <Ionicons name="alert-circle" size={18} color="#ef4444" />
++              <Text style={styles.errorText}>{error}</Text>
++            </View>
++          )}
++
++          {/* Sign Out Button */}
++          <TouchableOpacity
++            style={styles.logoutButton}
++            onPress={handleLogout}
++            data-testid="logout-btn"
++          >
++            <Ionicons name="log-out-outline" size={22} color="#ef4444" />
++            <Text style={styles.logoutButtonText}>Sign Out</Text>
++          </TouchableOpacity>
++        </ScrollView>
++      </SafeAreaView>
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  container: {
++    flex: 1,
++    backgroundColor: '#0f0f0f',
++  },
++  safeArea: {
++    flex: 1,
++  },
++  scrollContent: {
++    padding: 20,
++    paddingTop: 12,
++  },
++  backButton: {
++    width: 44,
++    height: 44,
++    borderRadius: 12,
++    backgroundColor: '#27272a',
++    justifyContent: 'center',
++    alignItems: 'center',
++    marginBottom: 24,
++  },
++  header: {
++    alignItems: 'center',
++    marginBottom: 32,
++  },
++  avatarContainer: {
++    width: 80,
++    height: 80,
++    borderRadius: 40,
++    backgroundColor: '#27272a',
++    justifyContent: 'center',
++    alignItems: 'center',
++    marginBottom: 16,
++  },
++  userName: {
++    fontSize: 24,
++    fontWeight: '700',
++    color: '#ffffff',
++    marginBottom: 4,
++  },
++  userEmail: {
++    fontSize: 14,
++    color: '#a1a1aa',
++    marginBottom: 12,
++  },
++  badge: {
++    paddingHorizontal: 12,
++    paddingVertical: 6,
++    borderRadius: 16,
++  },
++  badgeText: {
++    fontSize: 11,
++    fontWeight: '700',
++    letterSpacing: 0.5,
++  },
++  section: {
++    marginBottom: 24,
++  },
++  sectionTitle: {
++    fontSize: 11,
++    fontWeight: '600',
++    color: '#6b7280',
++    letterSpacing: 1,
++    marginBottom: 12,
++  },
++  card: {
++    backgroundColor: '#27272a',
++    borderRadius: 12,
++    padding: 16,
++  },
++  cardRow: {
++    flexDirection: 'row',
++    justifyContent: 'space-between',
++    alignItems: 'center',
++    paddingVertical: 4,
++  },
++  cardRowLeft: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    gap: 12,
++  },
++  cardRowLabel: {
++    color: '#a1a1aa',
++    fontSize: 14,
++  },
++  cardRowValue: {
++    color: '#ffffff',
++    fontSize: 14,
++    fontWeight: '500',
++  },
++  cardDivider: {
++    height: 1,
++    backgroundColor: '#3f3f46',
++    marginVertical: 12,
++  },
++  statusContainer: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    gap: 6,
++  },
++  statusDot: {
++    width: 8,
++    height: 8,
++    borderRadius: 4,
++  },
++  trialRemaining: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    gap: 8,
++    backgroundColor: '#422006',
++    padding: 10,
++    borderRadius: 8,
++    marginTop: 4,
++  },
++  trialRemainingText: {
++    color: '#eab308',
++    fontSize: 13,
++    fontWeight: '500',
++  },
++  upgradeButton: {
++    backgroundColor: '#eab308',
++    borderRadius: 10,
++    paddingVertical: 14,
++    flexDirection: 'row',
++    alignItems: 'center',
++    justifyContent: 'center',
++    gap: 8,
++    marginTop: 12,
++  },
++  upgradeButtonText: {
++    color: '#1a1a1a',
++    fontSize: 14,
++    fontWeight: '700',
++  },
++  manageButton: {
++    backgroundColor: '#27272a',
++    borderRadius: 10,
++    paddingVertical: 14,
++    flexDirection: 'row',
++    alignItems: 'center',
++    justifyContent: 'center',
++    gap: 8,
++    marginTop: 12,
++    borderWidth: 1,
++    borderColor: '#eab308',
++  },
++  buttonDisabled: {
++    opacity: 0.7,
++  },
++  manageButtonText: {
++    color: '#eab308',
++    fontSize: 14,
++    fontWeight: '600',
++  },
++  menuItem: {
++    flexDirection: 'row',
++    justifyContent: 'space-between',
++    alignItems: 'center',
++    paddingVertical: 4,
++  },
++  menuItemLeft: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    gap: 12,
++  },
++  menuItemText: {
++    color: '#a1a1aa',
++    fontSize: 14,
++  },
++  menuItemRight: {
++    flexDirection: 'row',
++    alignItems: 'center',
++  },
++  menuItemValue: {
++    color: '#ffffff',
++    fontSize: 14,
++  },
++  verifiedBadge: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    gap: 4,
++  },
++  verifiedText: {
++    color: '#22c55e',
++    fontSize: 13,
++  },
++  verifyButton: {
++    backgroundColor: '#eab308',
++    paddingHorizontal: 12,
++    paddingVertical: 6,
++    borderRadius: 6,
++  },
++  verifyButtonText: {
++    color: '#1a1a1a',
++    fontSize: 12,
++    fontWeight: '600',
++  },
++  entitlementRow: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    gap: 10,
++    paddingVertical: 4,
++  },
++  entitlementText: {
++    color: '#e4e4e7',
++    fontSize: 14,
++  },
++  errorContainer: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    backgroundColor: 'rgba(239, 68, 68, 0.15)',
++    padding: 12,
++    borderRadius: 8,
++    marginBottom: 16,
++    gap: 8,
++  },
++  errorText: {
++    color: '#ef4444',
++    fontSize: 13,
++    flex: 1,
++  },
++  logoutButton: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    justifyContent: 'center',
++    gap: 8,
++    paddingVertical: 16,
++    marginTop: 8,
++    marginBottom: 40,
++  },
++  logoutButtonText: {
++    color: '#ef4444',
++    fontSize: 15,
++    fontWeight: '600',
++  },
++  // Not logged in state
++  notLoggedIn: {
++    flex: 1,
++    padding: 20,
++    paddingTop: 12,
++  },
++  notLoggedInContent: {
++    flex: 1,
++    alignItems: 'center',
++    justifyContent: 'center',
++    paddingBottom: 100,
++  },
++  notLoggedInTitle: {
++    fontSize: 24,
++    fontWeight: '700',
++    color: '#ffffff',
++    marginTop: 20,
++    marginBottom: 8,
++  },
++  notLoggedInSubtitle: {
++    fontSize: 14,
++    color: '#a1a1aa',
++    textAlign: 'center',
++    marginBottom: 32,
++  },
++  signInButton: {
++    backgroundColor: '#eab308',
++    borderRadius: 10,
++    paddingVertical: 16,
++    paddingHorizontal: 48,
++    flexDirection: 'row',
++    alignItems: 'center',
++    justifyContent: 'center',
++    gap: 10,
++    marginBottom: 12,
++  },
++  signInButtonText: {
++    color: '#1a1a1a',
++    fontSize: 15,
++    fontWeight: '700',
++    letterSpacing: 0.5,
++  },
++  signUpButton: {
++    paddingVertical: 12,
++  },
++  signUpButtonText: {
++    color: '#a1a1aa',
++    fontSize: 14,
++  },
++});
+
