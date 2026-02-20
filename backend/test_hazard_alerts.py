@@ -43,23 +43,20 @@ def make_wp(distance: float, temp: int = 30, conditions: str = "Snow") -> Waypoi
 
 
 def test_span_computation_and_clamp():
-    waypoints = [make_wp(0), make_wp(10), make_wp(20)]
     alerts = generate_hazard_alerts(
-        waypoints,
+        [make_wp(0), make_wp(10), make_wp(20)],
         datetime.datetime.utcnow(),
-        total_route_miles=100,
-        total_route_minutes=120,
-        route_id="test-span",
+        100,
+        120,
+        "test-span",
     )
     assert alerts
-    a = alerts[0]
-    assert a.hazard_schema_version == 2
+    assert alerts[0].hazard_schema_version == 2
 
 
 def test_merge_adjacent_hazards():
-    waypoints = [make_wp(10, 45, "heavy rain"), make_wp(15, 45, "heavy rain")]
     alerts = generate_hazard_alerts(
-        waypoints,
+        [make_wp(10, 45, "heavy rain"), make_wp(15, 45, "heavy rain")],
         datetime.datetime.utcnow(),
         100,
         120,
@@ -115,12 +112,7 @@ async def test_mapbox_steps_return_real_road_names(monkeypatch):
             "distance": 16093.44,
             "legs": [{
                 "steps": [
-                    {
-                        "distance": 8046.72,
-                        "duration": 600,
-                        "name": "I-80 E",
-                        "maneuver": {"type": "depart"},
-                    }
+                    {"distance": 8046.72, "duration": 600, "name": "I-80 E"}
                 ]
             }]
         }],
@@ -139,8 +131,7 @@ async def test_mapbox_steps_return_real_road_names(monkeypatch):
     monkeypatch.setattr("server.MAPBOX_ACCESS_TOKEN", "x")
     monkeypatch.setattr("server.httpx.AsyncClient", FakeClient)
 
-    waypoints = [make_wp(0), make_wp(5)]
-    steps = await get_turn_by_turn_directions((0,0),(1,1), waypoints)
+    steps = await get_turn_by_turn_directions((0, 0), (1, 1), [make_wp(0), make_wp(5)])
     assert steps is not None
 
 
@@ -148,7 +139,7 @@ async def test_mapbox_steps_return_real_road_names(monkeypatch):
 async def test_route_weather_handles_missing_waypoints(monkeypatch):
 
     async def fake_route(*a, **k):
-        return {"geometry": None, "distance": 160934.4, "legs":[{"distance":160934.4}]}
+        return {"geometry": None, "distance": 160934.4, "legs": [{"distance": 160934.4}]}
 
     async def fake_weather(*a, **k):
         return WeatherData(
@@ -165,12 +156,21 @@ async def test_route_weather_handles_missing_waypoints(monkeypatch):
             hourly_forecast=[],
         )
 
+    async def fake_alerts(*a, **k):
+        return []
+
+    async def fake_turn_by_turn(*a, **k):
+        return []
+
+    async def fake_rest(*a, **k):
+        return []
+
     monkeypatch.setattr("server.get_mapbox_route", fake_route)
     monkeypatch.setattr("server.get_noaa_weather", fake_weather)
-    monkeypatch.setattr("server.get_noaa_alerts", lambda *a, **k: [])
+    monkeypatch.setattr("server.get_noaa_alerts", fake_alerts)
     monkeypatch.setattr("server.reverse_geocode", lambda *a, **k: None)
-    monkeypatch.setattr("server.get_turn_by_turn_directions", lambda *a, **k: [])
-    monkeypatch.setattr("server.find_rest_stops", lambda *a, **k: [])
+    monkeypatch.setattr("server.get_turn_by_turn_directions", fake_turn_by_turn)
+    monkeypatch.setattr("server.find_rest_stops", fake_rest)
 
     req = RouteRequest(
         origin="0,0",
