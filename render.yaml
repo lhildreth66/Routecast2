@@ -72,4 +72,4 @@ services:
         destination: /index.html
     envVars:
       - key: EXPO_PUBLIC_BACKEND_URL
-        value: https://api.routecastweather.com
+        value: https://routecastweather.com
