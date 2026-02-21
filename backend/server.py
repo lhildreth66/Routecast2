@@ -163,11 +163,49 @@ async def cached_route(origin_coords: Dict, dest_coords: Dict, stop_coords: List
 
 
 def cache_route_context(route_id: str, context: Dict[str, Any], ttl: int = CACHE_TTL_SECONDS):
+    """Store route context in memory and schedule MongoDB write for cross-instance persistence."""
     _cache_set(_route_context_cache, route_id, context, ttl)
+    if db is not None:
+        import asyncio
+        async def _store():
+            try:
+                expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl)
+                await db.route_contexts.replace_one(
+                    {"route_id": route_id},
+                    {"route_id": route_id, "context": context, "expires_at": expires_at},
+                    upsert=True,
+                )
+            except Exception as e:
+                logger.warning(f"[route_context] MongoDB store failed: {e}")
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.ensure_future(_store())
+        except Exception:
+            pass
 
 
 def get_route_context(route_id: str) -> Optional[Dict[str, Any]]:
     return _cache_get(_route_context_cache, route_id)
+
+
+async def get_route_context_async(route_id: str) -> Optional[Dict[str, Any]]:
+    """Check in-memory first, then fall back to MongoDB for cross-instance reliability."""
+    result = _cache_get(_route_context_cache, route_id)
+    if result:
+        return result
+    if db is not None:
+        try:
+            doc = await db.route_contexts.find_one(
+                {"route_id": route_id, "expires_at": {"$gt": datetime.now(timezone.utc)}}
+            )
+            if doc:
+                context = doc.get("context")
+                _cache_set(_route_context_cache, route_id, context)
+                return context
+        except Exception as e:
+            logger.warning(f"[route_context] MongoDB fetch failed: {e}")
+    return None
 
 # We'll connect on app startup instead of during module import
 async def connect_to_mongo():
@@ -277,14 +315,22 @@ NOAA_HEADERS = {
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
-allow_origins=[
-    "https://routecastweather.com",
-    "https://www.routecastweather.com",
-    "https://app.routecastweather.com",
-],
+    allow_origins=[
+        "https://routecastweather.com",
+        "https://www.routecastweather.com",
+        "https://app.routecastweather.com",
+        "http://localhost:8081",
+        "http://localhost:19006",
+        "http://localhost:3000",
+        "http://127.0.0.1:8081",
+        "http://127.0.0.1:19006",
+        "http://127.0.0.1:3000",
+    ],
+    allow_origin_regex=r"^https://.*\.app\.github\.dev$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["*"],
 )
 
 # Create routers
@@ -3714,7 +3760,7 @@ async def get_route_weather_alerts(route_id: str):
     logger.info("route_alerts_request", extra={"route_id": route_id})
     debug_enabled = os.environ.get("ROUTE_ALERTS_DEBUG") in {"1", "true", "True", "on", "yes"}
     debug_payload: Optional[Dict[str, Any]] = {} if debug_enabled else None
-    ctx = get_route_context(route_id)
+    ctx = await get_route_context_async(route_id)
     if not ctx:
         logger.warning("route_alerts_context_missing", extra={"route_id": route_id})
         return HazardAlertsResponse(
@@ -8245,7 +8291,7 @@ async def get_truck_alerts(request: TruckAlertRequest):
         raise HTTPException(status_code=500, detail=f"Error generating truck alerts: {str(e)}")
 
 
-# Add CORS middleware first, before including router
+# Local dev origins (kept for reference)
 local_origins = [
     "http://localhost:8081",
     "http://localhost:19006",
@@ -8254,6 +8300,7 @@ local_origins = [
     "http://127.0.0.1:19006",
     "http://127.0.0.1:3000",
 ]
+
 @app.middleware("http")
 async def log_origin(request, call_next):
     origin = request.headers.get("origin")
@@ -8270,6 +8317,12 @@ async def startup_db_client():
         mongo_ok = await connect_to_mongo()
         if mongo_ok:
             logger.info("[startup] MongoDB connected db=%s", db_name)
+            # Ensure TTL index on route_contexts so old entries auto-expire
+            try:
+                await db.route_contexts.create_index("expires_at", expireAfterSeconds=0)
+                logger.info("[startup] route_contexts TTL index ensured")
+            except Exception as e:
+                logger.warning("[startup] route_contexts index failed: %s", e)
     except Exception as exc:
         logger.warning("[startup] MongoDB init failed: %s", exc)
 
