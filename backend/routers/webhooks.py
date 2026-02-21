@@ -413,12 +413,11 @@ async def handle_invoice_failed(db, data: dict, now: datetime):
 @router.post("/stripe")
 async def stripe_webhook(
     request: Request,
-    background_tasks: BackgroundTasks,
     stripe_signature: Optional[str] = Header(None, alias="Stripe-Signature")
 ):
     """
     Handle Stripe webhook events.
-    Returns 200 immediately, processes event in background.
+    Processes synchronously to ensure DB updates complete before response.
     """
     db = request.app.state.db
     body = await request.body()
@@ -443,8 +442,8 @@ async def stripe_webhook(
         
         logger.info(f"Stripe webhook: {event_type}")
         
-        # Process in background to return 200 quickly
-        background_tasks.add_task(process_stripe_event, db, event_type, data)
+        # Process synchronously to ensure DB updates complete
+        await process_stripe_event(db, event_type, data)
         
         return {"received": True}
         
