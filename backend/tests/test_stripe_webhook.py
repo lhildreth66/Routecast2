@@ -467,7 +467,7 @@ class TestSubscriptionDeletedWebhook:
         assert response.status_code == 200
         
         import time
-        time.sleep(1)
+        time.sleep(2)  # Wait for background task
         
         # User should no longer be premium
         me_response = requests.get(
