@@ -133,6 +133,9 @@ export default function RootLayout() {
         <Stack.Screen name="weather-alerts" />
         <Stack.Screen name="user-guide" />
         <Stack.Screen name="notifications" />
+        <Stack.Screen name="subscription" />
+        <Stack.Screen name="subscription/success" />
+        <Stack.Screen name="subscription/canceled" />
       </Stack>
     </>
   );
