@@ -410,7 +410,7 @@ async def handle_invoice_failed(db, data: dict, now: datetime):
     })
 
 
-@router.post("/stripe")
+@router.post("/webhook")
 async def stripe_webhook(
     request: Request,
     stripe_signature: Optional[str] = Header(None, alias="Stripe-Signature")
