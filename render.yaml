@@ -34,7 +34,7 @@ services:
       - key: APP_URL
         value: https://app.routecastweather.com
       - key: API_URL
-        value: https://api.routecastweather.com
+        value: https://routecastweather.com
       - key: SENDGRID_API_KEY
         sync: false
       - key: SENDER_EMAIL
