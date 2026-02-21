@@ -37,6 +37,7 @@ export default function SubscriptionScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  // Use the current origin for Stripe redirect URLs; default to production when unavailable (native)
   const originUrl = useMemo(() => {
     if (typeof window !== 'undefined' && window?.location?.origin) {
       return window.location.origin;
