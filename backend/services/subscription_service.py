@@ -33,7 +33,7 @@ async def check_subscription_status(db: AsyncIOMotorDatabase, user_id: str) -> d
     """Check and update subscription status for a user"""
     user = await db.users.find_one({"user_id": user_id})
     if not user:
-        return {"status": "inactive", "is_premium": False}
+        return {"status": "inactive", "is_premium": False, "plan": "free"}
     
     now = datetime.now(timezone.utc)
     status = user.get("subscription_status", "inactive")
@@ -44,18 +44,26 @@ async def check_subscription_status(db: AsyncIOMotorDatabase, user_id: str) -> d
         # Make sure expiration is timezone-aware
         if expiration.tzinfo is None:
             expiration = expiration.replace(tzinfo=timezone.utc)
-        if expiration < now and status in ["active", "trialing"]:
+        if expiration < now and status in ["active", "trialing", "canceling"]:
             # Subscription has expired
             await db.users.update_one(
                 {"user_id": user_id},
                 {"$set": {
                     "subscription_status": "expired",
+                    "is_premium": False,
                     "updated_at": now
                 }}
             )
             status = "expired"
     
-    is_premium = status in ["active", "trialing"]
+    # Premium statuses: active, trialing, canceling (still has access until period ends), past_due (grace period)
+    is_premium = status in ["active", "trialing", "canceling", "past_due"]
+    
+    # Also check the stored is_premium field as a fallback
+    if user.get("is_premium") == True and not is_premium:
+        # Trust the stored value if it's True and expiration hasn't passed
+        if expiration and expiration > now:
+            is_premium = True
     
     return {
         "status": status,
