@@ -584,10 +584,10 @@ const styles = StyleSheet.create({
 
   // Hero Section
   heroSection: {
-    minHeight: 700,
+    minHeight: 600,
   },
   heroGradient: {
-    paddingTop: 100,
+    paddingTop: 40,
     paddingBottom: 60,
     paddingHorizontal: 24,
   },
