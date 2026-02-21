@@ -330,6 +330,7 @@ async def handle_subscription_deleted(db, data: dict, now: datetime):
         {"$set": {
             "is_premium": False,
             "plan": "free",
+            "subscription_plan": "free",  # Fixed: also set subscription_plan field
             "subscription_status": "expired",
             "subscription_expiration": now,
             "stripe_subscription_id": None,
