@@ -256,8 +256,8 @@ HAZARD_CONFIG = {
     "wind_extreme_mph": _env_float("HAZARD_WIND_EXTREME_MPH", 41),
     "ice_temp_f": _env_float("HAZARD_ICE_TEMP_F", 32),
     "slippery_temp_f": _env_float("HAZARD_SLIPPERY_TEMP_F", 36),
-    "merge_gap_miles": _env_float("HAZARD_MERGE_GAP_MILES", 5.0),
-    "default_span_miles": _env_float("HAZARD_DEFAULT_SPAN_MILES", 5.0),
+    "merge_gap_miles": _env_float("HAZARD_MERGE_GAP_MILES", 1.0),
+    "default_span_miles": _env_float("HAZARD_DEFAULT_SPAN_MILES", 2.0),
     "max_alerts": int(_env_float("MAX_ALERTS_PER_ROUTE", 10)),
     "log_detail": int(_env_float("HAZARD_LOG_DETAIL", 0)),
 }
@@ -3808,10 +3808,10 @@ async def get_route_weather_alerts(route_id: str):
 
     stats_before = _snapshot_noaa_cache_stats()
 
-    base_points = 10
-    extra_points = min(6, max(0, int(total_distance // 100)))
-    target_points = max(base_points + extra_points, 10)
-    target_points = min(target_points, 16)
+    base_points = 12
+    extra_points = min(18, max(0, int(total_distance // 50)))
+    target_points = max(base_points + extra_points, 12)
+    target_points = min(target_points, 30)
 
     def downsample_waypoints(data: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
         if len(data) <= limit:
