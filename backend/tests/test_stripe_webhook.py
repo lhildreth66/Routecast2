@@ -279,7 +279,7 @@ class TestStripeWebhookEndpoint:
         assert webhook_response.status_code == 200
         
         import time
-        time.sleep(0.5)
+        time.sleep(2)
         
         # User should still NOT be premium
         me_response = requests.get(f"{BASE_URL}/api/auth/me", headers={"Authorization": f"Bearer {token}"})
