@@ -6279,13 +6279,13 @@ async def _search_walmart_google_places(request: OvernightSearchRequest) -> List
     radius_meters = min(50000.0, float(request.radius_miles * 1609.34))
     url = "https://places.googleapis.com/v1/places:searchNearby"
     body = {
-        "locationRestriction": {
+        "textQuery": "Walmart",
+        "locationBias": {
             "circle": {
                 "center": {"latitude": request.latitude, "longitude": request.longitude},
                 "radius": float(radius_meters),
             }
         },
-        "includedTypes": ["parking", "truck_stop"],
         "maxResultCount": 20,
     }
     headers = {
@@ -6293,6 +6293,8 @@ async def _search_walmart_google_places(request: OvernightSearchRequest) -> List
         "X-Goog-Api-Key": GOOGLE_PLACES_API_KEY,
         "X-Goog-FieldMask": "places.displayName,places.formattedAddress,places.location,places.nationalPhoneNumber,places.websiteUri,places.regularOpeningHours",
     }
+    # Use Text Search endpoint for Walmart-specific results
+    url = "https://places.googleapis.com/v1/places:searchText"
 
     try:
         async with httpx.AsyncClient(timeout=12.0) as client:
@@ -6319,6 +6321,10 @@ async def _search_walmart_google_places(request: OvernightSearchRequest) -> List
 
         distance_miles = _haversine_meters(request.latitude, request.longitude, lat, lon) * 0.000621371
         display_name = (place.get("displayName") or {}).get("text") or "Walmart"
+
+        # Filter: only include results that are actually Walmart locations
+        if "walmart" not in display_name.lower():
+            continue
         address = place.get("formattedAddress")
         phone = place.get("nationalPhoneNumber")
         website = place.get("websiteUri")
