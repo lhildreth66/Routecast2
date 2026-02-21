@@ -1226,8 +1226,23 @@ export default function HomeScreen() {
               {/* App Description */}
               <View style={styles.descriptionBox}>
                 <Text style={styles.descriptionText}>
-                  Plan your road trip with confidence. See real-time weather conditions, alerts, and AI-powered recommendations for every mile of your drive.
+                  Weather-aware routing with live alerts and hazard intelligence for every mile. Start your 7-day free trial and drive with confidence.
                 </Text>
+              </View>
+
+              <View style={styles.ctaRow}>
+                <TouchableOpacity style={styles.primaryCta} onPress={() => router.push('/subscription')}>
+                  <Ionicons name="sparkles" size={20} color="#0f172a" />
+                  <View style={styles.ctaTextGroup}>
+                    <Text style={styles.primaryCtaText}>Start Free Trial</Text>
+                    <Text style={styles.primaryCtaSub}>7-day premium access, cancel anytime</Text>
+                  </View>
+                  <Ionicons name="arrow-forward" size={18} color="#0f172a" />
+                </TouchableOpacity>
+
+                <TouchableOpacity style={styles.secondaryCta} onPress={() => router.push('/user-guide')}>
+                  <Text style={styles.secondaryCtaText}>Learn More</Text>
+                </TouchableOpacity>
               </View>
 
               {/* Origin Input */}
@@ -1946,6 +1961,46 @@ const styles = StyleSheet.create({
     color: '#d4d4d8',
     fontSize: 12,
     lineHeight: 18,
+  },
+  ctaRow: {
+    gap: 10,
+    marginBottom: 16,
+  },
+  primaryCta: {
+    backgroundColor: '#22c55e',
+    borderRadius: 12,
+    padding: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    justifyContent: 'space-between',
+  },
+  ctaTextGroup: {
+    flex: 1,
+    gap: 2,
+  },
+  primaryCtaText: {
+    color: '#0f172a',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  primaryCtaSub: {
+    color: '#0f172a',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  secondaryCta: {
+    borderRadius: 12,
+    padding: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#3f3f46',
+    backgroundColor: '#18181b',
+  },
+  secondaryCtaText: {
+    color: '#e5e7eb',
+    fontSize: 14,
+    fontWeight: '700',
   },
   inputSection: {
     marginBottom: 12,
