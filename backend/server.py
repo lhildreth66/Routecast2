@@ -2,8 +2,6 @@ from fastapi import FastAPI, APIRouter, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
-from fastapi.middleware.cors import CORSMiddleware
-from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
@@ -8256,19 +8254,6 @@ local_origins = [
     "http://127.0.0.1:19006",
     "http://127.0.0.1:3000",
 ]
-
-cors_allow_origins = local_origins if DEBUG_MODE else []
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=cors_allow_origins,
-    allow_origin_regex=r"^https:\/\/.*\.app\.github\.dev$",
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["*"],
-)
-
 @app.middleware("http")
 async def log_origin(request, call_next):
     origin = request.headers.get("origin")
