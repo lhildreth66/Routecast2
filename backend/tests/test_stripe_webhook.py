@@ -351,7 +351,7 @@ class TestSubscriptionUpdatedWebhook:
         assert response.status_code == 200
         
         import time
-        time.sleep(1)
+        time.sleep(2)  # Wait for background task
         
         # User should still have premium (until period ends)
         me_response = requests.get(
