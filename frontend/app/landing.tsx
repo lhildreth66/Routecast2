@@ -18,9 +18,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const isWideScreen = SCREEN_WIDTH > 768;
 
-// Stripe payment links - replace with your actual links
-const STRIPE_MONTHLY_LINK = 'https://buy.stripe.com/test_monthly'; // TODO: Replace
-const STRIPE_ANNUAL_LINK = 'https://buy.stripe.com/test_annual'; // TODO: Replace
+// All pricing CTAs route to /signup - Stripe checkout handled post-signup
 
 export default function LandingPage() {
   const [activeFaq, setActiveFaq] = useState<number | null>(null);
