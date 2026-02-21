@@ -386,7 +386,7 @@ class TestSubscriptionUpdatedWebhook:
         assert response.status_code == 200
         
         import time
-        time.sleep(1)
+        time.sleep(2)  # Wait for background task
         
         me_response = requests.get(
             f"{BASE_URL}/api/auth/me",
