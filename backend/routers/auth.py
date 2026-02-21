@@ -309,7 +309,9 @@ async def get_me(request: Request, current_user: dict = Depends(get_current_user
     
     mock_user = MockUser(user, sub_status)
     entitlements = get_user_entitlements(mock_user)
-    is_premium = user_is_premium(mock_user)
+    
+    # Use is_premium from subscription status check (includes canceling, past_due grace periods)
+    is_premium = sub_status["is_premium"]
     
     return UserMeResponse(
         user_id=user["user_id"],
