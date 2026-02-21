@@ -1,304 +1,337 @@
-import React, { useState, useEffect } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
   ActivityIndicator,
-  ScrollView,
-  Linking,
-  Platform,
   Alert,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+  Linking,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
-import { useAuth } from '../contexts/AuthContext';
-import axios from 'axios';
+import { useRouter } from 'expo-router';
+import { buildUrl } from './apiConfig';
 
-const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+type PlanId = 'monthly' | 'yearly';
 
-interface Plan {
-  id: string;
-  name: string;
-  price: number;
-  currency: string;
-  interval: string;
-  trial_days: number;
-  features: string[];
-  savings?: string;
-}
-
-const PLAN_FEATURES = [
-  'Premium weather along your route',
-  'Severe weather alerts',
-  'Radar + forecast tools',
-  'Advanced trucking restrictions',
-];
-
-const FALLBACK_PLANS: Plan[] = [
-  {
-    id: 'monthly',
-    name: 'Monthly',
-    price: 9.99,
-    currency: 'USD',
-    interval: 'month',
-    trial_days: 7,
-    features: PLAN_FEATURES,
+const PLANS: Record<PlanId, { title: string; price: string; note: string; badge?: string }> = {
+  monthly: {
+    title: 'Monthly',
+    price: '$9.99/month',
+    note: 'Billed monthly',
   },
-  {
-    id: 'yearly',
-    name: 'Yearly',
-    price: 59.99,
-    currency: 'USD',
-    interval: 'year',
-    trial_days: 7,
-    savings: 'Save 50%',
-    features: PLAN_FEATURES,
+  yearly: {
+    title: 'Yearly',
+    price: '$59.99/year',
+    note: 'Save over 40% vs monthly',
+    badge: 'Best value',
   },
-];
-
-function normalizePlans(data: any): Plan[] | null {
-  if (Array.isArray(data)) return data as Plan[];
-  if (data && Array.isArray(data.plans)) return data.plans as Plan[];
-  return null;
-}
+};
 
 export default function SubscriptionScreen() {
-  const { user, accessToken, refreshUser, isAuthenticated } = useAuth();
-  const [plans, setPlans] = useState<Plan[]>([]);
-  const [selectedPlan, setSelectedPlan] = useState<string>('yearly');
-  const [loading, setLoading] = useState(true);
-  const [checkoutLoading, setCheckoutLoading] = useState(false);
-  const [trialLoading, setTrialLoading] = useState(false);
+  const router = useRouter();
+  const [selectedPlan, setSelectedPlan] = useState<PlanId>('monthly');
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  useEffect(() => {
-    fetchPlans();
+  // Use the current origin for Stripe redirect URLs; default to production when unavailable (native)
+  const originUrl = useMemo(() => {
+    if (typeof window !== 'undefined' && window?.location?.origin) {
+      return window.location.origin;
+    }
+    return 'https://routecastweather.com';
   }, []);
 
-  const fetchPlans = async () => {
-    setLoading(true);
+  const handleSubscribe = async () => {
     setError('');
-
-    const candidates = [
-      `${API_BASE}/api/subscriptions/plans`,
-      `${API_BASE}/api/subscription/plans`,
-    ];
+    setLoading(true);
 
     try {
-      for (const url of candidates) {
-        try {
-          const resp = await axios.get(url);
-          const parsed = normalizePlans(resp.data);
-          if (parsed && parsed.length) {
-            setPlans(parsed);
-            setSelectedPlan(parsed.some(p => p.id === 'yearly') ? 'yearly' : parsed[0].id);
-            return;
-          }
-        } catch {}
+      const response = await fetch(buildUrl('subscription/checkout'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan: selectedPlan, origin_url: originUrl }),
+      });
+
+      if (!response.ok) {
+        const bodyText = await response.text();
+        throw new Error(bodyText || 'Unable to start checkout.');
       }
 
-      setPlans(FALLBACK_PLANS);
-      setSelectedPlan('yearly');
+      const data = await response.json();
+      const checkoutUrl = data.checkout_url || data.url;
+
+      if (!checkoutUrl) {
+        throw new Error('Checkout URL missing from response.');
+      }
+
+      if (Platform.OS === 'web') {
+        window.location.href = checkoutUrl;
+      } else {
+        const canOpen = await Linking.canOpenURL(checkoutUrl);
+        if (!canOpen) {
+          throw new Error('Unable to open checkout.');
+        }
+        await Linking.openURL(checkoutUrl);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unable to start checkout.';
+      setError(message);
+      if (Platform.OS !== 'web') {
+        Alert.alert('Checkout error', message);
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  const handleStartTrial = async () => {
-    if (!isAuthenticated) {
-      router.push('/signup');
-      return;
-    }
+  const renderPlanCard = (planId: PlanId) => {
+    const plan = PLANS[planId];
+    const isSelected = selectedPlan === planId;
 
-    setTrialLoading(true);
-    setError('');
-
-    try {
-      const urls = [
-        `${API_BASE}/api/subscriptions/start-trial`,
-        `${API_BASE}/api/subscription/start-trial`,
-      ];
-
-      let ok = false;
-      for (const url of urls) {
-        try {
-          await axios.post(url, {}, { headers: { Authorization: `Bearer ${accessToken}` } });
-          ok = true;
-          break;
-        } catch {}
-      }
-
-      if (!ok) {
-        const msg = 'Trial is not available yet. You can still use the free version.';
-        setError(msg);
-        if (Platform.OS !== 'web') Alert.alert('Trial coming soon', msg);
-        return;
-      }
-
-      await refreshUser();
-      router.replace('/');
-    } finally {
-      setTrialLoading(false);
-    }
-  };
-
-  const handleCheckout = async (planId: string) => {
-    if (!isAuthenticated) {
-      router.push('/signup');
-      return;
-    }
-
-    setCheckoutLoading(true);
-    setError('');
-
-    try {
-      const origin =
-        Platform.OS === 'web'
-          ? window.location.origin
-          : 'https://routecastweather.com';
-
-      const urls = [
-        `${API_BASE}/api/subscriptions/checkout`,
-        `${API_BASE}/api/subscription/checkout`,
-      ];
-
-      let response: any = null;
-      for (const url of urls) {
-        try {
-          response = await axios.post(
-            url,
-            { plan: planId, origin_url: origin },
-            { headers: { Authorization: `Bearer ${accessToken}` } }
-          );
-          break;
-        } catch {}
-      }
-
-      if (!response?.data?.checkout_url) {
-        const msg = 'Billing is not configured yet. You can still use the free version.';
-        setError(msg);
-        if (Platform.OS !== 'web') Alert.alert('Not ready yet', msg);
-        return;
-      }
-
-      Platform.OS === 'web'
-        ? (window.location.href = response.data.checkout_url)
-        : await Linking.openURL(response.data.checkout_url);
-    } finally {
-      setCheckoutLoading(false);
-    }
-  };
-
-  if (loading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#eab308" />
-      </View>
+      <TouchableOpacity
+        key={planId}
+        activeOpacity={0.8}
+        onPress={() => setSelectedPlan(planId)}
+        style={[styles.planCard, isSelected && styles.planCardSelected]}
+      >
+        <View style={styles.planHeaderRow}>
+          <View style={styles.planTitleRow}>
+            <Ionicons name={planId === 'yearly' ? 'ribbon' : 'calendar'} size={22} color={isSelected ? '#0f172a' : '#eab308'} />
+            <Text style={[styles.planTitle, isSelected && styles.planTitleSelected]}>{plan.title}</Text>
+          </View>
+          {plan.badge && (
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>{plan.badge}</Text>
+            </View>
+          )}
+        </View>
+        <Text style={[styles.planPrice, isSelected && styles.planPriceSelected]}>{plan.price}</Text>
+        <Text style={[styles.planNote, isSelected && styles.planNoteSelected]}>{plan.note}</Text>
+      </TouchableOpacity>
     );
-  }
+  };
 
   return (
-    <View style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ScrollView contentContainerStyle={styles.scrollContent}>
-          <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-            <Ionicons name="arrow-back" size={24} color="#fff" />
+    <SafeAreaView style={styles.container}>
+      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+        <View style={styles.header}>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={22} color="#60a5fa" />
+            <Text style={styles.backText}>Back</Text>
           </TouchableOpacity>
+          <Text style={styles.headerTitle}>Upgrade to Premium</Text>
+          <View style={styles.placeholder} />
+        </View>
 
-          <View style={styles.header}>
-            <View style={styles.iconContainer}>
-              <Ionicons name="rocket" size={32} color="#1a1a1a" />
-            </View>
-            <Text style={styles.title}>Upgrade to Premium</Text>
-            <Text style={styles.subtitle}>Unlock all features and drive with confidence</Text>
+        <View style={styles.heroCard}>
+          <Text style={styles.heroTitle}>Weather-smart routing without limits</Text>
+          <Text style={styles.heroSubtitle}>Start a 7-day free trial. Cancel anytime.</Text>
+          <View style={styles.bulletRow}>
+            <Ionicons name="cloud" size={18} color="#22d3ee" />
+            <Text style={styles.bulletText}>Live radar, alerts, and hazard-aware routing</Text>
           </View>
-
-          <View style={styles.trialInfoAlways}>
-            <Text style={styles.trialInfoTitle}>Free for 7 days</Text>
-            <Text style={styles.trialInfoSub}>No credit card required (for now)</Text>
+          <View style={styles.bulletRow}>
+            <Ionicons name="shield-checkmark" size={18} color="#22c55e" />
+            <Text style={styles.bulletText}>Premium tools for RVers & truckers</Text>
           </View>
-
-          <Text style={styles.sectionTitle}>Choose Your Plan</Text>
-
-          <View style={styles.plansContainer}>
-            {plans.map(plan => (
-              <TouchableOpacity
-                key={plan.id}
-                style={[styles.planCard, selectedPlan === plan.id && styles.planCardSelected]}
-                onPress={() => setSelectedPlan(plan.id)}
-              >
-                {plan.savings && (
-                  <View style={styles.savingsBadge}>
-                    <Text style={styles.savingsText}>{plan.savings}</Text>
-                  </View>
-                )}
-
-                <View style={styles.planHeader}>
-                  <Text style={styles.planName}>{plan.name}</Text>
-                  <Text style={styles.planPrice}>${plan.price}/{plan.interval}</Text>
-                </View>
-
-                <Text style={styles.planTrialText}>7-day free trial • No card required</Text>
-                <Text style={styles.planBillingText}>
-                  {plan.id === 'yearly' ? 'Billed annually • Save 50%' : 'Billed monthly'}
-                </Text>
-
-                {PLAN_FEATURES.map((f, i) => (
-                  <View key={i} style={styles.featureRow}>
-                    <Ionicons name="checkmark-circle" size={18} color="#22c55e" />
-                    <Text style={styles.featureText}>{f}</Text>
-                  </View>
-                ))}
-              </TouchableOpacity>
-            ))}
+          <View style={styles.bulletRow}>
+            <Ionicons name="sparkles" size={18} color="#fbbf24" />
+            <Text style={styles.bulletText}>All features included with one plan</Text>
           </View>
+        </View>
 
-          <TouchableOpacity
-            style={styles.checkoutButton}
-            onPress={() => handleCheckout(selectedPlan)}
-          >
-            <Text style={styles.checkoutButtonText}>Subscribe</Text>
-          </TouchableOpacity>
+        <View style={styles.planGrid}>
+          {renderPlanCard('monthly')}
+          {renderPlanCard('yearly')}
+        </View>
 
-          <TouchableOpacity style={styles.skipButton} onPress={() => router.replace('/')}>
-            <Text style={styles.skipButtonText}>Continue with free version</Text>
-          </TouchableOpacity>
-        </ScrollView>
-      </SafeAreaView>
-    </View>
+        {error ? (
+          <View style={styles.errorBanner}>
+            <Ionicons name="warning" size={18} color="#fcd34d" />
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        ) : null}
+
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={handleSubscribe}
+          disabled={loading}
+          style={[styles.subscribeButton, loading && styles.subscribeButtonDisabled]}
+        >
+          {loading ? (
+            <ActivityIndicator color="#0f172a" />
+          ) : (
+            <Text style={styles.subscribeText}>Subscribe & Start Trial</Text>
+          )}
+        </TouchableOpacity>
+
+        <Text style={styles.legal}>You will not be charged until the 7-day trial ends. Payment method is collected today.</Text>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0f0f0f' },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  safeArea: { flex: 1 },
-  scrollContent: { padding: 20 },
-  backButton: { marginBottom: 20 },
-  header: { alignItems: 'center', marginBottom: 20 },
-  iconContainer: { backgroundColor: '#eab308', borderRadius: 20, padding: 16, marginBottom: 10 },
-  title: { color: '#fff', fontSize: 28, fontWeight: '700' },
-  subtitle: { color: '#a1a1aa' },
-  trialInfoAlways: { backgroundColor: '#14532d', padding: 14, borderRadius: 12, marginBottom: 20 },
-  trialInfoTitle: { color: '#22c55e', fontSize: 16, fontWeight: '800' },
-  trialInfoSub: { color: '#86efac', fontSize: 13 },
-  sectionTitle: { color: '#a1a1aa', marginBottom: 12 },
-  plansContainer: { gap: 12 },
-  planCard: { backgroundColor: '#27272a', padding: 16, borderRadius: 12 },
-  planCardSelected: { borderColor: '#eab308', borderWidth: 2 },
-  savingsBadge: { position: 'absolute', top: -8, right: 10, backgroundColor: '#22c55e', padding: 6, borderRadius: 10 },
-  savingsText: { color: '#fff', fontSize: 11 },
-  planHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 },
-  planName: { color: '#fff', fontSize: 18, fontWeight: '700' },
-  planPrice: { color: '#eab308', fontSize: 18, fontWeight: '700' },
-  planTrialText: { color: '#86efac', fontSize: 12 },
-  planBillingText: { color: '#a1a1aa', fontSize: 12, marginBottom: 10 },
-  featureRow: { flexDirection: 'row', gap: 8, marginBottom: 6 },
-  featureText: { color: '#d4d4d8', fontSize: 13 },
-  checkoutButton: { backgroundColor: '#eab308', padding: 16, borderRadius: 10, marginTop: 20 },
-  checkoutButtonText: { color: '#1a1a1a', textAlign: 'center', fontWeight: '700' },
-  skipButton: { marginTop: 14 },
-  skipButtonText: { color: '#6b7280', textAlign: 'center' },
+  container: {
+    flex: 1,
+    backgroundColor: '#0a0a0a',
+  },
+  content: {
+    padding: 20,
+    gap: 16,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  backButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 4,
+  },
+  backText: {
+    color: '#60a5fa',
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  headerTitle: {
+    color: '#e5e7eb',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  placeholder: {
+    width: 60,
+  },
+  heroCard: {
+    backgroundColor: '#111827',
+    borderRadius: 14,
+    padding: 18,
+    borderWidth: 1,
+    borderColor: '#1f2937',
+    gap: 10,
+  },
+  heroTitle: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  heroSubtitle: {
+    color: '#9ca3af',
+    fontSize: 14,
+  },
+  bulletRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  bulletText: {
+    color: '#cbd5e1',
+    fontSize: 14,
+    flex: 1,
+  },
+  planGrid: {
+    flexDirection: 'row',
+    gap: 12,
+    flexWrap: 'wrap',
+  },
+  planCard: {
+    flex: 1,
+    backgroundColor: '#18181b',
+    borderRadius: 12,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#27272a',
+    gap: 8,
+  },
+  planCardSelected: {
+    backgroundColor: '#fbbf24',
+    borderColor: '#f59e0b',
+  },
+  planHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  planTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  planTitle: {
+    color: '#fbbf24',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  planTitleSelected: {
+    color: '#0f172a',
+  },
+  planPrice: {
+    color: '#fff',
+    fontSize: 22,
+    fontWeight: '800',
+  },
+  planPriceSelected: {
+    color: '#0f172a',
+  },
+  planNote: {
+    color: '#9ca3af',
+    fontSize: 12,
+  },
+  planNoteSelected: {
+    color: '#0f172a',
+  },
+  badge: {
+    backgroundColor: '#0f172a',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  badgeText: {
+    color: '#fbbf24',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  errorBanner: {
+    backgroundColor: '#7f1d1d',
+    borderRadius: 10,
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: '#b91c1c',
+  },
+  errorText: {
+    color: '#fecdd3',
+    fontSize: 13,
+    flex: 1,
+  },
+  subscribeButton: {
+    backgroundColor: '#22c55e',
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  subscribeButtonDisabled: {
+    opacity: 0.7,
+  },
+  subscribeText: {
+    color: '#0f172a',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  legal: {
+    color: '#9ca3af',
+    fontSize: 12,
+    textAlign: 'center',
+    lineHeight: 18,
+    paddingHorizontal: 12,
+  },
 });

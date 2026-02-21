@@ -9,7 +9,7 @@ from pathlib import Path
 import re
 import random
 from pydantic import BaseModel, Field, ConfigDict
-from typing import List, Optional, Dict, Any, Tuple, Callable, TypeVar, Set, Awaitable
+from typing import List, Optional, Dict, Any, Tuple, Callable, TypeVar, Set, Awaitable, Literal
 
 T = TypeVar("T")
 import uuid
@@ -23,6 +23,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 import polyline
+import stripe
 from notifications.route_alerts import sample_route_points
 import asyncio
 from bridge_database import get_bridge_warnings, get_bridge_warnings_near_route
@@ -236,6 +237,12 @@ MAPBOX_ACCESS_TOKEN = os.environ.get('MAPBOX_ACCESS_TOKEN', '')
 ROUTECAST_MODE = os.environ.get('ROUTECAST_MODE', 'prod').lower()
 GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-1.5-flash')
 GOOGLE_PLACES_API_KEY = os.environ.get("GOOGLE_PLACES_API_KEY", "")
+STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY")
+STRIPE_PRICE_MONTHLY = os.environ.get("STRIPE_PRICE_MONTHLY")
+STRIPE_PRICE_YEARLY = os.environ.get("STRIPE_PRICE_YEARLY")
+
+if STRIPE_API_KEY:
+    stripe.api_key = STRIPE_API_KEY
 BUILD_SHA = os.environ.get("RENDER_GIT_COMMIT") or os.environ.get("BUILD_SHA") or "unknown"
 BUILD_TIME = os.environ.get("BUILD_TIME") or datetime.utcnow().isoformat()
 ALERT_DEBUG = bool(int(os.environ.get("ALERT_DEBUG", "0") or 0))
@@ -662,6 +669,20 @@ class SubscriptionResponse(BaseModel):
     is_valid: bool
     subscription_id: str
     message: str
+
+
+class SubscriptionCheckoutRequest(BaseModel):
+    """Request payload for Stripe Checkout session creation"""
+
+    plan: Literal["monthly", "yearly"]
+    origin_url: Optional[str] = None
+
+
+class SubscriptionCheckoutResponse(BaseModel):
+    """Response containing the Stripe Checkout URL"""
+
+    checkout_url: str
+    session_id: str
 
 class RoadPassabilityRequest(BaseModel):
     """Request for road passability assessment (Premium feature)"""
@@ -4289,6 +4310,60 @@ class BillingVerifyRequest(BaseModel):
     platform: str  # "android" or "ios"
     product_id: str  # "boondocking_pro_monthly" or "boondocking_pro_yearly"
     purchase_token: str
+
+
+DEFAULT_CHECKOUT_ORIGIN = "https://routecastweather.com"
+
+
+def _normalize_origin(origin_url: Optional[str]) -> str:
+    if origin_url and origin_url.startswith("http"):
+        return origin_url.rstrip("/")
+    return DEFAULT_CHECKOUT_ORIGIN
+
+
+def _stripe_price_for_plan(plan: str) -> str:
+    if plan not in ("monthly", "yearly"):
+        raise HTTPException(status_code=400, detail="Invalid plan")
+
+    price_id = STRIPE_PRICE_MONTHLY if plan == "monthly" else STRIPE_PRICE_YEARLY
+    if not price_id:
+        raise HTTPException(status_code=500, detail="Stripe price ID not configured")
+    return price_id
+
+
+async def _create_checkout_session(plan: str, origin_url: Optional[str]):
+    if not STRIPE_API_KEY:
+        raise HTTPException(status_code=500, detail="Stripe API key not configured")
+
+    price_id = _stripe_price_for_plan(plan)
+    base_origin = _normalize_origin(origin_url)
+
+    success_url = f"{base_origin}/subscription/success?session_id={{CHECKOUT_SESSION_ID}}"
+    cancel_url = f"{base_origin}/subscription/canceled"
+
+    try:
+        session = await asyncio.to_thread(
+            stripe.checkout.Session.create,
+            mode="subscription",
+            line_items=[{"price": price_id, "quantity": 1}],
+            success_url=success_url,
+            cancel_url=cancel_url,
+            subscription_data={"trial_period_days": 7},
+            payment_method_collection="always",
+        )
+        return session
+    except stripe.error.StripeError as e:
+        logger.error("[STRIPE] Checkout session error", exc_info=True)
+        raise HTTPException(status_code=502, detail="Unable to start checkout") from e
+    except Exception as e:
+        logger.error("[STRIPE] Unexpected checkout error", exc_info=True)
+        raise HTTPException(status_code=500, detail="Unable to start checkout") from e
+
+
+@api_router.post("/subscription/checkout", response_model=SubscriptionCheckoutResponse)
+async def subscription_checkout(request: SubscriptionCheckoutRequest):
+    session = await _create_checkout_session(request.plan, request.origin_url)
+    return SubscriptionCheckoutResponse(checkout_url=session.url, session_id=session.id)
 
 
 @api_router.post("/billing/verify", response_model=dict)
