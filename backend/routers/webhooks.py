@@ -12,7 +12,7 @@ import stripe
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/webhook", tags=["Webhooks"])
+router = APIRouter(prefix="/stripe", tags=["Webhooks"])
 
 STRIPE_API_KEY = os.environ.get('STRIPE_API_KEY', '')
 STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET', '')
