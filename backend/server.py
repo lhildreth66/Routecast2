@@ -4081,8 +4081,8 @@ async def get_route_weather_alerts(route_id: str):
         return HazardAlertsResponse(
             route_id=route_id,
             hazard_alerts=hazard_alerts,
-            alerts=returned_cards,
-            weather_alert_cards=returned_cards,
+            alerts=hazard_alerts + returned_cards,
+            weather_alert_cards=hazard_alerts + returned_cards,
             road_conditions=road_conditions,
             weather_conditions=weather_conditions,
             hazard_status=status_value,
