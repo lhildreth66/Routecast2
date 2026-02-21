@@ -1,3 +1,4 @@
+
 """
 Critical route alert monitoring and worker.
 
@@ -491,6 +492,8 @@ class RouteAlertService:
         bbox: Optional[Dict[str, float]] = None,
         sample_miles: float = 10.0,
         max_points: int = 25,
+        origin: Optional[str] = None,
+        destination: Optional[str] = None,
     ) -> Dict[str, Any]:
         if sample_points:
             samples = sample_points
@@ -511,6 +514,15 @@ class RouteAlertService:
             {"$set": {"active": False, "stopped_at": now}},
         )
 
+        # Build human-readable route name
+        route_name = None
+        if origin and destination:
+            orig_short = origin.split(",")[0].strip()
+            dest_short = destination.split(",")[0].strip()
+            route_name = f"{orig_short} to {dest_short}"
+        elif origin:
+            route_name = origin.split(",")[0].strip()
+
         doc = {
             "monitor_id": monitor_id,
             "user_id": user_id,
@@ -523,6 +535,9 @@ class RouteAlertService:
             "route_id": route_id,
             "current_route_id": route_id,
             "route_signature": route_signature,
+            "origin": origin,
+            "destination": destination,
+            "route_name": route_name,
             "active": True,
             "created_at": now,
             "expires_at": expires_at,
@@ -1455,7 +1470,17 @@ class CriticalRouteAlertWorker:
             top_alert_id = top.get("alert_id")
             count = len(selected)
             events = sorted({item.get("event") for item in selected if item.get("event")})
-            collapsed_body = f"{count} active alerts near your route"
+            # Use human-readable route name from stored monitor
+            _mon = monitor_doc
+            route_name = _mon.get("route_name") or ""
+            if not route_name and _mon.get("destination"):
+                route_name = _mon.get("destination", "").split(",")[0].strip()
+            if not route_name:
+                route_name = "your route"
+            if count == 1 and events:
+                collapsed_body = f"{events[0]} on {route_name}"
+            else:
+                collapsed_body = f"{count} weather alerts on {route_name}"
             expanded_lines = [f"• {e}" for e in events][:8]
             expanded_body = "\n".join(expanded_lines) if expanded_lines else collapsed_body
             severity_icon = top_payload.get("title", "").split(" ")[0] if top_payload else "⚠️"

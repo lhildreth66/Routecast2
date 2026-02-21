@@ -9,17 +9,25 @@ on:
 jobs:
   test-backend-hazards:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+
       - name: Install deps
         run: |
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
+          pip install pytest pytest-asyncio
+
+      - name: Set PYTHONPATH
+        run: echo "PYTHONPATH=$GITHUB_WORKSPACE/backend" >> $GITHUB_ENV
+
       - name: Run hazard tests
         run: |
           pytest -q backend/test_hazard_alerts.py

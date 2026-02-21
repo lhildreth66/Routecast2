@@ -3,17 +3,20 @@ import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
+import { AuthProvider } from '../contexts/AuthContext';
 import { registerDevicePushTokenOnce } from './pushRegistration';
 import { addNotificationToHistory } from './notificationHistory';
 
-// Configure notifications
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: false,
-  }),
-});
+// Configure notifications (NATIVE ONLY)
+if (Platform.OS !== 'web') {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: false,
+    }),
+  });
+}
 
 async function ensureAndroidChannel() {
   if (Platform.OS !== 'android') return;
@@ -39,30 +42,38 @@ export default function RootLayout() {
   const router = useRouter();
 
   useEffect(() => {
-    // Request notification permissions
+    // 🚫 WEB: completely skip expo-notifications
+    if (Platform.OS === 'web') {
+      console.log('[push-auto] skip on web platform');
+      return;
+    }
+
     async function requestPermissions() {
-      if (Platform.OS !== 'web') {
-        const { status } = await Notifications.requestPermissionsAsync();
-        if (status !== 'granted') {
-          console.log('Notification permissions not granted');
-        }
+      const { status } = await Notifications.requestPermissionsAsync();
+      if (status !== 'granted') {
+        console.log('Notification permissions not granted');
       }
     }
-    requestPermissions();
-    ensureAndroidChannel();
-    registerDevicePushTokenOnce();
+
+    void requestPermissions();
+    void ensureAndroidChannel();
+    void registerDevicePushTokenOnce();
 
     const sub = Notifications.addNotificationReceivedListener((notification) => {
-      console.log('[notifications] received', notification.request.identifier, notification.request.content?.title);
-      // fire-and-forget persist to history
+      console.log(
+        '[notifications] received',
+        notification.request.identifier,
+        notification.request.content?.title
+      );
       void addNotificationToHistory(notification);
     });
 
     const responseSub = Notifications.addNotificationResponseReceivedListener((response) => {
-      // Persist on tap (covers cases where receive listener might not run)
-      console.log('[notifications] tapped', response.notification?.request?.identifier);
+      console.log(
+        '[notifications] tapped',
+        response.notification?.request?.identifier
+      );
       void addNotificationToHistory(response.notification);
-      // Small delay helps when app is cold-started and navigation not ready yet
       setTimeout(() => {
         try {
           router.push('/notifications' as any);
@@ -72,11 +83,10 @@ export default function RootLayout() {
       }, 50);
     });
 
-    // Handle cold-start taps (app opened from killed state)
+    // Cold-start notification tap (native only)
     void (async () => {
       const last = await Notifications.getLastNotificationResponseAsync();
       if (last) {
-        console.log('[notifications] last response on launch', last.notification?.request?.identifier);
         void addNotificationToHistory(last.notification);
         setTimeout(() => {
           try {
@@ -95,7 +105,7 @@ export default function RootLayout() {
   }, [router]);
 
   return (
-    <>
+    <AuthProvider>
       <StatusBar style="light" />
       <Stack
         screenOptions={{
@@ -106,7 +116,8 @@ export default function RootLayout() {
       >
         <Stack.Screen name="index" />
         <Stack.Screen name="route" />
-        {/* Boondockers Screens */}
+
+        {/* Boondockers */}
         <Stack.Screen name="boondockers" />
         <Stack.Screen name="camp-prep-checklist" />
         <Stack.Screen name="free-camping" />
@@ -119,7 +130,8 @@ export default function RootLayout() {
         <Stack.Screen name="wind-shelter" />
         <Stack.Screen name="connectivity" />
         <Stack.Screen name="campsite-index" />
-        {/* Tractor Trailer Screens */}
+
+        {/* Tractor Trailer */}
         <Stack.Screen name="tractor-trailer" />
         <Stack.Screen name="truck-stops" />
         <Stack.Screen name="weigh-stations" />
@@ -127,7 +139,8 @@ export default function RootLayout() {
         <Stack.Screen name="low-clearance" />
         <Stack.Screen name="truck-services" />
         <Stack.Screen name="truck-restrictions" />
-        {/* Shared/Supporting Screens */}
+
+        {/* Shared */}
         <Stack.Screen name="truckerAlerts" />
         <Stack.Screen name="radar-map" />
         <Stack.Screen name="weather-alerts" />
@@ -137,6 +150,6 @@ export default function RootLayout() {
         <Stack.Screen name="subscription/success" />
         <Stack.Screen name="subscription/canceled" />
       </Stack>
-    </>
+    </AuthProvider>
   );
 }

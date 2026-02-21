@@ -1,7 +1,7 @@
 from fastapi import FastAPI, APIRouter, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
-from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
 import logging
@@ -164,11 +164,49 @@ async def cached_route(origin_coords: Dict, dest_coords: Dict, stop_coords: List
 
 
 def cache_route_context(route_id: str, context: Dict[str, Any], ttl: int = CACHE_TTL_SECONDS):
+    """Store route context in memory and schedule MongoDB write for cross-instance persistence."""
     _cache_set(_route_context_cache, route_id, context, ttl)
+    if db is not None:
+        import asyncio
+        async def _store():
+            try:
+                expires_at = datetime.now(timezone.utc) + timedelta(seconds=ttl)
+                await db.route_contexts.replace_one(
+                    {"route_id": route_id},
+                    {"route_id": route_id, "context": context, "expires_at": expires_at},
+                    upsert=True,
+                )
+            except Exception as e:
+                logger.warning(f"[route_context] MongoDB store failed: {e}")
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.ensure_future(_store())
+        except Exception:
+            pass
 
 
 def get_route_context(route_id: str) -> Optional[Dict[str, Any]]:
     return _cache_get(_route_context_cache, route_id)
+
+
+async def get_route_context_async(route_id: str) -> Optional[Dict[str, Any]]:
+    """Check in-memory first, then fall back to MongoDB for cross-instance reliability."""
+    result = _cache_get(_route_context_cache, route_id)
+    if result:
+        return result
+    if db is not None:
+        try:
+            doc = await db.route_contexts.find_one(
+                {"route_id": route_id, "expires_at": {"$gt": datetime.now(timezone.utc)}}
+            )
+            if doc:
+                context = doc.get("context")
+                _cache_set(_route_context_cache, route_id, context)
+                return context
+        except Exception as e:
+            logger.warning(f"[route_context] MongoDB fetch failed: {e}")
+    return None
 
 # We'll connect on app startup instead of during module import
 async def connect_to_mongo():
@@ -225,7 +263,7 @@ HAZARD_CONFIG = {
     "wind_extreme_mph": _env_float("HAZARD_WIND_EXTREME_MPH", 41),
     "ice_temp_f": _env_float("HAZARD_ICE_TEMP_F", 32),
     "slippery_temp_f": _env_float("HAZARD_SLIPPERY_TEMP_F", 36),
-    "merge_gap_miles": _env_float("HAZARD_MERGE_GAP_MILES", 5.0),
+    "merge_gap_miles": _env_float("HAZARD_MERGE_GAP_MILES", 1.0),
     "default_span_miles": _env_float("HAZARD_DEFAULT_SPAN_MILES", 5.0),
     "max_alerts": int(_env_float("MAX_ALERTS_PER_ROUTE", 10)),
     "log_detail": int(_env_float("HAZARD_LOG_DETAIL", 0)),
@@ -282,6 +320,25 @@ NOAA_HEADERS = {
 
 # Create the main app
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://routecastweather.com",
+        "https://www.routecastweather.com",
+        "https://app.routecastweather.com",
+        "http://localhost:8081",
+        "http://localhost:19006",
+        "http://localhost:3000",
+        "http://127.0.0.1:8081",
+        "http://127.0.0.1:19006",
+        "http://127.0.0.1:3000",
+    ],
+    allow_origin_regex=r"^https://.*\.app\.github\.dev$",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+)
 
 # Create routers
 api_router = APIRouter(prefix="/api")
@@ -2267,7 +2324,7 @@ def generate_hazard_alerts(
 
             if merged:
                 prev = merged[-1]
-                same_type_level = (alert.type == prev.type) and ((alert.alert_level or "") == (prev.alert_level or ""))
+                same_type_level = (alert.type == prev.type) and (((alert.severity or alert.alert_level or "").lower()) == ((prev.severity or prev.alert_level or "").lower()))
                 allow_any_road = alert.type in {"rain", "snow", "whiteout", "ice"}
                 roads_compatible = allow_any_road or (not prev.road_name) or (not alert.road_name) or (prev.road_name == alert.road_name)
                 if same_type_level and roads_compatible:
@@ -3724,7 +3781,7 @@ async def get_route_weather_alerts(route_id: str):
     logger.info("route_alerts_request", extra={"route_id": route_id})
     debug_enabled = os.environ.get("ROUTE_ALERTS_DEBUG") in {"1", "true", "True", "on", "yes"}
     debug_payload: Optional[Dict[str, Any]] = {} if debug_enabled else None
-    ctx = get_route_context(route_id)
+    ctx = await get_route_context_async(route_id)
     if not ctx:
         logger.warning("route_alerts_context_missing", extra={"route_id": route_id})
         return HazardAlertsResponse(
@@ -3772,10 +3829,10 @@ async def get_route_weather_alerts(route_id: str):
 
     stats_before = _snapshot_noaa_cache_stats()
 
-    base_points = 10
-    extra_points = min(6, max(0, int(total_distance // 100)))
-    target_points = max(base_points + extra_points, 10)
-    target_points = min(target_points, 16)
+    base_points = 12
+    extra_points = min(18, max(0, int(total_distance // 50)))
+    target_points = max(base_points + extra_points, 12)
+    target_points = min(target_points, 30)
 
     def downsample_waypoints(data: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
         if len(data) <= limit:
@@ -4045,8 +4102,8 @@ async def get_route_weather_alerts(route_id: str):
         return HazardAlertsResponse(
             route_id=route_id,
             hazard_alerts=hazard_alerts,
-            alerts=returned_cards,
-            weather_alert_cards=returned_cards,
+            alerts=hazard_alerts + returned_cards,
+            weather_alert_cards=hazard_alerts + returned_cards,
             road_conditions=road_conditions,
             weather_conditions=weather_conditions,
             hazard_status=status_value,
@@ -6297,13 +6354,13 @@ async def _search_walmart_google_places(request: OvernightSearchRequest) -> List
     radius_meters = min(50000.0, float(request.radius_miles * 1609.34))
     url = "https://places.googleapis.com/v1/places:searchNearby"
     body = {
-        "locationRestriction": {
+        "textQuery": "Walmart",
+        "locationBias": {
             "circle": {
                 "center": {"latitude": request.latitude, "longitude": request.longitude},
                 "radius": float(radius_meters),
             }
         },
-        "includedTypes": ["parking", "truck_stop"],
         "maxResultCount": 20,
     }
     headers = {
@@ -6311,6 +6368,8 @@ async def _search_walmart_google_places(request: OvernightSearchRequest) -> List
         "X-Goog-Api-Key": GOOGLE_PLACES_API_KEY,
         "X-Goog-FieldMask": "places.displayName,places.formattedAddress,places.location,places.nationalPhoneNumber,places.websiteUri,places.regularOpeningHours",
     }
+    # Use Text Search endpoint for Walmart-specific results
+    url = "https://places.googleapis.com/v1/places:searchText"
 
     try:
         async with httpx.AsyncClient(timeout=12.0) as client:
@@ -6337,6 +6396,10 @@ async def _search_walmart_google_places(request: OvernightSearchRequest) -> List
 
         distance_miles = _haversine_meters(request.latitude, request.longitude, lat, lon) * 0.000621371
         display_name = (place.get("displayName") or {}).get("text") or "Walmart"
+
+        # Filter: only include results that are actually Walmart locations
+        if "walmart" not in display_name.lower():
+            continue
         address = place.get("formattedAddress")
         phone = place.get("nationalPhoneNumber")
         website = place.get("websiteUri")
@@ -8309,7 +8372,7 @@ async def get_truck_alerts(request: TruckAlertRequest):
         raise HTTPException(status_code=500, detail=f"Error generating truck alerts: {str(e)}")
 
 
-# Add CORS middleware first, before including router
+# Local dev origins (kept for reference)
 local_origins = [
     "http://localhost:8081",
     "http://localhost:19006",
@@ -8318,18 +8381,6 @@ local_origins = [
     "http://127.0.0.1:19006",
     "http://127.0.0.1:3000",
 ]
-
-cors_allow_origins = local_origins if DEBUG_MODE else []
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=cors_allow_origins,
-    allow_origin_regex=r"^https:\/\/.*\.app\.github\.dev$",
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["*"],
-)
 
 @app.middleware("http")
 async def log_origin(request, call_next):
@@ -8347,6 +8398,12 @@ async def startup_db_client():
         mongo_ok = await connect_to_mongo()
         if mongo_ok:
             logger.info("[startup] MongoDB connected db=%s", db_name)
+            # Ensure TTL index on route_contexts so old entries auto-expire
+            try:
+                await db.route_contexts.create_index("expires_at", expireAfterSeconds=0)
+                logger.info("[startup] route_contexts TTL index ensured")
+            except Exception as e:
+                logger.warning("[startup] route_contexts index failed: %s", e)
     except Exception as exc:
         logger.warning("[startup] MongoDB init failed: %s", exc)
 
