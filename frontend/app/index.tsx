@@ -83,7 +83,7 @@ interface AutocompleteSuggestion {
 }
 
 export default function HomeScreen() {
-  const { user, isAuthenticated, isPremium, loading: authLoading } = useAuth();
+  const { user, isAuthenticated, isPremium, isLoading: authLoading } = useAuth();
   
   // Redirect non-authenticated web users to landing page
   useEffect(() => {
