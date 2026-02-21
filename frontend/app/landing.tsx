@@ -23,14 +23,6 @@ const isWideScreen = SCREEN_WIDTH > 768;
 export default function LandingPage() {
   const [activeFaq, setActiveFaq] = useState<number | null>(null);
 
-  const handleStripeCheckout = (link: string) => {
-    if (Platform.OS === 'web') {
-      window.open(link, '_blank');
-    } else {
-      Linking.openURL(link);
-    }
-  };
-
   const scrollToSection = (sectionId: string) => {
     // For web, use anchor scrolling
     if (Platform.OS === 'web') {
