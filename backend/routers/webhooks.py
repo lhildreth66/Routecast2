@@ -98,7 +98,7 @@ async def find_or_link_user(db, customer_id: str, email: str = None):
 
 
 def determine_plan(data: dict) -> str:
-    """Determine if subscription is monthly or annual"""
+    """Determine if subscription is monthly or yearly"""
     # Check line items or subscription items
     line_items = data.get("line_items", {}).get("data", [])
     if line_items:
@@ -106,7 +106,7 @@ def determine_plan(data: dict) -> str:
             price = item.get("price", {})
             interval = price.get("recurring", {}).get("interval", "")
             if interval == "year":
-                return "annual"
+                return "yearly"  # Fixed: was "annual", must match SubscriptionPlan.YEARLY
             elif interval == "month":
                 return "monthly"
     
@@ -117,20 +117,20 @@ def determine_plan(data: dict) -> str:
             price = item.get("price", {})
             interval = price.get("recurring", {}).get("interval", "")
             if interval == "year":
-                return "annual"
+                return "yearly"  # Fixed: was "annual"
     
     # Check plan object (older format)
     plan = data.get("plan", {})
     interval = plan.get("interval", "")
     if interval == "year":
-        return "annual"
+        return "yearly"  # Fixed: was "annual"
     
     # Check amount to determine (fallback)
     amount = data.get("amount_total", 0) or data.get("amount", 0)
     if amount:
         amount_dollars = amount / 100
-        if amount_dollars > 50:  # Annual is ~$60
-            return "annual"
+        if amount_dollars > 50:  # Annual/yearly is ~$60
+            return "yearly"  # Fixed: was "annual"
     
     return "monthly"
 
