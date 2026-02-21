@@ -168,7 +168,7 @@ async def handle_checkout_completed(db, data: dict, now: datetime):
     plan = determine_plan(data)
     
     # Calculate expiration
-    if plan == "annual":
+    if plan == "yearly":
         expiration = now + timedelta(days=365)
     else:
         expiration = now + timedelta(days=30)
