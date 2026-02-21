@@ -1,0 +1,2269 @@
+diff --git a/backend/routers/webhooks.py b/backend/routers/webhooks.py
+new file mode 100644
+index 0000000..cebc90c
+--- /dev/null
++++ b/backend/routers/webhooks.py
+@@ -0,0 +1,492 @@
++"""
++Webhook Router for RouteCast
++Handles incoming webhooks from Stripe, Apple, and Google
++"""
++from fastapi import APIRouter, HTTPException, Request, Header
++from typing import Optional
++from datetime import datetime, timezone, timedelta
++import os
++import json
++import logging
++import stripe
++
++logger = logging.getLogger(__name__)
++
++router = APIRouter(prefix="/stripe", tags=["Webhooks"])
++
++STRIPE_API_KEY = os.environ.get('STRIPE_API_KEY', '')
++STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET', '')
++
++# Initialize Stripe
++if STRIPE_API_KEY:
++    stripe.api_key = STRIPE_API_KEY
++
++
++async def process_stripe_event(db, event_type: str, data: dict):
++    """Process Stripe event in background to return 200 quickly"""
++    try:
++        now = datetime.now(timezone.utc)
++        
++        if event_type == "checkout.session.completed":
++            await handle_checkout_completed(db, data, now)
++        
++        elif event_type == "customer.subscription.updated":
++            await handle_subscription_updated(db, data, now)
++        
++        elif event_type == "customer.subscription.deleted":
++            await handle_subscription_deleted(db, data, now)
++        
++        elif event_type == "customer.subscription.created":
++            await handle_subscription_created(db, data, now)
++        
++        elif event_type == "invoice.paid":
++            await handle_invoice_paid(db, data, now)
++        
++        elif event_type == "invoice.payment_failed":
++            await handle_invoice_failed(db, data, now)
++            
++    except Exception as e:
++        logger.error(f"Error processing Stripe event {event_type}: {e}")
++
++
++async def get_customer_email(customer_id: str) -> Optional[str]:
++    """Fetch customer email from Stripe"""
++    if not STRIPE_API_KEY or not customer_id:
++        return None
++    try:
++        customer = stripe.Customer.retrieve(customer_id)
++        return customer.get("email")
++    except Exception as e:
++        logger.error(f"Error fetching Stripe customer {customer_id}: {e}")
++        return None
++
++
++async def find_or_link_user(db, customer_id: str, email: str = None):
++    """
++    Find user by Stripe customer ID or email.
++    Links Stripe customer to existing user if found by email.
++    """
++    # First try to find by Stripe customer ID
++    user = await db.users.find_one({"stripe_customer_id": customer_id})
++    if user:
++        return user
++    
++    # Get email from Stripe if not provided
++    if not email:
++        email = await get_customer_email(customer_id)
++    
++    if not email:
++        logger.warning(f"No email found for Stripe customer {customer_id}")
++        return None
++    
++    # Find user by email
++    user = await db.users.find_one({"email": email.lower()})
++    if user:
++        # Link Stripe customer to this user
++        await db.users.update_one(
++            {"user_id": user["user_id"]},
++            {"$set": {
++                "stripe_customer_id": customer_id,
++                "updated_at": datetime.now(timezone.utc)
++            }}
++        )
++        logger.info(f"Linked Stripe customer {customer_id} to user {user['user_id']}")
++        return user
++    
++    logger.warning(f"No user found for email {email}")
++    return None
++
++
++def determine_plan(data: dict) -> str:
++    """Determine if subscription is monthly or yearly"""
++    # Check line items or subscription items
++    line_items = data.get("line_items", {}).get("data", [])
++    if line_items:
++        for item in line_items:
++            price = item.get("price", {})
++            interval = price.get("recurring", {}).get("interval", "")
++            if interval == "year":
++                return "yearly"  # Fixed: was "annual", must match SubscriptionPlan.YEARLY
++            elif interval == "month":
++                return "monthly"
++    
++    # Check subscription directly
++    items = data.get("items", {}).get("data", [])
++    if items:
++        for item in items:
++            price = item.get("price", {})
++            interval = price.get("recurring", {}).get("interval", "")
++            if interval == "year":
++                return "yearly"  # Fixed: was "annual"
++    
++    # Check plan object (older format)
++    plan = data.get("plan", {})
++    interval = plan.get("interval", "")
++    if interval == "year":
++        return "yearly"  # Fixed: was "annual"
++    
++    # Check amount to determine (fallback)
++    amount = data.get("amount_total", 0) or data.get("amount", 0)
++    if amount:
++        amount_dollars = amount / 100
++        if amount_dollars > 50:  # Annual/yearly is ~$60
++            return "yearly"  # Fixed: was "annual"
++    
++    return "monthly"
++
++
++async def handle_checkout_completed(db, data: dict, now: datetime):
++    """Handle checkout.session.completed - immediate premium unlock"""
++    customer_id = data.get("customer")
++    customer_email = data.get("customer_email") or data.get("customer_details", {}).get("email")
++    payment_status = data.get("payment_status")
++    mode = data.get("mode")
++    
++    logger.info(f"Checkout completed: customer={customer_id}, email={customer_email}, status={payment_status}, mode={mode}")
++    
++    # Only process successful payments
++    if payment_status != "paid":
++        logger.info(f"Checkout not paid yet: {payment_status}")
++        return
++    
++    # Find or link user
++    user = await find_or_link_user(db, customer_id, customer_email)
++    if not user:
++        # Log for manual resolution
++        await db.pending_subscriptions.insert_one({
++            "stripe_customer_id": customer_id,
++            "email": customer_email,
++            "event": "checkout.session.completed",
++            "data": data,
++            "created_at": now,
++            "resolved": False
++        })
++        logger.warning(f"No user found for checkout, saved for manual resolution")
++        return
++    
++    user_id = user["user_id"]
++    plan = determine_plan(data)
++    
++    # Calculate expiration
++    if plan == "yearly":
++        expiration = now + timedelta(days=365)
++    else:
++        expiration = now + timedelta(days=30)
++    
++    # Get subscription ID if this was a subscription checkout
++    subscription_id = data.get("subscription")
++    
++    # Update user - IMMEDIATE premium access
++    update_data = {
++        "is_premium": True,
++        "plan": plan,
++        "subscription_status": "active",
++        "subscription_plan": plan,
++        "subscription_provider": "stripe",
++        "subscription_expiration": expiration,
++        "stripe_customer_id": customer_id,
++        "updated_at": now
++    }
++    
++    if subscription_id:
++        update_data["stripe_subscription_id"] = subscription_id
++    
++    await db.users.update_one(
++        {"user_id": user_id},
++        {"$set": update_data}
++    )
++    
++    logger.info(f"Premium activated for user {user_id}: plan={plan}, expires={expiration}")
++    
++    # Log the activation
++    await db.subscription_logs.insert_one({
++        "user_id": user_id,
++        "action": "activated",
++        "plan": plan,
++        "provider": "stripe",
++        "stripe_customer_id": customer_id,
++        "stripe_subscription_id": subscription_id,
++        "timestamp": now
++    })
++
++
++async def handle_subscription_created(db, data: dict, now: datetime):
++    """Handle customer.subscription.created"""
++    customer_id = data.get("customer")
++    subscription_id = data.get("id")
++    status = data.get("status")
++    
++    logger.info(f"Subscription created: {subscription_id}, status={status}")
++    
++    user = await find_or_link_user(db, customer_id)
++    if not user:
++        return
++    
++    user_id = user["user_id"]
++    plan = determine_plan(data)
++    
++    # Only activate if status is active or trialing
++    if status in ["active", "trialing"]:
++        if plan == "annual":
++            expiration = now + timedelta(days=365)
++        else:
++            expiration = now + timedelta(days=30)
++        
++        await db.users.update_one(
++            {"user_id": user_id},
++            {"$set": {
++                "is_premium": True,
++                "plan": plan,
++                "subscription_status": status,
++                "subscription_plan": plan,
++                "subscription_provider": "stripe",
++                "subscription_expiration": expiration,
++                "stripe_subscription_id": subscription_id,
++                "updated_at": now
++            }}
++        )
++        logger.info(f"Subscription activated for user {user_id}: {plan}")
++
++
++async def handle_subscription_updated(db, data: dict, now: datetime):
++    """Handle customer.subscription.updated - plan changes, renewals, status changes"""
++    customer_id = data.get("customer")
++    subscription_id = data.get("id")
++    status = data.get("status")  # active, past_due, canceled, unpaid, trialing
++    cancel_at_period_end = data.get("cancel_at_period_end", False)
++    current_period_end = data.get("current_period_end")
++    
++    logger.info(f"Subscription updated: {subscription_id}, status={status}, cancel_at_period_end={cancel_at_period_end}")
++    
++    user = await find_or_link_user(db, customer_id)
++    if not user:
++        return
++    
++    user_id = user["user_id"]
++    plan = determine_plan(data)
++    
++    # Determine premium status based on Stripe status
++    is_premium = status in ["active", "trialing"]
++    
++    # Map Stripe status to our status
++    if status == "active" and cancel_at_period_end:
++        subscription_status = "canceling"  # Will cancel at period end
++    elif status == "active":
++        subscription_status = "active"
++    elif status == "trialing":
++        subscription_status = "trialing"
++    elif status == "past_due":
++        subscription_status = "past_due"
++        is_premium = True  # Give grace period
++    elif status == "canceled":
++        subscription_status = "canceled"
++        is_premium = False
++    elif status == "unpaid":
++        subscription_status = "unpaid"
++        is_premium = False
++    else:
++        subscription_status = status
++    
++    # Calculate expiration from Stripe's period end
++    if current_period_end:
++        expiration = datetime.fromtimestamp(current_period_end, tz=timezone.utc)
++    elif plan == "annual":
++        expiration = now + timedelta(days=365)
++    else:
++        expiration = now + timedelta(days=30)
++    
++    await db.users.update_one(
++        {"user_id": user_id},
++        {"$set": {
++            "is_premium": is_premium,
++            "plan": plan if is_premium else user.get("plan", "free"),
++            "subscription_status": subscription_status,
++            "subscription_plan": plan,
++            "subscription_expiration": expiration,
++            "stripe_subscription_id": subscription_id,
++            "updated_at": now
++        }}
++    )
++    
++    logger.info(f"User {user_id} subscription updated: status={subscription_status}, is_premium={is_premium}")
++
++
++async def handle_subscription_deleted(db, data: dict, now: datetime):
++    """Handle customer.subscription.deleted - subscription ended"""
++    customer_id = data.get("customer")
++    subscription_id = data.get("id")
++    
++    logger.info(f"Subscription deleted: {subscription_id}")
++    
++    user = await find_or_link_user(db, customer_id)
++    if not user:
++        return
++    
++    user_id = user["user_id"]
++    
++    # Revoke premium access
++    await db.users.update_one(
++        {"user_id": user_id},
++        {"$set": {
++            "is_premium": False,
++            "plan": "free",
++            "subscription_plan": "free",  # Fixed: also set subscription_plan field
++            "subscription_status": "expired",
++            "subscription_expiration": now,
++            "stripe_subscription_id": None,
++            "updated_at": now
++        }}
++    )
++    
++    logger.info(f"Premium revoked for user {user_id}")
++    
++    # Log the cancellation
++    await db.subscription_logs.insert_one({
++        "user_id": user_id,
++        "action": "expired",
++        "provider": "stripe",
++        "stripe_customer_id": customer_id,
++        "timestamp": now
++    })
++
++
++async def handle_invoice_paid(db, data: dict, now: datetime):
++    """Handle invoice.paid - successful payment/renewal"""
++    customer_id = data.get("customer")
++    subscription_id = data.get("subscription")
++    
++    if not subscription_id:
++        return  # Not a subscription invoice
++    
++    logger.info(f"Invoice paid for subscription {subscription_id}")
++    
++    user = await find_or_link_user(db, customer_id)
++    if not user:
++        return
++    
++    # The subscription.updated event will handle the actual update
++    # Just log the payment
++    await db.subscription_logs.insert_one({
++        "user_id": user["user_id"],
++        "action": "payment_succeeded",
++        "provider": "stripe",
++        "stripe_subscription_id": subscription_id,
++        "amount": data.get("amount_paid", 0) / 100,
++        "timestamp": now
++    })
++
++
++async def handle_invoice_failed(db, data: dict, now: datetime):
++    """Handle invoice.payment_failed - failed payment"""
++    customer_id = data.get("customer")
++    subscription_id = data.get("subscription")
++    
++    if not subscription_id:
++        return
++    
++    logger.info(f"Invoice payment failed for subscription {subscription_id}")
++    
++    user = await find_or_link_user(db, customer_id)
++    if not user:
++        return
++    
++    user_id = user["user_id"]
++    
++    # Set to past_due but keep premium for grace period
++    await db.users.update_one(
++        {"user_id": user_id},
++        {"$set": {
++            "subscription_status": "past_due",
++            "updated_at": now
++        }}
++    )
++    
++    await db.subscription_logs.insert_one({
++        "user_id": user_id,
++        "action": "payment_failed",
++        "provider": "stripe",
++        "stripe_subscription_id": subscription_id,
++        "timestamp": now
++    })
++
++
++@router.post("/webhook")
++async def stripe_webhook(
++    request: Request,
++    stripe_signature: Optional[str] = Header(None, alias="Stripe-Signature")
++):
++    """
++    Handle Stripe webhook events.
++    Processes synchronously to ensure DB updates complete before response.
++    """
++    db = request.app.state.db
++    body = await request.body()
++    
++    try:
++        # Verify webhook signature in production
++        if STRIPE_WEBHOOK_SECRET and stripe_signature:
++            try:
++                event = stripe.Webhook.construct_event(
++                    body, stripe_signature, STRIPE_WEBHOOK_SECRET
++                )
++                payload = event
++            except stripe.error.SignatureVerificationError as e:
++                logger.error(f"Stripe signature verification failed: {e}")
++                raise HTTPException(status_code=400, detail="Invalid signature")
++        else:
++            # Development mode - parse directly
++            payload = json.loads(body)
++        
++        event_type = payload.get("type", "")
++        data = payload.get("data", {}).get("object", {})
++        
++        logger.info(f"Stripe webhook: {event_type}")
++        
++        # Process synchronously to ensure DB updates complete
++        await process_stripe_event(db, event_type, data)
++        
++        return {"received": True}
++        
++    except json.JSONDecodeError:
++        logger.error("Invalid JSON in Stripe webhook")
++        raise HTTPException(status_code=400, detail="Invalid JSON")
++    except Exception as e:
++        logger.error(f"Stripe webhook error: {e}")
++        # Return 200 anyway to prevent retries
++        return {"received": True}
++
++
++@router.post("/apple")
++async def apple_webhook(request: Request):
++    """Handle Apple App Store Server Notifications (v2)"""
++    db = request.app.state.db
++    
++    try:
++        body = await request.body()
++        payload = json.loads(body)
++        logger.info("Apple webhook received")
++        
++        # TODO: Implement Apple Server Notification handling
++        return {"received": True}
++        
++    except Exception as e:
++        logger.error(f"Apple webhook error: {e}")
++        return {"received": True}
++
++
++@router.post("/google")
++async def google_webhook(request: Request):
++    """Handle Google Play Real-time Developer Notifications"""
++    db = request.app.state.db
++    
++    try:
++        body = await request.body()
++        payload = json.loads(body)
++        logger.info("Google webhook received")
++        
++        # TODO: Implement Google Play RTDN handling
++        return {"received": True}
++        
++    except Exception as e:
++        logger.error(f"Google webhook error: {e}")
++        return {"received": True}
+diff --git a/backend/services/subscription_service.py b/backend/services/subscription_service.py
+new file mode 100644
+index 0000000..9557be3
+--- /dev/null
++++ b/backend/services/subscription_service.py
+@@ -0,0 +1,356 @@
++"""
++Subscription Service for RouteCast
++Handles Stripe subscriptions, Apple/Google receipt verification, and entitlements
++"""
++import os
++from datetime import datetime, timedelta, timezone
++from typing import Optional, Tuple
++from motor.motor_asyncio import AsyncIOMotorDatabase
++import logging
++import httpx
++
++logger = logging.getLogger(__name__)
++
++# Subscription pricing
++SUBSCRIPTION_PRICES = {
++    "monthly": {
++        "amount": 9.99,
++        "stripe_price_id": None,  # Will be set from Stripe dashboard
++        "trial_days": 7,
++    },
++    "yearly": {
++        "amount": 59.99,
++        "stripe_price_id": None,  # Will be set from Stripe dashboard
++        "trial_days": 7,
++    }
++}
++
++# Trial duration
++TRIAL_DAYS = 7
++
++
++async def check_subscription_status(db: AsyncIOMotorDatabase, user_id: str) -> dict:
++    """Check and update subscription status for a user"""
++    user = await db.users.find_one({"user_id": user_id})
++    if not user:
++        return {"status": "inactive", "is_premium": False, "plan": "free"}
++    
++    now = datetime.now(timezone.utc)
++    status = user.get("subscription_status", "inactive")
++    expiration = user.get("subscription_expiration")
++    
++    # Check if subscription has expired
++    if expiration and isinstance(expiration, datetime):
++        # Make sure expiration is timezone-aware
++        if expiration.tzinfo is None:
++            expiration = expiration.replace(tzinfo=timezone.utc)
++        if expiration < now and status in ["active", "trialing", "canceling"]:
++            # Subscription has expired
++            await db.users.update_one(
++                {"user_id": user_id},
++                {"$set": {
++                    "subscription_status": "expired",
++                    "is_premium": False,
++                    "updated_at": now
++                }}
++            )
++            status = "expired"
++    
++    # Premium statuses: active, trialing, canceling (still has access until period ends), past_due (grace period)
++    is_premium = status in ["active", "trialing", "canceling", "past_due"]
++    
++    # Also check the stored is_premium field as a fallback
++    if user.get("is_premium") == True and not is_premium:
++        # Trust the stored value if it's True and expiration hasn't passed
++        if expiration and expiration > now:
++            is_premium = True
++    
++    return {
++        "status": status,
++        "is_premium": is_premium,
++        "plan": user.get("subscription_plan", "free"),
++        "provider": user.get("subscription_provider"),
++        "expiration": expiration,
++    }
++
++
++async def start_trial(db: AsyncIOMotorDatabase, user_id: str) -> Tuple[bool, str]:
++    """Start a free trial for a user"""
++    user = await db.users.find_one({"user_id": user_id})
++    if not user:
++        return False, "User not found"
++    
++    if user.get("trial_used", False):
++        return False, "Trial already used"
++    
++    now = datetime.now(timezone.utc)
++    trial_end = now + timedelta(days=TRIAL_DAYS)
++    
++    await db.users.update_one(
++        {"user_id": user_id},
++        {"$set": {
++            "subscription_status": "trialing",
++            "subscription_plan": "monthly",  # Trial gives monthly features
++            "trial_used": True,
++            "trial_start": now,
++            "trial_end": trial_end,
++            "subscription_expiration": trial_end,
++            "updated_at": now
++        }}
++    )
++    
++    return True, f"Trial started. Expires in {TRIAL_DAYS} days."
++
++
++async def activate_subscription(
++    db: AsyncIOMotorDatabase,
++    user_id: str,
++    plan: str,
++    provider: str,
++    duration_days: Optional[int] = None,
++    stripe_subscription_id: Optional[str] = None,
++    stripe_customer_id: Optional[str] = None,
++    apple_transaction_id: Optional[str] = None,
++    google_purchase_token: Optional[str] = None
++) -> bool:
++    """Activate a subscription for a user"""
++    now = datetime.now(timezone.utc)
++    
++    # Calculate expiration
++    if duration_days:
++        expiration = now + timedelta(days=duration_days)
++    else:
++        # Default durations
++        if plan == "monthly":
++            expiration = now + timedelta(days=30)
++        elif plan == "yearly":
++            expiration = now + timedelta(days=365)
++        else:
++            expiration = now + timedelta(days=30)
++    
++    update_data = {
++        "subscription_status": "active",
++        "subscription_plan": plan,
++        "subscription_provider": provider,
++        "subscription_expiration": expiration,
++        "updated_at": now
++    }
++    
++    if stripe_subscription_id:
++        update_data["stripe_subscription_id"] = stripe_subscription_id
++    if stripe_customer_id:
++        update_data["stripe_customer_id"] = stripe_customer_id
++    if apple_transaction_id:
++        update_data["apple_original_transaction_id"] = apple_transaction_id
++    if google_purchase_token:
++        update_data["google_purchase_token"] = google_purchase_token
++    
++    result = await db.users.update_one(
++        {"user_id": user_id},
++        {"$set": update_data}
++    )
++    
++    return result.modified_count > 0
++
++
++async def cancel_subscription(db: AsyncIOMotorDatabase, user_id: str, reason: Optional[str] = None) -> bool:
++    """Cancel a subscription (access continues until expiration)"""
++    now = datetime.now(timezone.utc)
++    
++    result = await db.users.update_one(
++        {"user_id": user_id},
++        {"$set": {
++            "subscription_status": "canceled",
++            "updated_at": now
++        }}
++    )
++    
++    if reason:
++        await db.subscription_logs.insert_one({
++            "user_id": user_id,
++            "action": "cancel",
++            "reason": reason,
++            "timestamp": now
++        })
++    
++    return result.modified_count > 0
++
++
++async def revoke_subscription(db: AsyncIOMotorDatabase, user_id: str, reason: Optional[str] = None) -> bool:
++    """Immediately revoke subscription access"""
++    now = datetime.now(timezone.utc)
++    
++    result = await db.users.update_one(
++        {"user_id": user_id},
++        {"$set": {
++            "subscription_status": "inactive",
++            "subscription_plan": "free",
++            "subscription_expiration": None,
++            "updated_at": now
++        }}
++    )
++    
++    if reason:
++        await db.subscription_logs.insert_one({
++            "user_id": user_id,
++            "action": "revoke",
++            "reason": reason,
++            "admin_action": True,
++            "timestamp": now
++        })
++    
++    return result.modified_count > 0
++
++
++async def grant_subscription(
++    db: AsyncIOMotorDatabase,
++    user_id: str,
++    plan: str,
++    duration_days: int,
++    reason: Optional[str] = None
++) -> bool:
++    """Admin: Grant subscription to a user"""
++    success = await activate_subscription(
++        db=db,
++        user_id=user_id,
++        plan=plan,
++        provider="admin",
++        duration_days=duration_days
++    )
++    
++    if success:
++        now = datetime.now(timezone.utc)
++        await db.subscription_logs.insert_one({
++            "user_id": user_id,
++            "action": "grant",
++            "plan": plan,
++            "duration_days": duration_days,
++            "reason": reason,
++            "admin_action": True,
++            "timestamp": now
++        })
++    
++    return success
++
++
++# ==================== Apple Receipt Verification ====================
++
++async def verify_apple_receipt(receipt_data: str, product_id: str) -> dict:
++    """
++    Verify an Apple App Store receipt.
++    In production, this would call Apple's verifyReceipt endpoint.
++    """
++    # Production URL: https://buy.itunes.apple.com/verifyReceipt
++    # Sandbox URL: https://sandbox.itunes.apple.com/verifyReceipt
++    
++    # TODO: Implement actual Apple receipt verification
++    # For now, return scaffold response
++    
++    logger.info(f"Apple receipt verification requested for product: {product_id}")
++    
++    # Scaffold response - implement when Apple IAP is configured
++    return {
++        "valid": False,
++        "message": "Apple receipt verification not yet configured. Please contact support.",
++        "subscription_status": "inactive",
++        "expiration": None
++    }
++
++
++# ==================== Google Play Receipt Verification ====================
++
++async def verify_google_receipt(purchase_token: str, product_id: str, package_name: str) -> dict:
++    """
++    Verify a Google Play purchase token.
++    In production, this would call Google Play Developer API.
++    """
++    # TODO: Implement actual Google Play verification
++    # Requires: Google Play Developer API credentials
++    
++    logger.info(f"Google Play verification requested for product: {product_id}")
++    
++    # Scaffold response - implement when Google Play Billing is configured
++    return {
++        "valid": False,
++        "message": "Google Play verification not yet configured. Please contact support.",
++        "subscription_status": "inactive",
++        "expiration": None
++    }
++
++
++# ==================== Stripe Webhook Handling ====================
++
++async def handle_stripe_subscription_event(
++    db: AsyncIOMotorDatabase,
++    event_type: str,
++    subscription_data: dict,
++    customer_id: str
++) -> bool:
++    """Handle Stripe subscription webhook events"""
++    
++    # Find user by Stripe customer ID
++    user = await db.users.find_one({"stripe_customer_id": customer_id})
++    if not user:
++        logger.warning(f"No user found for Stripe customer: {customer_id}")
++        return False
++    
++    user_id = user["user_id"]
++    now = datetime.now(timezone.utc)
++    
++    if event_type == "customer.subscription.created":
++        # New subscription created
++        plan = "yearly" if "year" in subscription_data.get("plan", {}).get("interval", "") else "monthly"
++        await activate_subscription(
++            db=db,
++            user_id=user_id,
++            plan=plan,
++            provider="stripe",
++            stripe_subscription_id=subscription_data.get("id")
++        )
++        return True
++    
++    elif event_type == "customer.subscription.updated":
++        # Subscription updated (could be upgrade/downgrade)
++        status = subscription_data.get("status")
++        if status == "active":
++            plan = "yearly" if "year" in subscription_data.get("plan", {}).get("interval", "") else "monthly"
++            await activate_subscription(
++                db=db,
++                user_id=user_id,
++                plan=plan,
++                provider="stripe",
++                stripe_subscription_id=subscription_data.get("id")
++            )
++        elif status in ["past_due", "unpaid"]:
++            await db.users.update_one(
++                {"user_id": user_id},
++                {"$set": {"subscription_status": "past_due", "updated_at": now}}
++            )
++        return True
++    
++    elif event_type == "customer.subscription.deleted":
++        # Subscription canceled or expired
++        await db.users.update_one(
++            {"user_id": user_id},
++            {"$set": {
++                "subscription_status": "expired",
++                "stripe_subscription_id": None,
++                "updated_at": now
++            }}
++        )
++        return True
++    
++    elif event_type == "invoice.payment_succeeded":
++        # Payment successful - extend subscription
++        # The subscription.updated event will handle the actual update
++        return True
++    
++    elif event_type == "invoice.payment_failed":
++        # Payment failed
++        await db.users.update_one(
++            {"user_id": user_id},
++            {"$set": {"subscription_status": "past_due", "updated_at": now}}
++        )
++        return True
++    
++    return False
+diff --git a/frontend/app/_layout.tsx b/frontend/app/_layout.tsx
+index 5fbdf5f..271a3e4 100644
+--- a/frontend/app/_layout.tsx
++++ b/frontend/app/_layout.tsx
+@@ -3,6 +3,7 @@ import { StatusBar } from 'expo-status-bar';
+ import { useEffect } from 'react';
+ import * as Notifications from 'expo-notifications';
+ import { Platform } from 'react-native';
++import { AuthProvider } from '../contexts/AuthContext';
+ 
+ // Configure notifications
+ Notifications.setNotificationHandler({
+@@ -30,7 +31,7 @@ export default function RootLayout() {
+   }, []);
+ 
+   return (
+-    <>
++    <AuthProvider>
+       <StatusBar style="light" />
+       <Stack
+         screenOptions={{
+@@ -39,8 +40,17 @@ export default function RootLayout() {
+           animation: 'slide_from_right',
+         }}
+       >
++        <Stack.Screen name="landing" />
+         <Stack.Screen name="index" />
+         <Stack.Screen name="route" />
++        {/* Auth Screens */}
++        <Stack.Screen name="login" />
++        <Stack.Screen name="signup" />
++        <Stack.Screen name="verify-email" />
++        <Stack.Screen name="forgot-password" />
++        <Stack.Screen name="reset-password" />
++        <Stack.Screen name="subscription" />
++        <Stack.Screen name="account" />
+         {/* Boondockers Screens */}
+         <Stack.Screen name="boondockers" />
+         <Stack.Screen name="camp-prep-checklist" />
+@@ -70,6 +80,6 @@ export default function RootLayout() {
+         <Stack.Screen name="weather-alerts" />
+         <Stack.Screen name="user-guide" />
+       </Stack>
+-    </>
++    </AuthProvider>
+   );
+ }
+diff --git a/frontend/app/index.tsx b/frontend/app/index.tsx
+index 9de42ed..cf3d329 100644
+--- a/frontend/app/index.tsx
++++ b/frontend/app/index.tsx
+@@ -45,6 +45,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
+ import DateTimePicker from '@react-native-community/datetimepicker';
+ import { format } from 'date-fns';
+ import { WebView } from 'react-native-webview';
++import { useAuth } from '../contexts/AuthContext';
+ 
+ const { width: SCREEN_WIDTH } = Dimensions.get('window');
+ 
+@@ -82,6 +83,15 @@ interface AutocompleteSuggestion {
+ }
+ 
+ export default function HomeScreen() {
++  const { user, isAuthenticated, isPremium, isLoading: authLoading } = useAuth();
++  
++  // Redirect non-authenticated web users to landing page
++  useEffect(() => {
++    if (Platform.OS === 'web' && !authLoading && !isAuthenticated) {
++      router.replace('/landing');
++    }
++  }, [isAuthenticated, authLoading]);
++  
+   const [origin, setOrigin] = useState('');
+   const [destination, setDestination] = useState('');
+   const [loading, setLoading] = useState(false);
+@@ -569,10 +579,18 @@ export default function HomeScreen() {
+                   <Text style={styles.radarHomeBtnText}>Radar</Text>
+                 </TouchableOpacity>
+                 <TouchableOpacity 
+-                  style={styles.favoriteButton}
+-                  onPress={addToFavorites}
++                  style={styles.accountButton}
++                  onPress={() => router.push('/account')}
++                  data-testid="account-btn"
+                 >
+-                  <Ionicons name="heart-outline" size={24} color="#eab308" />
++                  {isAuthenticated ? (
++                    <View style={styles.accountLoggedIn}>
++                      <Ionicons name="person" size={18} color="#eab308" />
++                      {isPremium && <View style={styles.premiumDot} />}
++                    </View>
++                  ) : (
++                    <Ionicons name="person-outline" size={22} color="#a1a1aa" />
++                  )}
+                 </TouchableOpacity>
+               </View>
+ 
+@@ -1241,6 +1259,21 @@ const styles = StyleSheet.create({
+   favoriteButton: {
+     padding: 8,
+   },
++  accountButton: {
++    padding: 8,
++  },
++  accountLoggedIn: {
++    position: 'relative',
++  },
++  premiumDot: {
++    position: 'absolute',
++    top: -2,
++    right: -2,
++    width: 8,
++    height: 8,
++    borderRadius: 4,
++    backgroundColor: '#22c55e',
++  },
+   descriptionBox: {
+     backgroundColor: 'rgba(234, 179, 8, 0.1)',
+     borderRadius: 10,
+diff --git a/frontend/app/landing.tsx b/frontend/app/landing.tsx
+new file mode 100644
+index 0000000..c7e2942
+--- /dev/null
++++ b/frontend/app/landing.tsx
+@@ -0,0 +1,1183 @@
++import React, { useState, useEffect } from 'react';
++import {
++  View,
++  Text,
++  StyleSheet,
++  TouchableOpacity,
++  ScrollView,
++  Platform,
++  Dimensions,
++  Linking,
++  Image,
++} from 'react-native';
++import { SafeAreaView } from 'react-native-safe-area-context';
++import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
++import { router } from 'expo-router';
++import { LinearGradient } from 'expo-linear-gradient';
++
++const { width: SCREEN_WIDTH } = Dimensions.get('window');
++const isWideScreen = SCREEN_WIDTH > 768;
++
++// All pricing CTAs route to /signup - Stripe checkout handled post-signup
++
++export default function LandingPage() {
++  const [activeFaq, setActiveFaq] = useState<number | null>(null);
++
++  const scrollToSection = (sectionId: string) => {
++    // For web, use anchor scrolling
++    if (Platform.OS === 'web') {
++      const element = document.getElementById(sectionId);
++      element?.scrollIntoView({ behavior: 'smooth' });
++    }
++  };
++
++  return (
++    <View style={styles.container}>
++      <ScrollView 
++        style={styles.scrollView}
++        showsVerticalScrollIndicator={false}
++      >
++        {/* Navigation Bar */}
++        <View style={styles.navbar}>
++          <View style={styles.navContent}>
++            <View style={styles.logoContainer}>
++              <MaterialCommunityIcons name="weather-lightning-rainy" size={28} color="#eab308" />
++              <Text style={styles.logoText}>RouteCast</Text>
++            </View>
++            <View style={styles.navLinks}>
++              <TouchableOpacity onPress={() => scrollToSection('features')}>
++                <Text style={styles.navLink}>Features</Text>
++              </TouchableOpacity>
++              <TouchableOpacity onPress={() => scrollToSection('pricing')}>
++                <Text style={styles.navLink}>Pricing</Text>
++              </TouchableOpacity>
++              <TouchableOpacity onPress={() => scrollToSection('faq')}>
++                <Text style={styles.navLink}>FAQ</Text>
++              </TouchableOpacity>
++              <TouchableOpacity 
++                style={styles.navLoginBtn}
++                onPress={() => router.push('/login')}
++              >
++                <Text style={styles.navLoginText}>Log In</Text>
++              </TouchableOpacity>
++            </View>
++          </View>
++        </View>
++
++        {/* Hero Section */}
++        <View style={styles.heroSection}>
++          <LinearGradient
++            colors={['#0f0f0f', '#1a1a2e', '#16213e']}
++            style={styles.heroGradient}
++          >
++            <View style={styles.heroContent}>
++              <View style={styles.heroBadge}>
++                <Ionicons name="shield-checkmark" size={14} color="#22c55e" />
++                <Text style={styles.heroBadgeText}>Drive with confidence</Text>
++              </View>
++              
++              <Text style={styles.heroTitle}>
++                Weather along your route—{'\n'}
++                <Text style={styles.heroTitleAccent}>before you drive.</Text>
++              </Text>
++              
++              <Text style={styles.heroSubtitle}>
++                See conditions, alerts, and road hazards for your entire journey. 
++                Plan smarter. Arrive safer.
++              </Text>
++
++              <View style={styles.heroCtas}>
++                <TouchableOpacity 
++                  style={styles.primaryCta}
++                  onPress={() => router.push('/signup')}
++                  data-testid="hero-start-trial"
++                >
++                  <Ionicons name="rocket" size={20} color="#0f0f0f" />
++                  <Text style={styles.primaryCtaText}>Start Free Trial</Text>
++                </TouchableOpacity>
++                
++                <TouchableOpacity 
++                  style={styles.secondaryCta}
++                  onPress={() => scrollToSection('pricing')}
++                  data-testid="hero-view-pricing"
++                >
++                  <Text style={styles.secondaryCtaText}>View Pricing</Text>
++                  <Ionicons name="arrow-down" size={18} color="#eab308" />
++                </TouchableOpacity>
++              </View>
++
++              <View style={styles.trustBullets}>
++                <View style={styles.trustBullet}>
++                  <Ionicons name="checkmark-circle" size={16} color="#22c55e" />
++                  <Text style={styles.trustBulletText}>7-day free trial</Text>
++                </View>
++                <View style={styles.trustBullet}>
++                  <Ionicons name="checkmark-circle" size={16} color="#22c55e" />
++                  <Text style={styles.trustBulletText}>Cancel anytime</Text>
++                </View>
++                <View style={styles.trustBullet}>
++                  <Ionicons name="checkmark-circle" size={16} color="#22c55e" />
++                  <Text style={styles.trustBulletText}>Premium unlocks instantly</Text>
++                </View>
++              </View>
++            </View>
++
++            {/* Hero Visual */}
++            <View style={styles.heroVisual}>
++              <View style={styles.phoneFrame}>
++                <View style={styles.phoneScreen}>
++                  <View style={styles.mockHeader}>
++                    <Text style={styles.mockHeaderText}>Denver → Las Vegas</Text>
++                    <View style={styles.mockSafetyBadge}>
++                      <Text style={styles.mockSafetyText}>Safe</Text>
++                    </View>
++                  </View>
++                  <View style={styles.mockWeatherCard}>
++                    <View style={styles.mockWeatherRow}>
++                      <Ionicons name="sunny" size={24} color="#fbbf24" />
++                      <Text style={styles.mockTemp}>72°F</Text>
++                      <Text style={styles.mockCondition}>Clear</Text>
++                    </View>
++                    <View style={styles.mockAlertRow}>
++                      <Ionicons name="warning" size={16} color="#f59e0b" />
++                      <Text style={styles.mockAlertText}>Wind advisory at mile 180</Text>
++                    </View>
++                  </View>
++                  <View style={styles.mockTimeline}>
++                    <View style={styles.mockTimelineItem}>
++                      <View style={[styles.mockTimelineDot, { backgroundColor: '#22c55e' }]} />
++                      <Text style={styles.mockTimelineText}>Now - Clear</Text>
++                    </View>
++                    <View style={styles.mockTimelineItem}>
++                      <View style={[styles.mockTimelineDot, { backgroundColor: '#f59e0b' }]} />
++                      <Text style={styles.mockTimelineText}>2h - Windy</Text>
++                    </View>
++                    <View style={styles.mockTimelineItem}>
++                      <View style={[styles.mockTimelineDot, { backgroundColor: '#22c55e' }]} />
++                      <Text style={styles.mockTimelineText}>4h - Clear</Text>
++                    </View>
++                  </View>
++                </View>
++                {/* Callout bubbles */}
++                <View style={[styles.calloutBubble, styles.calloutLeft]}>
++                  <Ionicons name="alert-circle" size={14} color="#ef4444" />
++                  <Text style={styles.calloutText}>Severe weather alerts</Text>
++                </View>
++                <View style={[styles.calloutBubble, styles.calloutRight]}>
++                  <Ionicons name="time" size={14} color="#eab308" />
++                  <Text style={styles.calloutText}>Hour-by-hour timeline</Text>
++                </View>
++              </View>
++            </View>
++          </LinearGradient>
++        </View>
++
++        {/* Social Proof Band */}
++        <View style={styles.socialProofSection}>
++          <Text style={styles.socialProofTitle}>Designed for road trippers & professionals</Text>
++          <View style={styles.socialProofGrid}>
++            <View style={styles.socialProofItem}>
++              <MaterialCommunityIcons name="car-side" size={32} color="#eab308" />
++              <Text style={styles.socialProofLabel}>Road Trippers</Text>
++            </View>
++            <View style={styles.socialProofItem}>
++              <MaterialCommunityIcons name="rv-truck" size={32} color="#eab308" />
++              <Text style={styles.socialProofLabel}>RV & Boondockers</Text>
++            </View>
++            <View style={styles.socialProofItem}>
++              <MaterialCommunityIcons name="truck" size={32} color="#eab308" />
++              <Text style={styles.socialProofLabel}>Truck Drivers</Text>
++            </View>
++            <View style={styles.socialProofItem}>
++              <MaterialCommunityIcons name="briefcase" size={32} color="#eab308" />
++              <Text style={styles.socialProofLabel}>Business Travelers</Text>
++            </View>
++          </View>
++        </View>
++
++        {/* Features Section */}
++        <View style={styles.featuresSection} nativeID="features">
++          <Text style={styles.sectionTitle}>Everything you need for safer drives</Text>
++          <Text style={styles.sectionSubtitle}>
++            From departure to destination, we've got you covered
++          </Text>
++          
++          <View style={styles.featuresGrid}>
++            <View style={styles.featureCard}>
++              <View style={[styles.featureIcon, { backgroundColor: '#422006' }]}>
++                <Ionicons name="map" size={24} color="#eab308" />
++              </View>
++              <Text style={styles.featureTitle}>Route-Based Forecast</Text>
++              <Text style={styles.featureDesc}>
++                See weather conditions at every point along your route, not just your destination.
++              </Text>
++            </View>
++
++            <View style={styles.featureCard}>
++              <View style={[styles.featureIcon, { backgroundColor: '#14532d' }]}>
++                <Ionicons name="warning" size={24} color="#22c55e" />
++              </View>
++              <Text style={styles.featureTitle}>Weather Alerts</Text>
++              <Text style={styles.featureDesc}>
++                Get NWS severe weather warnings for your exact route with countdown timers.
++              </Text>
++            </View>
++
++            <View style={styles.featureCard}>
++              <View style={[styles.featureIcon, { backgroundColor: '#1e3a5f' }]}>
++                <Ionicons name="speedometer" size={24} color="#3b82f6" />
++              </View>
++              <Text style={styles.featureTitle}>Road Conditions</Text>
++              <Text style={styles.featureDesc}>
++                Know when roads are wet, icy, or have low visibility before you encounter them.
++              </Text>
++            </View>
++
++            <View style={styles.featureCard}>
++              <View style={[styles.featureIcon, { backgroundColor: '#4a1d6a' }]}>
++                <Ionicons name="time" size={24} color="#a855f7" />
++              </View>
++              <Text style={styles.featureTitle}>Departure Optimizer</Text>
++              <Text style={styles.featureDesc}>
++                Find the best time to leave to avoid storms and hazardous conditions.
++              </Text>
++            </View>
++
++            <View style={styles.featureCard}>
++              <View style={[styles.featureIcon, { backgroundColor: '#7c2d12' }]}>
++                <Ionicons name="star" size={24} color="#f97316" />
++              </View>
++              <Text style={styles.featureTitle}>Saved Routes</Text>
++              <Text style={styles.featureDesc}>
++                Save your frequent trips and check conditions with one tap.
++              </Text>
++            </View>
++
++            <View style={styles.featureCard}>
++              <View style={[styles.featureIcon, { backgroundColor: '#134e4a' }]}>
++                <Ionicons name="shield-checkmark" size={24} color="#14b8a6" />
++              </View>
++              <Text style={styles.featureTitle}>Safety Score</Text>
++              <Text style={styles.featureDesc}>
++                Get an at-a-glance safety rating based on your vehicle type and conditions.
++              </Text>
++            </View>
++          </View>
++        </View>
++
++        {/* Pricing Section */}
++        <View style={styles.pricingSection} nativeID="pricing">
++          <Text style={styles.sectionTitle}>Simple, transparent pricing</Text>
++          <Text style={styles.sectionSubtitle}>
++            Start with a 7-day free trial. Cancel anytime.
++          </Text>
++
++          <View style={styles.pricingGrid}>
++            {/* Monthly Plan */}
++            <View style={styles.pricingCard}>
++              <Text style={styles.pricingPlan}>Monthly</Text>
++              <View style={styles.pricingAmount}>
++                <Text style={styles.pricingDollar}>$</Text>
++                <Text style={styles.pricingPrice}>9</Text>
++                <Text style={styles.pricingCents}>.99</Text>
++                <Text style={styles.pricingPeriod}>/month</Text>
++              </View>
++              <Text style={styles.pricingTrial}>7-day free trial included</Text>
++              
++              <View style={styles.pricingFeatures}>
++                <View style={styles.pricingFeatureRow}>
++                  <Ionicons name="checkmark" size={18} color="#22c55e" />
++                  <Text style={styles.pricingFeatureText}>Unlimited route forecasts</Text>
++                </View>
++                <View style={styles.pricingFeatureRow}>
++                  <Ionicons name="checkmark" size={18} color="#22c55e" />
++                  <Text style={styles.pricingFeatureText}>Real-time weather alerts</Text>
++                </View>
++                <View style={styles.pricingFeatureRow}>
++                  <Ionicons name="checkmark" size={18} color="#22c55e" />
++                  <Text style={styles.pricingFeatureText}>Road condition insights</Text>
++                </View>
++                <View style={styles.pricingFeatureRow}>
++                  <Ionicons name="checkmark" size={18} color="#22c55e" />
++                  <Text style={styles.pricingFeatureText}>Trucker & RV features</Text>
++                </View>
++              </View>
++
++              <TouchableOpacity 
++                style={styles.pricingButton}
++                onPress={() => router.push('/signup')}
++                data-testid="pricing-monthly-btn"
++              >
++                <Text style={styles.pricingButtonText}>Start Monthly Trial</Text>
++              </TouchableOpacity>
++            </View>
++
++            {/* Annual Plan */}
++            <View style={[styles.pricingCard, styles.pricingCardFeatured]}>
++              <View style={styles.pricingBadge}>
++                <Text style={styles.pricingBadgeText}>BEST VALUE</Text>
++              </View>
++              <Text style={styles.pricingPlan}>Annual</Text>
++              <View style={styles.pricingAmount}>
++                <Text style={styles.pricingDollar}>$</Text>
++                <Text style={styles.pricingPrice}>59</Text>
++                <Text style={styles.pricingCents}>.99</Text>
++                <Text style={styles.pricingPeriod}>/year</Text>
++              </View>
++              <Text style={styles.pricingTrial}>7-day free trial included</Text>
++              <Text style={styles.pricingSavings}>Save $60/year (2 months free)</Text>
++              
++              <View style={styles.pricingFeatures}>
++                <View style={styles.pricingFeatureRow}>
++                  <Ionicons name="checkmark" size={18} color="#22c55e" />
++                  <Text style={styles.pricingFeatureText}>Everything in Monthly</Text>
++                </View>
++                <View style={styles.pricingFeatureRow}>
++                  <Ionicons name="checkmark" size={18} color="#22c55e" />
++                  <Text style={styles.pricingFeatureText}>Priority support</Text>
++                </View>
++                <View style={styles.pricingFeatureRow}>
++                  <Ionicons name="checkmark" size={18} color="#22c55e" />
++                  <Text style={styles.pricingFeatureText}>Extended forecast (7 days)</Text>
++                </View>
++                <View style={styles.pricingFeatureRow}>
++                  <Ionicons name="checkmark" size={18} color="#22c55e" />
++                  <Text style={styles.pricingFeatureText}>Export routes</Text>
++                </View>
++              </View>
++
++              <TouchableOpacity 
++                style={[styles.pricingButton, styles.pricingButtonFeatured]}
++                onPress={() => router.push('/signup')}
++                data-testid="pricing-annual-btn"
++              >
++                <Text style={styles.pricingButtonTextFeatured}>Start Annual Trial</Text>
++              </TouchableOpacity>
++            </View>
++          </View>
++
++          <Text style={styles.pricingDisclaimer}>
++            You'll be redirected to Stripe to complete checkout. Premium access activates automatically after payment confirmation.
++          </Text>
++        </View>
++
++        {/* Comparison Table */}
++        <View style={styles.comparisonSection}>
++          <Text style={styles.sectionTitle}>Free vs Premium</Text>
++          
++          <View style={styles.comparisonTable}>
++            <View style={styles.comparisonHeader}>
++              <Text style={styles.comparisonHeaderText}>Feature</Text>
++              <Text style={styles.comparisonHeaderText}>Free</Text>
++              <Text style={styles.comparisonHeaderText}>Premium</Text>
++            </View>
++            
++            <View style={styles.comparisonRow}>
++              <Text style={styles.comparisonFeature}>Route weather forecast</Text>
++              <Text style={styles.comparisonValue}>Basic</Text>
++              <Text style={styles.comparisonValuePremium}>Extended</Text>
++            </View>
++            
++            <View style={styles.comparisonRow}>
++              <Text style={styles.comparisonFeature}>Weather alerts</Text>
++              <Ionicons name="checkmark-circle" size={18} color="#22c55e" />
++              <Ionicons name="checkmark-circle" size={18} color="#22c55e" />
++            </View>
++            
++            <View style={styles.comparisonRow}>
++              <Text style={styles.comparisonFeature}>Route monitoring</Text>
++              <Text style={styles.comparisonValue}>1 route</Text>
++              <Text style={styles.comparisonValuePremium}>Unlimited</Text>
++            </View>
++            
++            <View style={styles.comparisonRow}>
++              <Text style={styles.comparisonFeature}>Push notifications</Text>
++              <Ionicons name="close-circle" size={18} color="#6b7280" />
++              <Ionicons name="checkmark-circle" size={18} color="#22c55e" />
++            </View>
++            
++            <View style={styles.comparisonRow}>
++              <Text style={styles.comparisonFeature}>Trucker features</Text>
++              <Ionicons name="close-circle" size={18} color="#6b7280" />
++              <Ionicons name="checkmark-circle" size={18} color="#22c55e" />
++            </View>
++            
++            <View style={styles.comparisonRow}>
++              <Text style={styles.comparisonFeature}>Boondocking tools</Text>
++              <Ionicons name="close-circle" size={18} color="#6b7280" />
++              <Ionicons name="checkmark-circle" size={18} color="#22c55e" />
++            </View>
++          </View>
++        </View>
++
++        {/* FAQ Section */}
++        <View style={styles.faqSection} nativeID="faq">
++          <Text style={styles.sectionTitle}>Frequently Asked Questions</Text>
++          
++          <View style={styles.faqList}>
++            {[
++              {
++                q: 'How does the free trial work?',
++                a: 'Start your 7-day free trial by creating an account. You get full access to all premium features. No credit card required to start—you only pay when you choose to subscribe.'
++              },
++              {
++                q: 'How do I cancel my subscription?',
++                a: 'You can cancel anytime from your account settings or directly through Stripe. Your premium access continues until the end of your billing period.'
++              },
++              {
++                q: 'How do I get premium access after paying?',
++                a: 'Premium access is activated automatically within seconds after Stripe confirms your payment. Just log back in and you\'ll see your premium status updated.'
++              },
++              {
++                q: 'What if I change my email address?',
++                a: 'Your subscription is linked to your account by email. If you need to change your email, please contact support so we can update your records and ensure uninterrupted access.'
++              },
++              {
++                q: 'Is my payment secure?',
++                a: 'Yes! All payments are processed securely through Stripe. We never see or store your credit card details.'
++              },
++              {
++                q: 'What weather data sources do you use?',
++                a: 'We use official NOAA/National Weather Service data for the most accurate forecasts and alerts available for US routes.'
++              }
++            ].map((faq, index) => (
++              <TouchableOpacity 
++                key={index}
++                style={styles.faqItem}
++                onPress={() => setActiveFaq(activeFaq === index ? null : index)}
++              >
++                <View style={styles.faqQuestion}>
++                  <Text style={styles.faqQuestionText}>{faq.q}</Text>
++                  <Ionicons 
++                    name={activeFaq === index ? 'chevron-up' : 'chevron-down'} 
++                    size={20} 
++                    color="#a1a1aa" 
++                  />
++                </View>
++                {activeFaq === index && (
++                  <Text style={styles.faqAnswer}>{faq.a}</Text>
++                )}
++              </TouchableOpacity>
++            ))}
++          </View>
++        </View>
++
++        {/* Final CTA */}
++        <View style={styles.finalCtaSection}>
++          <LinearGradient
++            colors={['#1a1a2e', '#16213e', '#0f0f0f']}
++            style={styles.finalCtaGradient}
++          >
++            <Text style={styles.finalCtaTitle}>Ready to drive smarter?</Text>
++            <Text style={styles.finalCtaSubtitle}>
++              Join thousands of drivers who plan their trips with confidence.
++            </Text>
++            <TouchableOpacity 
++              style={styles.finalCtaButton}
++              onPress={() => router.push('/signup')}
++              data-testid="final-cta-btn"
++            >
++              <Text style={styles.finalCtaButtonText}>Start Your Free Trial</Text>
++              <Ionicons name="arrow-forward" size={20} color="#0f0f0f" />
++            </TouchableOpacity>
++          </LinearGradient>
++        </View>
++
++        {/* Footer */}
++        <View style={styles.footer}>
++          <View style={styles.footerContent}>
++            <View style={styles.footerBrand}>
++              <MaterialCommunityIcons name="weather-lightning-rainy" size={24} color="#eab308" />
++              <Text style={styles.footerBrandText}>RouteCast</Text>
++            </View>
++            <View style={styles.footerLinks}>
++              <TouchableOpacity>
++                <Text style={styles.footerLink}>Privacy Policy</Text>
++              </TouchableOpacity>
++              <TouchableOpacity>
++                <Text style={styles.footerLink}>Terms of Service</Text>
++              </TouchableOpacity>
++              <TouchableOpacity>
++                <Text style={styles.footerLink}>Contact</Text>
++              </TouchableOpacity>
++            </View>
++            <View style={styles.footerStripe}>
++              <Ionicons name="lock-closed" size={14} color="#6b7280" />
++              <Text style={styles.footerStripeText}>Payments secured by Stripe</Text>
++            </View>
++          </View>
++          <Text style={styles.footerCopyright}>
++            © {new Date().getFullYear()} RouteCast. All rights reserved.
++          </Text>
++        </View>
++      </ScrollView>
++    </View>
++  );
++}
++
++const styles = StyleSheet.create({
++  container: {
++    flex: 1,
++    backgroundColor: '#0f0f0f',
++  },
++  scrollView: {
++    flex: 1,
++  },
++
++  // Navbar
++  navbar: {
++    backgroundColor: '#0f0f0f',
++    borderBottomWidth: 1,
++    borderBottomColor: 'rgba(255,255,255,0.1)',
++  },
++  navContent: {
++    flexDirection: 'row',
++    justifyContent: 'space-between',
++    alignItems: 'center',
++    paddingHorizontal: 24,
++    paddingVertical: 16,
++    maxWidth: 1200,
++    marginHorizontal: 'auto',
++    width: '100%',
++  },
++  logoContainer: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    gap: 8,
++  },
++  logoText: {
++    color: '#ffffff',
++    fontSize: 20,
++    fontWeight: '700',
++  },
++  navLinks: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    gap: 24,
++  },
++  navLink: {
++    color: '#a1a1aa',
++    fontSize: 14,
++    fontWeight: '500',
++  },
++  navLoginBtn: {
++    backgroundColor: '#27272a',
++    paddingHorizontal: 16,
++    paddingVertical: 8,
++    borderRadius: 8,
++  },
++  navLoginText: {
++    color: '#ffffff',
++    fontSize: 14,
++    fontWeight: '600',
++  },
++
++  // Hero Section
++  heroSection: {
++    minHeight: 600,
++  },
++  heroGradient: {
++    paddingTop: 40,
++    paddingBottom: 60,
++    paddingHorizontal: 24,
++  },
++  heroContent: {
++    maxWidth: 600,
++    marginHorizontal: 'auto',
++    alignItems: 'center',
++  },
++  heroBadge: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    gap: 6,
++    backgroundColor: 'rgba(34, 197, 94, 0.15)',
++    paddingHorizontal: 12,
++    paddingVertical: 6,
++    borderRadius: 20,
++    marginBottom: 24,
++  },
++  heroBadgeText: {
++    color: '#22c55e',
++    fontSize: 13,
++    fontWeight: '600',
++  },
++  heroTitle: {
++    fontSize: 42,
++    fontWeight: '800',
++    color: '#ffffff',
++    textAlign: 'center',
++    lineHeight: 52,
++    marginBottom: 20,
++  },
++  heroTitleAccent: {
++    color: '#eab308',
++  },
++  heroSubtitle: {
++    fontSize: 18,
++    color: '#a1a1aa',
++    textAlign: 'center',
++    lineHeight: 28,
++    marginBottom: 32,
++    maxWidth: 500,
++  },
++  heroCtas: {
++    flexDirection: 'row',
++    gap: 16,
++    marginBottom: 32,
++    flexWrap: 'wrap',
++    justifyContent: 'center',
++  },
++  primaryCta: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    gap: 10,
++    backgroundColor: '#eab308',
++    paddingHorizontal: 28,
++    paddingVertical: 16,
++    borderRadius: 12,
++  },
++  primaryCtaText: {
++    color: '#0f0f0f',
++    fontSize: 16,
++    fontWeight: '700',
++  },
++  secondaryCta: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    gap: 8,
++    backgroundColor: 'transparent',
++    borderWidth: 2,
++    borderColor: '#eab308',
++    paddingHorizontal: 24,
++    paddingVertical: 14,
++    borderRadius: 12,
++  },
++  secondaryCtaText: {
++    color: '#eab308',
++    fontSize: 16,
++    fontWeight: '600',
++  },
++  trustBullets: {
++    flexDirection: 'row',
++    gap: 24,
++    flexWrap: 'wrap',
++    justifyContent: 'center',
++  },
++  trustBullet: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    gap: 6,
++  },
++  trustBulletText: {
++    color: '#a1a1aa',
++    fontSize: 13,
++  },
++
++  // Hero Visual
++  heroVisual: {
++    alignItems: 'center',
++    marginTop: 48,
++  },
++  phoneFrame: {
++    width: 280,
++    height: 400,
++    backgroundColor: '#1a1a1a',
++    borderRadius: 32,
++    padding: 12,
++    borderWidth: 3,
++    borderColor: '#333',
++    position: 'relative',
++  },
++  phoneScreen: {
++    flex: 1,
++    backgroundColor: '#0f0f0f',
++    borderRadius: 24,
++    padding: 16,
++  },
++  mockHeader: {
++    flexDirection: 'row',
++    justifyContent: 'space-between',
++    alignItems: 'center',
++    marginBottom: 16,
++  },
++  mockHeaderText: {
++    color: '#fff',
++    fontSize: 14,
++    fontWeight: '600',
++  },
++  mockSafetyBadge: {
++    backgroundColor: '#14532d',
++    paddingHorizontal: 8,
++    paddingVertical: 4,
++    borderRadius: 8,
++  },
++  mockSafetyText: {
++    color: '#22c55e',
++    fontSize: 11,
++    fontWeight: '700',
++  },
++  mockWeatherCard: {
++    backgroundColor: '#1a1a1a',
++    borderRadius: 12,
++    padding: 12,
++    marginBottom: 12,
++  },
++  mockWeatherRow: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    gap: 10,
++    marginBottom: 8,
++  },
++  mockTemp: {
++    color: '#fff',
++    fontSize: 24,
++    fontWeight: '700',
++  },
++  mockCondition: {
++    color: '#a1a1aa',
++    fontSize: 14,
++  },
++  mockAlertRow: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    gap: 6,
++  },
++  mockAlertText: {
++    color: '#f59e0b',
++    fontSize: 12,
++  },
++  mockTimeline: {
++    gap: 10,
++  },
++  mockTimelineItem: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    gap: 10,
++  },
++  mockTimelineDot: {
++    width: 10,
++    height: 10,
++    borderRadius: 5,
++  },
++  mockTimelineText: {
++    color: '#a1a1aa',
++    fontSize: 12,
++  },
++  calloutBubble: {
++    position: 'absolute',
++    flexDirection: 'row',
++    alignItems: 'center',
++    gap: 6,
++    backgroundColor: '#27272a',
++    paddingHorizontal: 12,
++    paddingVertical: 8,
++    borderRadius: 20,
++    borderWidth: 1,
++    borderColor: '#3f3f46',
++  },
++  calloutLeft: {
++    left: -100,
++    top: 80,
++  },
++  calloutRight: {
++    right: -90,
++    bottom: 120,
++  },
++  calloutText: {
++    color: '#fff',
++    fontSize: 11,
++    fontWeight: '500',
++  },
++
++  // Social Proof
++  socialProofSection: {
++    backgroundColor: '#141414',
++    paddingVertical: 48,
++    paddingHorizontal: 24,
++  },
++  socialProofTitle: {
++    color: '#a1a1aa',
++    fontSize: 14,
++    fontWeight: '600',
++    textAlign: 'center',
++    textTransform: 'uppercase',
++    letterSpacing: 1,
++    marginBottom: 32,
++  },
++  socialProofGrid: {
++    flexDirection: 'row',
++    justifyContent: 'center',
++    gap: 48,
++    flexWrap: 'wrap',
++  },
++  socialProofItem: {
++    alignItems: 'center',
++    gap: 12,
++  },
++  socialProofLabel: {
++    color: '#d4d4d8',
++    fontSize: 14,
++    fontWeight: '500',
++  },
++
++  // Features Section
++  featuresSection: {
++    paddingVertical: 80,
++    paddingHorizontal: 24,
++  },
++  sectionTitle: {
++    color: '#ffffff',
++    fontSize: 32,
++    fontWeight: '700',
++    textAlign: 'center',
++    marginBottom: 12,
++  },
++  sectionSubtitle: {
++    color: '#a1a1aa',
++    fontSize: 16,
++    textAlign: 'center',
++    marginBottom: 48,
++  },
++  featuresGrid: {
++    flexDirection: 'row',
++    flexWrap: 'wrap',
++    justifyContent: 'center',
++    gap: 24,
++    maxWidth: 1000,
++    marginHorizontal: 'auto',
++  },
++  featureCard: {
++    width: 300,
++    backgroundColor: '#1a1a1a',
++    borderRadius: 16,
++    padding: 24,
++    borderWidth: 1,
++    borderColor: '#27272a',
++  },
++  featureIcon: {
++    width: 48,
++    height: 48,
++    borderRadius: 12,
++    justifyContent: 'center',
++    alignItems: 'center',
++    marginBottom: 16,
++  },
++  featureTitle: {
++    color: '#ffffff',
++    fontSize: 18,
++    fontWeight: '600',
++    marginBottom: 8,
++  },
++  featureDesc: {
++    color: '#a1a1aa',
++    fontSize: 14,
++    lineHeight: 22,
++  },
++
++  // Pricing Section
++  pricingSection: {
++    backgroundColor: '#141414',
++    paddingVertical: 80,
++    paddingHorizontal: 24,
++  },
++  pricingGrid: {
++    flexDirection: 'row',
++    justifyContent: 'center',
++    gap: 24,
++    flexWrap: 'wrap',
++    marginBottom: 32,
++  },
++  pricingCard: {
++    width: 320,
++    backgroundColor: '#1a1a1a',
++    borderRadius: 20,
++    padding: 32,
++    borderWidth: 1,
++    borderColor: '#27272a',
++    position: 'relative',
++  },
++  pricingCardFeatured: {
++    borderColor: '#eab308',
++    borderWidth: 2,
++  },
++  pricingBadge: {
++    position: 'absolute',
++    top: -12,
++    right: 24,
++    backgroundColor: '#eab308',
++    paddingHorizontal: 12,
++    paddingVertical: 6,
++    borderRadius: 12,
++  },
++  pricingBadgeText: {
++    color: '#0f0f0f',
++    fontSize: 11,
++    fontWeight: '700',
++  },
++  pricingPlan: {
++    color: '#a1a1aa',
++    fontSize: 14,
++    fontWeight: '600',
++    textTransform: 'uppercase',
++    letterSpacing: 1,
++    marginBottom: 8,
++  },
++  pricingAmount: {
++    flexDirection: 'row',
++    alignItems: 'baseline',
++    marginBottom: 8,
++  },
++  pricingDollar: {
++    color: '#ffffff',
++    fontSize: 20,
++    fontWeight: '600',
++  },
++  pricingPrice: {
++    color: '#ffffff',
++    fontSize: 48,
++    fontWeight: '700',
++  },
++  pricingCents: {
++    color: '#ffffff',
++    fontSize: 20,
++    fontWeight: '600',
++  },
++  pricingPeriod: {
++    color: '#6b7280',
++    fontSize: 16,
++    marginLeft: 4,
++  },
++  pricingTrial: {
++    color: '#22c55e',
++    fontSize: 13,
++    fontWeight: '500',
++    marginBottom: 4,
++  },
++  pricingSavings: {
++    color: '#eab308',
++    fontSize: 13,
++    fontWeight: '600',
++    marginBottom: 24,
++  },
++  pricingFeatures: {
++    gap: 12,
++    marginBottom: 24,
++  },
++  pricingFeatureRow: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    gap: 10,
++  },
++  pricingFeatureText: {
++    color: '#d4d4d8',
++    fontSize: 14,
++  },
++  pricingButton: {
++    backgroundColor: '#27272a',
++    paddingVertical: 14,
++    borderRadius: 10,
++    alignItems: 'center',
++  },
++  pricingButtonFeatured: {
++    backgroundColor: '#eab308',
++  },
++  pricingButtonText: {
++    color: '#ffffff',
++    fontSize: 15,
++    fontWeight: '600',
++  },
++  pricingButtonTextFeatured: {
++    color: '#0f0f0f',
++    fontSize: 15,
++    fontWeight: '700',
++  },
++  pricingDisclaimer: {
++    color: '#6b7280',
++    fontSize: 12,
++    textAlign: 'center',
++    maxWidth: 500,
++    marginHorizontal: 'auto',
++    lineHeight: 18,
++  },
++
++  // Comparison Section
++  comparisonSection: {
++    paddingVertical: 80,
++    paddingHorizontal: 24,
++  },
++  comparisonTable: {
++    maxWidth: 600,
++    marginHorizontal: 'auto',
++    backgroundColor: '#1a1a1a',
++    borderRadius: 16,
++    overflow: 'hidden',
++    borderWidth: 1,
++    borderColor: '#27272a',
++  },
++  comparisonHeader: {
++    flexDirection: 'row',
++    backgroundColor: '#27272a',
++    paddingVertical: 16,
++    paddingHorizontal: 20,
++  },
++  comparisonHeaderText: {
++    flex: 1,
++    color: '#ffffff',
++    fontSize: 13,
++    fontWeight: '700',
++    textAlign: 'center',
++  },
++  comparisonRow: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    paddingVertical: 14,
++    paddingHorizontal: 20,
++    borderBottomWidth: 1,
++    borderBottomColor: '#27272a',
++  },
++  comparisonFeature: {
++    flex: 1,
++    color: '#d4d4d8',
++    fontSize: 14,
++  },
++  comparisonValue: {
++    flex: 1,
++    color: '#6b7280',
++    fontSize: 13,
++    textAlign: 'center',
++  },
++  comparisonValuePremium: {
++    flex: 1,
++    color: '#22c55e',
++    fontSize: 13,
++    fontWeight: '600',
++    textAlign: 'center',
++  },
++
++  // FAQ Section
++  faqSection: {
++    backgroundColor: '#141414',
++    paddingVertical: 80,
++    paddingHorizontal: 24,
++  },
++  faqList: {
++    maxWidth: 700,
++    marginHorizontal: 'auto',
++    gap: 12,
++  },
++  faqItem: {
++    backgroundColor: '#1a1a1a',
++    borderRadius: 12,
++    padding: 20,
++    borderWidth: 1,
++    borderColor: '#27272a',
++  },
++  faqQuestion: {
++    flexDirection: 'row',
++    justifyContent: 'space-between',
++    alignItems: 'center',
++  },
++  faqQuestionText: {
++    color: '#ffffff',
++    fontSize: 15,
++    fontWeight: '600',
++    flex: 1,
++    paddingRight: 16,
++  },
++  faqAnswer: {
++    color: '#a1a1aa',
++    fontSize: 14,
++    lineHeight: 22,
++    marginTop: 12,
++  },
++
++  // Final CTA
++  finalCtaSection: {
++    paddingHorizontal: 24,
++    paddingVertical: 48,
++  },
++  finalCtaGradient: {
++    borderRadius: 24,
++    paddingVertical: 64,
++    paddingHorizontal: 32,
++    alignItems: 'center',
++  },
++  finalCtaTitle: {
++    color: '#ffffff',
++    fontSize: 32,
++    fontWeight: '700',
++    textAlign: 'center',
++    marginBottom: 12,
++  },
++  finalCtaSubtitle: {
++    color: '#a1a1aa',
++    fontSize: 16,
++    textAlign: 'center',
++    marginBottom: 32,
++  },
++  finalCtaButton: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    gap: 10,
++    backgroundColor: '#eab308',
++    paddingHorizontal: 32,
++    paddingVertical: 18,
++    borderRadius: 12,
++  },
++  finalCtaButtonText: {
++    color: '#0f0f0f',
++    fontSize: 17,
++    fontWeight: '700',
++  },
++
++  // Footer
++  footer: {
++    backgroundColor: '#0a0a0a',
++    paddingVertical: 48,
++    paddingHorizontal: 24,
++    borderTopWidth: 1,
++    borderTopColor: '#1a1a1a',
++  },
++  footerContent: {
++    maxWidth: 1000,
++    marginHorizontal: 'auto',
++    flexDirection: 'row',
++    justifyContent: 'space-between',
++    alignItems: 'center',
++    flexWrap: 'wrap',
++    gap: 24,
++    marginBottom: 24,
++  },
++  footerBrand: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    gap: 8,
++  },
++  footerBrandText: {
++    color: '#ffffff',
++    fontSize: 18,
++    fontWeight: '600',
++  },
++  footerLinks: {
++    flexDirection: 'row',
++    gap: 32,
++  },
++  footerLink: {
++    color: '#6b7280',
++    fontSize: 14,
++  },
++  footerStripe: {
++    flexDirection: 'row',
++    alignItems: 'center',
++    gap: 6,
++  },
++  footerStripeText: {
++    color: '#6b7280',
++    fontSize: 12,
++  },
++  footerCopyright: {
++    color: '#52525b',
++    fontSize: 12,
++    textAlign: 'center',
++  },
++});
+diff --git a/render.yaml b/render.yaml
+index 515b829..4d12233 100644
+--- a/render.yaml
++++ b/render.yaml
+@@ -1,42 +1,75 @@
+-# Render Blueprint - Deploy both services with one click
+-# Usage: Connect this repo to Render and it will auto-detect this file
++# Render Blueprint for RouteCast - Full Stack
++# Backend API + Frontend Static Site
+ 
+ services:
+   # Backend API Service
+   - type: web
+-    name: routecast-backend
++    name: routecast-api
+     runtime: python
++    region: oregon
++    plan: starter
+     rootDir: backend
+     buildCommand: pip install -r requirements.txt
+     startCommand: uvicorn server:app --host 0.0.0.0 --port $PORT
++    healthCheckPath: /api/health
+     envVars:
+       - key: MONGO_URL
+-        sync: false  # Set manually in Render dashboard
++        sync: false
+       - key: DB_NAME
+-        value: routecast_db
++        value: routecast
+       - key: MAPBOX_ACCESS_TOKEN
+-        sync: false  # Set manually in Render dashboard
++        sync: false
+       - key: GOOGLE_API_KEY
+-        sync: false  # Set manually in Render dashboard
++        sync: false
++      - key: NOAA_USER_AGENT
++        value: Routecast/1.0 (support@routecastweather.com)
++      - key: JWT_SECRET_KEY
++        generateValue: true
++      - key: JWT_ALGORITHM
++        value: HS256
++      - key: ACCESS_TOKEN_EXPIRE_MINUTES
++        value: 30
++      - key: REFRESH_TOKEN_EXPIRE_DAYS
++        value: 7
++      - key: APP_URL
++        value: https://app.routecastweather.com
++      - key: API_URL
++        value: https://routecastweather.com
++      - key: SENDGRID_API_KEY
++        sync: false
++      - key: SENDER_EMAIL
++        value: noreply@routecastweather.com
++      - key: STRIPE_API_KEY
++        sync: false
++      - key: STRIPE_WEBHOOK_SECRET
++        sync: false
++      - key: ADMIN_API_KEY
++        generateValue: true
+       - key: PYTHON_VERSION
+         value: 3.11.0
+-    healthCheckPath: /api/health
+-    autoDeploy: true
+ 
+-  # Frontend Static Site (Web export)
+-  # Note: For mobile app, use EAS Build instead
++  # Frontend Static Site (Expo Web)
+   - type: web
+-    name: routecast-frontend
+-    runtime: node
++    name: routecast-app
++    runtime: static
++    region: oregon
+     rootDir: frontend
+     buildCommand: yarn install && npx expo export --platform web
+-    startCommand: npx serve dist -s -l $PORT
++    staticPublishPath: dist
++    headers:
++      - path: /*
++        name: X-Frame-Options
++        value: DENY
++      - path: /*
++        name: X-Content-Type-Options
++        value: nosniff
++      - path: /*
++        name: Cache-Control
++        value: public, max-age=0, must-revalidate
++    routes:
++      - type: rewrite
++        source: /*
++        destination: /index.html
+     envVars:
+       - key: EXPO_PUBLIC_BACKEND_URL
+-        fromService:
+-          type: web
+-          name: routecast-backend
+-          property: host
+-      - key: NODE_VERSION
+-        value: 18.19.0
+-    autoDeploy: true
++        value: https://routecastweather.com
