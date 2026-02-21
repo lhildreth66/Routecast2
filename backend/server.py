@@ -257,7 +257,7 @@ HAZARD_CONFIG = {
     "ice_temp_f": _env_float("HAZARD_ICE_TEMP_F", 32),
     "slippery_temp_f": _env_float("HAZARD_SLIPPERY_TEMP_F", 36),
     "merge_gap_miles": _env_float("HAZARD_MERGE_GAP_MILES", 1.0),
-    "default_span_miles": _env_float("HAZARD_DEFAULT_SPAN_MILES", 2.0),
+    "default_span_miles": _env_float("HAZARD_DEFAULT_SPAN_MILES", 5.0),
     "max_alerts": int(_env_float("MAX_ALERTS_PER_ROUTE", 10)),
     "log_detail": int(_env_float("HAZARD_LOG_DETAIL", 0)),
 }
@@ -2303,7 +2303,7 @@ def generate_hazard_alerts(
 
             if merged:
                 prev = merged[-1]
-                same_type_level = (alert.type == prev.type) and ((alert.alert_level or "") == (prev.alert_level or ""))
+                same_type_level = (alert.type == prev.type) and (((alert.severity or alert.alert_level or "").lower()) == ((prev.severity or prev.alert_level or "").lower()))
                 allow_any_road = alert.type in {"rain", "snow", "whiteout", "ice"}
                 roads_compatible = allow_any_road or (not prev.road_name) or (not alert.road_name) or (prev.road_name == alert.road_name)
                 if same_type_level and roads_compatible:
