@@ -437,7 +437,7 @@ class TestSubscriptionDeletedWebhook:
         requests.post(f"{BASE_URL}/api/webhook/stripe", json=webhook_payload)
         
         import time
-        time.sleep(1)
+        time.sleep(2)  # Wait for background task
         
         # Verify user is premium
         me_response = requests.get(f"{BASE_URL}/api/auth/me", headers={"Authorization": f"Bearer {token}"})
