@@ -13,13 +13,13 @@ from services.subscription_service import handle_stripe_subscription_event
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/webhook", tags=["Webhooks"])
+router = APIRouter(prefix="/stripe", tags=["Webhooks"])
 
-STRIPE_API_KEY = os.environ.get('STRIPE_API_KEY', 'sk_test_emergent')
-STRIPE_WEBHOOK_SECRET = os.environ.get('STRIPE_WEBHOOK_SECRET', '')
+STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY")
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET")
 
 
-@router.post("/stripe")
+@router.post("/webhook")
 async def stripe_webhook(
     request: Request,
     stripe_signature: Optional[str] = Header(None, alias="Stripe-Signature")
