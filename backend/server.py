@@ -2303,7 +2303,12 @@ def generate_hazard_alerts(
 
             if merged:
                 prev = merged[-1]
-                same_type_level = (alert.type == prev.type) and ((alert.alert_level or "") == (prev.alert_level or ""))
+                # Merge when hazards are the same type AND same severity.
+                # (CI test expects adjacent rain hazards with same severity to collapse into 1.)
+                same_type_level = (
+                    (alert.type == prev.type)
+                    and ((alert.severity or "").lower() == (prev.severity or "").lower())
+                )
                 allow_any_road = alert.type in {"rain", "snow", "whiteout", "ice"}
                 roads_compatible = allow_any_road or (not prev.road_name) or (not alert.road_name) or (prev.road_name == alert.road_name)
                 if same_type_level and roads_compatible:
