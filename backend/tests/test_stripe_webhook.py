@@ -323,7 +323,7 @@ class TestSubscriptionUpdatedWebhook:
         requests.post(f"{BASE_URL}/api/webhook/stripe", json=webhook_payload)
         
         import time
-        time.sleep(1)
+        time.sleep(2)  # Wait for background task
         
         return {
             "email": email,
