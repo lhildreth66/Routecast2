@@ -231,5 +231,17 @@ ADMIN_API_KEY=<key>
 - Fixed `determine_plan()` to return `'yearly'` instead of `'annual'` to match SubscriptionPlan enum
 - Fixed `handle_subscription_deleted()` to set both `plan` and `subscription_plan` to `'free'`
 - Fixed `check_subscription_status()` to include `'canceling'` and `'past_due'` as premium statuses
+- Changed webhook processing from background task to synchronous for reliable DB updates
 - Email-based user lookup for generic `buy.stripe.com` payment links
 - All webhook events tested: checkout.session.completed, customer.subscription.updated, customer.subscription.deleted
+
+### Landing Page (Feb 2025)
+- Created vibrant marketing landing page at `/landing`
+- Hero section with clear value proposition and CTAs
+- Social proof band for different user types (Road Trippers, RV, Truckers, Business)
+- 6 feature cards showcasing app capabilities
+- Pricing section with Monthly ($9.99) and Annual ($59.99) plans
+- Free vs Premium comparison table
+- FAQ accordion with 6 common questions
+- Final CTA and footer with links
+- Non-authenticated web users auto-redirect to landing page
