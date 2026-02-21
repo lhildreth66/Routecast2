@@ -224,9 +224,9 @@ class TestStripeWebhookEndpoint:
         )
         assert webhook_response.status_code == 200, f"Webhook failed: {webhook_response.text}"
         
-        # Wait a bit for background task to complete
+        # Wait for background task to complete (webhook processes async)
         import time
-        time.sleep(1)
+        time.sleep(2)
         
         # Check user profile - should now be premium
         me_response = requests.get(
