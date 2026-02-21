@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/subscription", tags=["Subscription"])
 
 # Stripe integration
-STRIPE_API_KEY = os.environ.get('STRIPE_API_KEY', 'sk_test_emergent')
+STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY")
 
 
 @router.get("/status", response_model=SubscriptionInfo)
