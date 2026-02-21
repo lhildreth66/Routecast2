@@ -536,12 +536,7 @@ const styles = StyleSheet.create({
 
   // Navbar
   navbar: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 100,
-    backgroundColor: 'rgba(15, 15, 15, 0.9)',
+    backgroundColor: '#0f0f0f',
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.1)',
   },
