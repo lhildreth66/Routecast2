@@ -536,7 +536,7 @@ class TestYearlySubscription:
         user_data = me_response.json()
         
         assert user_data.get("is_premium") == True, "User should be premium"
-        assert user_data.get("subscription_plan") in ["yearly", "annual"], f"Plan should be 'yearly'. Got: {user_data.get('subscription_plan')}"
+        assert user_data.get("subscription_plan") == "yearly", f"Plan should be 'yearly'. Got: {user_data.get('subscription_plan')}"
         
         print(f"✓ Yearly subscription checkout processed")
         print(f"  subscription_plan: {user_data.get('subscription_plan')}")
