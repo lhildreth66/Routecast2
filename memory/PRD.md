@@ -207,9 +207,11 @@ ADMIN_API_KEY=<key>
 - ~~**Bridge Height Alerts (OSM/Overpass)**~~ - DONE, integrated into route + trucker endpoints
 - ~~**Push Notification Worker**~~ - DONE, token registration + route monitors
 - ~~**Weight-Restricted Roads**~~ - DONE, real OSM data integration
+- ~~**Stripe Webhook for Generic Payment Links**~~ - DONE (Feb 2025), supports email-based user mapping
 
 ### P1 (High Priority)
-- **Redeploy backend** - Push code to trigger Render redeploy with new features
+- **Redeploy backend** - Push code to trigger Render redeploy with new Stripe webhook
+- **End-to-end validation** - Signup → checkout → webhook → premium unlocked
 - Fix white bar autofill bug on address fields
 - Complete Apple IAP implementation
 - Complete Google Play Billing implementation
@@ -222,3 +224,12 @@ ADMIN_API_KEY=<key>
 - Offline mode support
 - Rate limiting
 - Analytics integration
+
+## Recent Changes (Feb 2025)
+
+### Stripe Webhook Improvements
+- Fixed `determine_plan()` to return `'yearly'` instead of `'annual'` to match SubscriptionPlan enum
+- Fixed `handle_subscription_deleted()` to set both `plan` and `subscription_plan` to `'free'`
+- Fixed `check_subscription_status()` to include `'canceling'` and `'past_due'` as premium statuses
+- Email-based user lookup for generic `buy.stripe.com` payment links
+- All webhook events tested: checkout.session.completed, customer.subscription.updated, customer.subscription.deleted
