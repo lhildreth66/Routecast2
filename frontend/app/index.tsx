@@ -47,6 +47,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import { format } from 'date-fns';
 import { WebView } from 'react-native-webview';
 import { useAuth } from '../contexts/AuthContext';
+import * as Notifications from 'expo-notifications';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
