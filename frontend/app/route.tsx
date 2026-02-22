@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -13,88 +13,16 @@ import {
   Modal,
   TextInput,
   Dimensions,
-  Alert,
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Speech from 'expo-speech';
 import { format, parseISO } from 'date-fns';
-import { WebView } from 'react-native-webview';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
-import { buildUrl } from './apiConfig';
+import { WebView } from 'react-native-webview';
 
+const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-
-function pickAlertDetails(a: any): string {
-  const clean = (s?: string) => (typeof s === 'string' ? s.trim() : '');
-  const p = a?.properties ?? {};
-  return (
-    clean(a?.description) ||
-    clean(p.description) ||
-    clean(a?.full_description) ||
-    clean(p.full_description) ||
-    clean(a?.instruction) ||
-    clean(p.instruction) ||
-    clean(a?.headline) ||
-    clean(p.headline) ||
-    clean(p.message) ||
-    clean(a?.message) ||
-    'Details not available for this alert.'
-  );
-}
-
-const parseAlertTimestamp = (alert: HazardAlert): number | null => {
-  const props = alert.properties || {};
-  const candidates = [
-    props.sent,
-    props.issued,
-    props.effective,
-    alert.sent,
-    alert.issued,
-    alert.effective,
-    alert.onset,
-    props.onset,
-    alert.expires,
-    props.expires,
-    alert.ends,
-    props.ends,
-  ];
-
-  for (const ts of candidates) {
-    if (!ts) continue;
-    const ms = Date.parse(ts);
-    if (!Number.isNaN(ms)) {
-      return ms;
-    }
-  }
-  return null;
-};
-
-const filterRecentAlerts = (
-  alerts: HazardAlert[],
-  windowMs = 2 * 60 * 60 * 1000,
-  limit = 10
-): HazardAlert[] => {
-  const cutoff = Date.now() - windowMs;
-
-  return alerts
-    .map((alert) => ({ alert, timestamp: parseAlertTimestamp(alert) }))
-    .filter(({ timestamp }) => timestamp === null || timestamp >= cutoff)
-    .sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))
-    .slice(0, limit)
-    .map(({ alert }) => alert);
-};
-
-const alertMatchesId = (alert: HazardAlert, target?: string | string[]): boolean => {
-  if (!target) return false;
-  const matchValue = Array.isArray(target) ? target[0] : target;
-  if (!matchValue) return false;
-  const normalized = String(matchValue).toLowerCase();
-  const props = alert.properties || {};
-  const candidates = [alert.id, alert.alert_id, props.id, alert.event, alert.headline];
-  return candidates.some((candidate) => candidate && String(candidate).toLowerCase() === normalized);
-};
 
 // Types
 interface RoadCondition {
@@ -143,10 +71,6 @@ interface WaypointWeather {
   };
   weather: WeatherData | null;
   alerts: WeatherAlert[];
-  road_name?: string;
-  span_miles?: number;
-  alert_level?: string;
-  driver_action?: string;
 }
 
 interface SafetyScore {
@@ -158,8 +82,6 @@ interface SafetyScore {
 }
 
 interface HazardAlert {
-  id?: string;
-  alert_id?: string;
   type: string;
   severity: string;
   distance_miles: number;
@@ -167,33 +89,16 @@ interface HazardAlert {
   message: string;
   recommendation: string;
   countdown_text: string;
-  event?: string;
-  headline?: string;
-  description?: string;
-  full_description?: string;
-  instruction?: string;
-  areaDesc?: string;
-  onset?: string;
-  expires?: string;
-  effective?: string;
-  ends?: string;
-  sent?: string;
-  issued?: string;
-  location_name?: string;
-  properties?: {
-    id?: string;
-    event?: string;
-    headline?: string;
-    description?: string;
-    instruction?: string;
-    areaDesc?: string;
-    onset?: string;
-    expires?: string;
-    effective?: string;
-    ends?: string;
-    sent?: string;
-    issued?: string;
-  };
+}
+
+interface BridgeClearanceAlert {
+  bridge_name: string;
+  clearance_ft: number;
+  vehicle_height_ft: number;
+  distance_miles: number;
+  latitude: number;
+  longitude: number;
+  warning: string;
 }
 
 interface RouteData {
@@ -202,10 +107,10 @@ interface RouteData {
   destination: string;
   total_duration_minutes: number | null;
   total_distance_miles: number | null;
-  route_geometry?: string;
   waypoints: WaypointWeather[];
   safety_score: SafetyScore | null;
   hazard_alerts: HazardAlert[];
+  bridge_clearance_alerts?: BridgeClearanceAlert[];
   turn_by_turn: TurnByTurnStep[];
   road_condition_summary: string | null;
   worst_road_condition: string | null;
@@ -213,57 +118,7 @@ interface RouteData {
   reroute_reason: string | null;
   trucker_warnings: string[];
   ai_summary: string | null;
-  hazard_status?: string;
-  road_conditions?: any[];
-  weather_conditions?: any[];
-  timings_ms?: Record<string, number>;
 }
-
-const sampleRoutePoints = (waypoints: WaypointWeather[], intervalMiles = 8) => {
-  const points: { lat: number; lon: number }[] = [];
-  let lastDistance = -Infinity;
-
-  waypoints.forEach((wp, idx) => {
-    const lat = wp?.waypoint?.lat;
-    const lon = wp?.waypoint?.lon;
-    const dist = wp?.waypoint?.distance_from_start;
-    if (typeof lat !== 'number' || typeof lon !== 'number') return;
-
-    if (typeof dist === 'number') {
-      if (!points.length || dist - lastDistance >= intervalMiles || idx === waypoints.length - 1) {
-        points.push({ lat, lon });
-        lastDistance = dist;
-      }
-    } else {
-      // Fallback if distance is missing: keep all valid coords
-      points.push({ lat, lon });
-    }
-  });
-
-  return points;
-};
-
-const computeBBox = (points: { lat: number; lon: number }[]) => {
-  if (!points || points.length === 0) return undefined;
-  let minLat = Number.POSITIVE_INFINITY;
-  let maxLat = Number.NEGATIVE_INFINITY;
-  let minLon = Number.POSITIVE_INFINITY;
-  let maxLon = Number.NEGATIVE_INFINITY;
-
-  points.forEach((p) => {
-    if (typeof p.lat !== 'number' || typeof p.lon !== 'number') return;
-    minLat = Math.min(minLat, p.lat);
-    maxLat = Math.max(maxLat, p.lat);
-    minLon = Math.min(minLon, p.lon);
-    maxLon = Math.max(maxLon, p.lon);
-  });
-
-  if (!Number.isFinite(minLat) || !Number.isFinite(minLon) || !Number.isFinite(maxLat) || !Number.isFinite(maxLon)) {
-    return undefined;
-  }
-
-  return { min_lat: minLat, max_lat: maxLat, min_lon: minLon, max_lon: maxLon };
-};
 
 const formatDuration = (minutes: number): string => {
   const hours = Math.floor(minutes / 60);
@@ -291,6 +146,7 @@ const getManeuverIcon = (maneuver: string): string => {
 const generateRadarMapHtml = (centerLat: number, centerLon: number): string => {
   const usLat = Math.max(25, Math.min(48, centerLat));
   const usLon = Math.max(-124, Math.min(-68, centerLon));
+  
   return `
     <!DOCTYPE html>
     <html>
@@ -459,7 +315,6 @@ const generateRadarMapHtml = (centerLat: number, centerLon: number): string => {
           version: '1.3.0',
           opacity: 0.8
         }).addTo(map);
-        console.log('[map] NWS layer added (IEM WMS warnings_c)');
         
         var radarLayer = null;
         var showRadar = true;
@@ -475,7 +330,6 @@ const generateRadarMapHtml = (centerLat: number, centerLon: number): string => {
                 'https://tilecache.rainviewer.com' + latest.path + '/512/{z}/{x}/{y}/2/1_1.png',
                 { opacity: 0.5, zIndex: 50, tileSize: 512, zoomOffset: -1 }
               );
-              console.log('[map] RainViewer layer added', { timestamp: latest.time, path: latest.path });
               if (showRadar) radarLayer.addTo(map);
             }
           });
@@ -510,21 +364,8 @@ export default function RouteScreen() {
   const params = useLocalSearchParams();
   const [routeData, setRouteData] = useState<RouteData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [alerts, setAlerts] = useState<HazardAlert[]>([]);
-  const [alertsStatus, setAlertsStatus] = useState<'idle' | 'pending' | 'ready' | 'error'>('idle');
-  const [alertsError, setAlertsError] = useState<string | null>(null);
-  const [perfMetrics, setPerfMetrics] = useState<any | null>(null);
-  const [activeTab, setActiveTab] = useState<'conditions' | 'directions' | 'alerts'>('conditions');
+  const [activeTab, setActiveTab] = useState<'conditions' | 'directions' | 'alerts' | 'bridges'>('conditions');
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [pushToken, setPushToken] = useState<string | null>(null);
-  const monitorStartedRef = useRef(false);
-  const alertsRequestedRef = useRef<Set<string>>(new Set());
-  const alertIdParam = Array.isArray(params.alertId) ? params.alertId[0] : (params.alertId as string | undefined);
-  const requestedTab = Array.isArray(params.tab) ? params.tab[0] : (params.tab as string | undefined);
-  const filteredAlerts = useMemo(
-    () => filterRecentAlerts(alerts),
-    [alerts]
-  );
   
   // Radar map state
   const [showRadarMap, setShowRadarMap] = useState(false);
@@ -543,265 +384,34 @@ export default function RouteScreen() {
     setExpandedCards(newExpanded);
   };
 
-  const stopSpeech = useCallback((options?: { skipState?: boolean }) => {
-    Speech.stop();
-    if (!options?.skipState) {
-      setIsSpeaking(false);
-    }
-  }, []);
-
-  const fetchAlertsForRoute = useCallback(
-    async (routeId?: string) => {
-      if (!routeId) return;
-      setAlertsStatus('pending');
-      setAlertsError(null);
-      try {
-        console.log('[alerts] calling route alerts endpoint', { routeId });
-        const resp = await axios.get(buildUrl(`route/weather/alerts/${routeId}`));
-        const data = resp.data || {};
-
-        const cards = (data.weather_alert_cards || data.alerts || data.hazard_alerts || []) as HazardAlert[];
-        const status = (data.status || data.hazard_status || 'ready') as 'pending' | 'ready' | 'error';
-        const hydratedAlerts = filterRecentAlerts(cards, 2 * 60 * 60 * 1000, 10);
-
-        console.log('[alerts] fetched', {
-          routeId,
-          status,
-          keys: Object.keys(data || {}),
-          weather_alert_cards_len: (data.weather_alert_cards || []).length,
-          alerts_len: (data.alerts || []).length,
-          hazard_alerts_len: (data.hazard_alerts || []).length,
-          filteredCount: hydratedAlerts.length,
-        });
-        console.log('weather_alert_cards length', (data.weather_alert_cards || []).length);
-
-        setAlerts(hydratedAlerts);
-        setAlertsStatus(status);
-        if (data.error) {
-          setAlertsError(typeof data.error === 'string' ? data.error : 'Alerts unavailable');
-        }
-
-        setRouteData((prev) => {
-          if (!prev || prev.id !== routeId) return prev;
-          return {
-            ...prev,
-            hazard_alerts: hydratedAlerts,
-            hazard_status: status,
-            road_conditions: data.road_conditions || prev.road_conditions,
-            weather_conditions: data.weather_conditions || prev.weather_conditions,
-          };
-        });
-      } catch (err) {
-        console.warn('[route] alerts fetch failed', err);
-        setAlerts([]);
-        setAlertsStatus('error');
-        setAlertsError('Unable to load alerts');
-      }
-    },
-    [setRouteData]
-  );
-
-  const triggerAlertsFetch = useCallback(
-    (routeId?: string) => {
-      if (!routeId) return;
-      if (alertsRequestedRef.current.has(routeId)) return;
-      alertsRequestedRef.current.add(routeId);
-      console.log('[alerts] trigger fetch after route load', { routeId });
-      fetchAlertsForRoute(routeId);
-    },
-    [fetchAlertsForRoute]
-  );
-  
-
   useEffect(() => {
-    return () => {
-      stopSpeech({ skipState: true });
-    };
-  }, [stopSpeech]);
-
-
-  useEffect(() => {
-    const perfParam = Array.isArray(params.perf) ? params.perf[0] : (params.perf as string | undefined);
-    if (perfParam) {
-        try {
-            setPerfMetrics(JSON.parse(perfParam));
-        } catch (e) {
-            console.warn('Error parsing perf metrics:', e);
-        }
-    }
     if (params.routeData) {
       try {
         const data = JSON.parse(params.routeData as string);
-        const sanitized = {
-          ...data,
-          hazard_alerts: filterRecentAlerts(data?.hazard_alerts || [], 2 * 60 * 60 * 1000, 10),
-        };
-        console.warn('[ALERTS DEBUG] routeId is:', sanitized?.id);
-        setRouteData(sanitized);
-        setAlerts(sanitized.hazard_alerts || []);
-        setAlertsStatus((sanitized.hazard_status as 'pending' | 'ready' | 'error') || 'pending');
-
-        if (sanitized?.id) {
-          console.log('[alerts] scheduling initial fetch', { routeId: sanitized.id });
-          triggerAlertsFetch(sanitized.id);
-        }
+        setRouteData(data);
       } catch (e) {
         console.error('Error parsing route data:', e);
       }
     }
     setLoading(false);
-  }, [params.routeData, params.perf, triggerAlertsFetch]);
+  }, [params.routeData]);
 
-  useEffect(() => {
-    const clearStaleAlertsCache = async () => {
-      try {
-        const keys = await AsyncStorage.getAllKeys();
-        const candidateKeys = keys.filter((k) => k.toLowerCase().includes('alert'));
-        if (candidateKeys.length > 0) {
-          await AsyncStorage.multiRemove(candidateKeys);
-        }
-      } catch (err) {
-        console.warn('[alerts] failed to clear cached alerts', err);
-      }
-    };
-
-    clearStaleAlertsCache();
-  }, []);
-
-  useEffect(() => {
+  const speakSummary = async () => {
     if (!routeData) return;
-    const renderTs = Date.now();
-    if (perfMetrics) {
-      const { submit, request, response } = perfMetrics;
-      console.log('[perf][route] results rendered', {
-        submit,
-        request,
-        response,
-        render: renderTs,
-        ms_submit_to_render: submit ? renderTs - submit : undefined,
-        ms_response_to_render: response ? renderTs - response : undefined,
-      });
-    } else {
-      console.log('[perf][route] results rendered', { render: renderTs });
+    
+    if (isSpeaking) {
+      await Speech.stop();
+      setIsSpeaking(false);
+      return;
     }
-  }, [routeData, perfMetrics]);
 
-  useEffect(() => {
-    if (routeData?.id) {
-      triggerAlertsFetch(routeData.id);
-    }
-  }, [routeData?.id, triggerAlertsFetch]);
-
-  useEffect(() => {
-    if (activeTab === 'alerts' && alertsStatus === 'idle' && routeData?.id) {
-      triggerAlertsFetch(routeData.id);
-    }
-  }, [activeTab, alertsStatus, routeData?.id, triggerAlertsFetch]);
-
-  useEffect(() => {
-    if (requestedTab === 'alerts') {
-      setActiveTab('alerts');
-    }
-  }, [requestedTab]);
-
-  useEffect(() => {
-    if (!alertIdParam) return;
-    setActiveTab('alerts');
-    if (filteredAlerts.length === 0) return;
-    const targetIndex = filteredAlerts.findIndex((alert) => alertMatchesId(alert, alertIdParam));
-    if (targetIndex === -1) return;
-    setExpandedCards((prev) => {
-      const next = new Set(prev);
-      next.add(targetIndex + 1000);
-      return next;
-    });
-  }, [alertIdParam, filteredAlerts]);
-
-  useEffect(() => {
-    const loadPushToken = async () => {
-      try {
-        const stored = await AsyncStorage.getItem('expoPushToken');
-        if (stored) {
-          setPushToken(stored);
-        }
-      } catch (err) {
-        console.log('[route-monitor] failed to load push token', err);
-      }
-    };
-    loadPushToken();
-  }, []);
-
-  useEffect(() => {
-    const startMonitor = async () => {
-      if (!routeData || !pushToken || monitorStartedRef.current) return;
-      const samplePoints = sampleRoutePoints(routeData.waypoints || [], 8);
-      const routePoints = (routeData.waypoints || [])
-        .map((wp) => ({ lat: wp?.waypoint?.lat, lon: wp?.waypoint?.lon }))
-        .filter((p) => typeof p.lat === 'number' && typeof p.lon === 'number');
-      const hasPolyline = typeof routeData.route_geometry === 'string' && routeData.route_geometry.length > 0;
-      const hasSamples = samplePoints.length > 0;
-      const hasRoutePoints = routePoints.length > 0;
-      if (!hasPolyline && !hasSamples && !hasRoutePoints) return;
-
-      monitorStartedRef.current = true;
-      try {
-        const bbox = computeBBox(hasSamples ? samplePoints : routePoints);
-        const payload: any = {
-          route_id: routeData.id || 'route-monitor',
-          push_token: pushToken,
-          origin: routeData.origin,
-          destination: routeData.destination,
-          waypoints: routeData.waypoints?.map((wp) => ({
-            lat: wp?.waypoint?.lat,
-            lon: wp?.waypoint?.lon,
-            name: wp?.waypoint?.name,
-          })),
-          bbox,
-        };
-
-        if (hasPolyline) {
-          payload.route_polyline = routeData.route_geometry;
-        }
-        if (hasSamples) {
-          payload.sample_points = samplePoints;
-        }
-        if (hasRoutePoints) {
-          payload.route_points = routePoints;
-        }
-
-        const url = buildUrl('notifications/route-monitor/start');
-        console.warn('[route-monitor] start payload', { url, payload });
-        await axios.post(url, payload);
-      } catch (err) {
-        const status = (err as any)?.response?.status;
-        const detail = (err as any)?.response?.data;
-        const snippet = typeof detail === 'string' ? detail.slice(0, 200) : (() => {
-          try {
-            return JSON.stringify(detail).slice(0, 200);
-          } catch {
-            return String(detail).slice(0, 200);
-          }
-        })();
-        console.warn('[route-monitor] start failed', { status, detail: snippet, error: err });
-        monitorStartedRef.current = false; // allow retry on next render
-        const message = `Failed to start (${status || 'error'}): ${snippet || 'Please try again.'}`;
-        Alert.alert('Route Alerts', message);
-      }
-    };
-
-    startMonitor();
-  }, [routeData, pushToken]);
-
-  const speakSummary = () => {
-    if (!routeData) return;
-    stopSpeech();
     setIsSpeaking(true);
+    
     const parts: string[] = [];
-
     parts.push(`Route from ${routeData.origin} to ${routeData.destination}.`);
-
+    
     if (routeData.total_distance_miles) {
-      parts.push(`Distance: ${Math.round(routeData.total_distance_miles)} miles.`);
+      parts.push(`Total distance: ${Math.round(routeData.total_distance_miles)} miles.`);
     }
     if (routeData.total_duration_minutes) {
       parts.push(`Estimated time: ${formatDuration(routeData.total_duration_minutes)}.`);
@@ -823,11 +433,10 @@ export default function RouteScreen() {
     }
     
     // Hazards
-    if (filteredAlerts.length > 0) {
-      parts.push(`${filteredAlerts.length} weather hazards along your route.`);
-      filteredAlerts.slice(0, 3).forEach(alert => {
-        const title = alert.event || alert.headline || alert.message;
-        parts.push(`${title}. ${alert.countdown_text}. ${alert.recommendation}`);
+    if (routeData.hazard_alerts?.length > 0) {
+      parts.push(`${routeData.hazard_alerts.length} weather hazards along your route.`);
+      routeData.hazard_alerts.slice(0, 3).forEach(alert => {
+        parts.push(`${alert.countdown_text}. ${alert.recommendation}`);
       });
     }
     
@@ -919,7 +528,7 @@ export default function RouteScreen() {
             <Ionicons name="radio-outline" size={18} color="#22c55e" />
             <Text style={styles.radarBtnText}>Radar</Text>
           </TouchableOpacity>
-          <TouchableOpacity onPress={isSpeaking ? () => stopSpeech() : speakSummary} style={styles.speakBtn}>
+          <TouchableOpacity onPress={speakSummary} style={styles.speakBtn}>
             <Ionicons name={isSpeaking ? "stop-circle" : "volume-high"} size={22} color={isSpeaking ? "#ef4444" : "#60a5fa"} />
           </TouchableOpacity>
           <TouchableOpacity onPress={shareRoute} style={styles.shareBtn}>
@@ -1033,15 +642,15 @@ export default function RouteScreen() {
           <Text style={styles.proFeatureTitle}>Tractor Trailer</Text>
         </TouchableOpacity>
 
-        {/* User Guide */}
+        {/* How To Use */}
         <TouchableOpacity 
           style={styles.proFeatureCard}
-          onPress={() => router.push('/user-guide')}
+          onPress={() => router.push('/how-to-use')}
         >
           <View style={[styles.proFeatureIcon, { backgroundColor: '#8b5cf6' }]}>
-            <Ionicons name="book" size={20} color="#fff" />
+            <Ionicons name="help-circle" size={20} color="#fff" />
           </View>
-          <Text style={styles.proFeatureTitle}>Guide</Text>
+          <Text style={styles.proFeatureTitle}>How To Use</Text>
         </TouchableOpacity>
       </View>
 
@@ -1051,27 +660,39 @@ export default function RouteScreen() {
           style={[styles.tab, activeTab === 'conditions' && styles.tabActive]}
           onPress={() => setActiveTab('conditions')}
         >
-          <Ionicons name="car" size={18} color={activeTab === 'conditions' ? '#eab308' : '#6b7280'} />
+          <Ionicons name="car" size={16} color={activeTab === 'conditions' ? '#eab308' : '#6b7280'} />
           <Text style={[styles.tabText, activeTab === 'conditions' && styles.tabTextActive]}>Road</Text>
         </TouchableOpacity>
         <TouchableOpacity 
-          style={[styles.tab, activeTab === 'directions' && styles.tabActive]}
-          onPress={() => setActiveTab('directions')}
+          style={[styles.tab, activeTab === 'bridges' && styles.tabActive]}
+          onPress={() => setActiveTab('bridges')}
         >
-          <Ionicons name="navigate" size={18} color={activeTab === 'directions' ? '#eab308' : '#6b7280'} />
-          <Text style={[styles.tabText, activeTab === 'directions' && styles.tabTextActive]}>Directions</Text>
+          <Ionicons name="git-commit-outline" size={16} color={activeTab === 'bridges' ? '#f59e0b' : '#6b7280'} />
+          <Text style={[styles.tabText, activeTab === 'bridges' && styles.tabTextActive]}>Bridges</Text>
+          {routeData.bridge_clearance_alerts && routeData.bridge_clearance_alerts.length > 0 && (
+            <View style={[styles.tabBadge, { backgroundColor: '#f59e0b' }]}>
+              <Text style={styles.tabBadgeText}>{routeData.bridge_clearance_alerts.length}</Text>
+            </View>
+          )}
         </TouchableOpacity>
         <TouchableOpacity 
           style={[styles.tab, activeTab === 'alerts' && styles.tabActive]}
           onPress={() => setActiveTab('alerts')}
         >
-          <Ionicons name="warning" size={18} color={activeTab === 'alerts' ? '#ef4444' : '#6b7280'} />
+          <Ionicons name="warning" size={16} color={activeTab === 'alerts' ? '#ef4444' : '#6b7280'} />
           <Text style={[styles.tabText, activeTab === 'alerts' && styles.tabTextActive]}>Alerts</Text>
-          {filteredAlerts.length > 0 && (
+          {routeData.hazard_alerts?.length > 0 && (
             <View style={styles.tabBadge}>
-              <Text style={styles.tabBadgeText}>{filteredAlerts.length}</Text>
+              <Text style={styles.tabBadgeText}>{routeData.hazard_alerts.length}</Text>
             </View>
           )}
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={[styles.tab, activeTab === 'directions' && styles.tabActive]}
+          onPress={() => setActiveTab('directions')}
+        >
+          <Ionicons name="navigate" size={16} color={activeTab === 'directions' ? '#eab308' : '#6b7280'} />
+          <Text style={[styles.tabText, activeTab === 'directions' && styles.tabTextActive]}>Nav</Text>
         </TouchableOpacity>
       </View>
 
@@ -1182,6 +803,66 @@ export default function RouteScreen() {
           </View>
         )}
 
+        {/* Bridge Height Hazards Tab */}
+        {activeTab === 'bridges' && (
+          <View style={styles.bridgesTab}>
+            <Text style={styles.sectionTitle}>Bridge Height Hazards</Text>
+            <Text style={styles.sectionSubtitle}>Low clearances that may affect your vehicle</Text>
+            
+            {routeData.bridge_clearance_alerts && routeData.bridge_clearance_alerts.length > 0 ? (
+              <>
+                {routeData.bridge_clearance_alerts.map((alert, index) => (
+                  <View key={index} style={styles.bridgeCard}>
+                    <View style={styles.bridgeHeader}>
+                      <View style={styles.bridgeIconBox}>
+                        <Ionicons name="warning" size={24} color="#f59e0b" />
+                      </View>
+                      <View style={styles.bridgeInfo}>
+                        <Text style={styles.bridgeName}>{alert.bridge_name}</Text>
+                        <Text style={styles.bridgeDistance}>{Math.round(alert.distance_miles)} miles ahead</Text>
+                      </View>
+                    </View>
+                    
+                    <View style={styles.bridgeClearanceRow}>
+                      <View style={styles.clearanceBox}>
+                        <Text style={styles.clearanceLabel}>CLEARANCE</Text>
+                        <Text style={styles.clearanceValue}>{alert.clearance_ft.toFixed(1)} ft</Text>
+                      </View>
+                      <View style={styles.clearanceDivider} />
+                      <View style={styles.clearanceBox}>
+                        <Text style={styles.clearanceLabel}>YOUR HEIGHT</Text>
+                        <Text style={styles.clearanceValueDanger}>{alert.vehicle_height_ft.toFixed(1)} ft</Text>
+                      </View>
+                    </View>
+                    
+                    <View style={styles.bridgeWarning}>
+                      <Ionicons name="alert-circle" size={18} color="#fecaca" />
+                      <Text style={styles.bridgeWarningText}>{alert.warning}</Text>
+                    </View>
+                  </View>
+                ))}
+              </>
+            ) : (
+              <View style={styles.noBridgeAlerts}>
+                <Ionicons name="checkmark-circle" size={64} color="#22c55e" />
+                <Text style={styles.noBridgeTitle}>All Clear!</Text>
+                <Text style={styles.noBridgeText}>
+                  {routeData.trucker_warnings?.length > 0 
+                    ? "No low bridges detected for your vehicle height."
+                    : "Enable Trucker Mode and enter your vehicle height on the home screen to see bridge clearance alerts."}
+                </Text>
+              </View>
+            )}
+            
+            <View style={styles.bridgeDisclaimer}>
+              <Ionicons name="information-circle" size={18} color="#6b7280" />
+              <Text style={styles.bridgeDisclaimerText}>
+                Bridge data is for reference only. Always verify with current signage. Some temporary restrictions may not be reflected.
+              </Text>
+            </View>
+          </View>
+        )}
+
         {/* Turn-by-Turn Directions Tab */}
         {activeTab === 'directions' && (
           <View style={styles.directionsTab}>
@@ -1234,40 +915,20 @@ export default function RouteScreen() {
         {activeTab === 'alerts' && (
           <View style={styles.alertsTab}>
             <Text style={styles.sectionTitle}>⚠️ Weather Alerts Along Route</Text>
-            <Text style={styles.sectionSubtitle}>Tap any alert to see full National Weather Service details</Text>
-            <Text style={styles.debugNotice}>
-              Alerts loaded: {filteredAlerts.length} • Status: {alertsStatus}
-              {alertsError ? ` • Error: ${alertsError}` : ''}
-            </Text>
+            <Text style={styles.sectionSubtitle}>Tap any alert to see full details</Text>
             
-            {filteredAlerts.length > 0 ? (
-              filteredAlerts.map((alert, index) => {
+            {routeData.hazard_alerts && routeData.hazard_alerts.length > 0 ? (
+              routeData.hazard_alerts.map((alert, index) => {
                 const isExpanded = expandedCards.has(index + 1000); // Use offset to differentiate from road cards
-                const props = alert.properties || {};
-                const eventName = alert.event || props.event || alert.headline || 'Weather Alert';
-                const isInfo = eventName === 'Special Weather Statement';
-                const eventTitle = isInfo ? 'Info' : eventName;
-                const headline = alert.headline || props.headline;
-                const description = alert.description || alert.full_description || props.description;
-                const instruction = alert.instruction || props.instruction;
-                const areaDesc = alert.areaDesc || props.areaDesc;
-                const onset = alert.onset || props.onset;
-                const expires = alert.expires || props.expires;
-                const detailText = pickAlertDetails(alert);
                 
                 return (
                   <TouchableOpacity 
                     key={index} 
                     style={[
                       styles.alertCard,
-                      isInfo
-                        ? styles.alertInfoCard
-                        : alert.severity === 'extreme'
-                        ? styles.alertExtreme
-                        : alert.severity === 'high'
-                        ? styles.alertHigh
-                        : styles.alertMedium,
-                      isExpanded && styles.alertCardExpanded,
+                      alert.severity === 'extreme' ? styles.alertExtreme :
+                      alert.severity === 'high' ? styles.alertHigh : styles.alertMedium,
+                      isExpanded && styles.alertCardExpanded
                     ]}
                     onPress={() => toggleCardExpand(index + 1000)}
                     activeOpacity={0.8}
@@ -1275,25 +936,37 @@ export default function RouteScreen() {
                     <View style={styles.alertHeader}>
                       <Ionicons 
                         name={
-                          isInfo
-                            ? 'information-circle'
-                            : alert.type === 'ice'
-                            ? 'snow'
-                            : alert.type === 'rain'
-                            ? 'rainy'
-                            : alert.type === 'wind'
-                            ? 'cloudy'
-                            : 'warning'
-                        }
-                        size={28}
-                        color={isInfo ? '#bfdbfe' : '#fff'}
+                          alert.type === 'ice' ? 'snow' :
+                          alert.type === 'rain' ? 'rainy' :
+                          alert.type === 'wind' ? 'cloudy' :
+                          'warning'
+                        } 
+                        size={28} 
+                        color="#fff" 
                       />
                       <View style={styles.alertInfo}>
-                        <Text style={styles.alertMessage}>{eventTitle}</Text>
-                        {headline ? (
-                          <Text style={styles.alertSubhead}>{headline}</Text>
-                        ) : null}
+                        {/* Source and Severity badges */}
+                        <View style={styles.alertBadges}>
+                          <View style={[styles.alertSourceBadge, alert.source === 'nws' ? styles.alertSourceNWS : styles.alertSourceSystem]}>
+                            <Text style={styles.alertSourceText}>
+                              {alert.source === 'nws' ? 'Official NWS' : 'System Detected'}
+                            </Text>
+                          </View>
+                          <View style={[
+                            styles.alertSeverityBadge,
+                            alert.severity === 'extreme' ? styles.severityExtreme :
+                            alert.severity === 'high' ? styles.severityHigh :
+                            alert.severity === 'medium' ? styles.severityMedium : styles.severityLow
+                          ]}>
+                            <Text style={styles.alertSeverityText}>
+                              {alert.severity === 'extreme' ? 'Warning' :
+                               alert.severity === 'high' ? 'Warning' :
+                               alert.severity === 'medium' ? 'Watch' : 'Advisory'}
+                            </Text>
+                          </View>
+                        </View>
                         <Text style={styles.alertCountdown}>{alert.countdown_text}</Text>
+                        <Text style={styles.alertMessage}>{alert.message}</Text>
                       </View>
                       <Ionicons 
                         name={isExpanded ? "chevron-up" : "chevron-down"} 
@@ -1306,33 +979,19 @@ export default function RouteScreen() {
                     {isExpanded && (
                       <View style={styles.alertExpandedContent}>
                         <View style={styles.alertFullDescription}>
-                          <Text style={styles.alertFullTitle}>What is happening</Text>
+                          <Text style={styles.alertFullTitle}>Full Alert Details:</Text>
                           <Text style={styles.alertFullText}>
-                            {detailText}
+                            {alert.full_description || alert.description || 
+                             `This ${alert.message || 'weather alert'} is active for your route area. ` +
+                             `Exercise caution and monitor local weather updates. ` +
+                             `Conditions may include reduced visibility, slippery roads, or other hazards.`}
                           </Text>
                         </View>
-
-                        {areaDesc ? (
-                          <View style={styles.alertMetaRow}>
-                            <Ionicons name="map" size={16} color="#a1a1aa" />
-                            <Text style={styles.alertMetaText}>Affected areas: {areaDesc}</Text>
-                          </View>
-                        ) : null}
-
-                        {(onset || expires) && (
-                          <View style={styles.alertMetaRow}>
-                            <Ionicons name="time" size={16} color="#a1a1aa" />
-                            <Text style={styles.alertMetaText}>
-                              Valid {onset ? format(parseISO(onset), 'MMM d, h:mma') : 'now'}
-                              {expires ? ` → ${format(parseISO(expires), 'MMM d, h:mma')}` : ''}
-                            </Text>
-                          </View>
-                        )}
                         
-                        {instruction && (
+                        {alert.instruction && (
                           <View style={styles.alertInstructionBox}>
-                            <Text style={styles.alertInstructionTitle}>📋 What To Do</Text>
-                            <Text style={styles.alertInstructionText}>{instruction}</Text>
+                            <Text style={styles.alertInstructionTitle}>📋 What To Do:</Text>
+                            <Text style={styles.alertInstructionText}>{alert.instruction}</Text>
                           </View>
                         )}
                         
@@ -1345,22 +1004,6 @@ export default function RouteScreen() {
                     
                     {!isExpanded && (
                       <>
-                        <View style={styles.alertBriefRow}>
-                          {areaDesc ? (
-                            <Text style={styles.alertBriefText}>Areas: {areaDesc}</Text>
-                          ) : null}
-                          {(onset || expires) ? (
-                            <Text style={styles.alertBriefText}>
-                              {onset ? format(parseISO(onset), 'MMM d, h:mma') : 'Now'}
-                              {expires ? ` → ${format(parseISO(expires), 'MMM d, h:mma')}` : ''}
-                            </Text>
-                          ) : null}
-                        </View>
-                        {detailText ? (
-                          <Text style={styles.alertSnippet} numberOfLines={2}>
-                            {detailText}
-                          </Text>
-                        ) : null}
                         <View style={styles.alertAction}>
                           <Ionicons name="checkmark-circle" size={16} color="#22c55e" />
                           <Text style={styles.alertRec}>{alert.recommendation}</Text>
@@ -1381,23 +1024,11 @@ export default function RouteScreen() {
                   </TouchableOpacity>
                 );
               })
-            ) : alertsStatus === 'pending' ? (
-              <View style={styles.noAlerts}>
-                <ActivityIndicator size="small" color="#eab308" />
-                <Text style={styles.noAlertsTitle}>Loading alerts…</Text>
-                <Text style={styles.noAlertsText}>Fetching NWS alerts for this route</Text>
-              </View>
-            ) : alertsStatus === 'error' ? (
-              <View style={styles.noAlerts}>
-                <Ionicons name="alert-circle" size={48} color="#f97316" />
-                <Text style={styles.noAlertsTitle}>Alerts unavailable</Text>
-                <Text style={styles.noAlertsText}>{alertsError || 'Unable to load alerts right now'}</Text>
-              </View>
             ) : (
               <View style={styles.noAlerts}>
                 <Ionicons name="checkmark-circle" size={64} color="#22c55e" />
                 <Text style={styles.noAlertsTitle}>All Clear!</Text>
-                <Text style={styles.noAlertsText}>No active alerts for this route</Text>
+                <Text style={styles.noAlertsText}>No significant hazards on your route</Text>
               </View>
             )}
           </View>
@@ -1416,7 +1047,7 @@ export default function RouteScreen() {
           <Ionicons name="navigate" size={24} color="#fff" />
           <Text style={styles.navText}>Start Navigation</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.actionBtn} onPress={isSpeaking ? () => stopSpeech() : speakSummary}>
+        <TouchableOpacity style={styles.actionBtn} onPress={speakSummary}>
           <Ionicons name={isSpeaking ? "stop" : "volume-high"} size={22} color="#fff" />
           <Text style={styles.actionText}>{isSpeaking ? 'Stop' : 'Listen'}</Text>
         </TouchableOpacity>
@@ -1917,11 +1548,6 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: '#fbbf24',
   },
-  alertInfoCard: {
-    backgroundColor: '#0f172a',
-    borderColor: '#38bdf8',
-    borderWidth: 1,
-  },
   alertExtreme: {
     backgroundColor: '#7f1d1d',
   },
@@ -1939,6 +1565,51 @@ const styles = StyleSheet.create({
   alertInfo: {
     flex: 1,
   },
+  alertBadges: {
+    flexDirection: 'row',
+    gap: 6,
+    marginBottom: 4,
+  },
+  alertSourceBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  alertSourceNWS: {
+    backgroundColor: '#1d4ed8',
+  },
+  alertSourceSystem: {
+    backgroundColor: '#6b7280',
+  },
+  alertSourceText: {
+    color: '#fff',
+    fontSize: 9,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  alertSeverityBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  severityExtreme: {
+    backgroundColor: '#dc2626',
+  },
+  severityHigh: {
+    backgroundColor: '#ea580c',
+  },
+  severityMedium: {
+    backgroundColor: '#ca8a04',
+  },
+  severityLow: {
+    backgroundColor: '#16a34a',
+  },
+  alertSeverityText: {
+    color: '#fff',
+    fontSize: 9,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
   alertCountdown: {
     color: '#fff',
     fontSize: 16,
@@ -1947,11 +1618,6 @@ const styles = StyleSheet.create({
   alertMessage: {
     color: '#fecaca',
     fontSize: 12,
-    marginTop: 2,
-  },
-  alertSubhead: {
-    color: '#ffe4e6',
-    fontSize: 11,
     marginTop: 2,
   },
   alertExpandedContent: {
@@ -1991,18 +1657,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
   },
-  alertMetaRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-    marginBottom: 8,
-  },
-  alertMetaText: {
-    color: '#d4d4d8',
-    fontSize: 12,
-    flex: 1,
-    lineHeight: 18,
-  },
   alertAction: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -2021,21 +1675,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginTop: 10,
-  },
-  alertBriefRow: {
-    flexDirection: 'column',
-    gap: 4,
-    marginTop: 8,
-  },
-  alertBriefText: {
-    color: '#e5e7eb',
-    fontSize: 11,
-  },
-  alertSnippet: {
-    color: '#fff',
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: 6,
   },
   alertDistance: {
     color: 'rgba(255,255,255,0.7)',
@@ -2059,12 +1698,6 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     fontSize: 14,
     marginTop: 4,
-  },
-  debugNotice: {
-    color: '#a1a1aa',
-    fontSize: 12,
-    marginTop: 4,
-    marginBottom: 8,
   },
   bottomPadding: {
     height: 100,
@@ -2148,6 +1781,172 @@ const styles = StyleSheet.create({
   radarWebView: {
     flex: 1,
   },
+  // Chat styles
+  chatFab: {
+    position: 'absolute',
+    right: 20,
+    bottom: 100,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#eab308',
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+  },
+  chatModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'flex-end',
+  },
+  chatModalContent: {
+    backgroundColor: '#1f1f23',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    height: '75%',
+    paddingBottom: 20,
+  },
+  chatHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#3f3f46',
+  },
+  chatHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  chatTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  chatMessages: {
+    flex: 1,
+    padding: 16,
+  },
+  chatWelcome: {
+    alignItems: 'center',
+    paddingVertical: 30,
+  },
+  chatWelcomeText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  chatWelcomeSubtext: {
+    color: '#6b7280',
+    fontSize: 14,
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  chatBubble: {
+    maxWidth: '85%',
+    padding: 12,
+    borderRadius: 16,
+    marginBottom: 10,
+  },
+  userBubble: {
+    backgroundColor: '#2563eb',
+    alignSelf: 'flex-end',
+    borderBottomRightRadius: 4,
+  },
+  aiBubble: {
+    backgroundColor: '#3f3f46',
+    alignSelf: 'flex-start',
+    borderBottomLeftRadius: 4,
+  },
+  chatBubbleText: {
+    color: '#fff',
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  chatTyping: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 8,
+  },
+  chatTypingText: {
+    color: '#6b7280',
+    fontSize: 12,
+  },
+  chatSuggestions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    padding: 12,
+    gap: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#3f3f46',
+  },
+  chatSuggestionBtn: {
+    backgroundColor: '#27272a',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#3f3f46',
+  },
+  chatSuggestionText: {
+    color: '#a1a1aa',
+    fontSize: 12,
+  },
+  listeningIndicator: {
+    alignItems: 'center',
+    paddingVertical: 8,
+  },
+  listeningText: {
+    color: '#fecaca',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  chatInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    gap: 10,
+  },
+  chatInput: {
+    flex: 1,
+    backgroundColor: '#27272a',
+    borderRadius: 24,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    color: '#fff',
+    fontSize: 14,
+    borderWidth: 1,
+    borderColor: '#3f3f46',
+  },
+  chatSendBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#eab308',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  chatSendBtnDisabled: {
+    backgroundColor: '#3f3f46',
+  },
+  micBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#3f3f46',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  micBtnActive: {
+    backgroundColor: '#7f1d1d',
+  },
   // Features Row Styles
   proFeaturesRow: {
     flexDirection: 'row',
@@ -2178,5 +1977,125 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '600',
     textAlign: 'center',
+  },
+  // Bridge Height Hazards Tab Styles
+  bridgesTab: {},
+  bridgeCard: {
+    backgroundColor: '#422006',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#f59e0b',
+  },
+  bridgeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  bridgeIconBox: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(245, 158, 11, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  bridgeInfo: {
+    flex: 1,
+  },
+  bridgeName: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  bridgeDistance: {
+    color: '#fbbf24',
+    fontSize: 13,
+    marginTop: 2,
+  },
+  bridgeClearanceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.3)',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 12,
+  },
+  clearanceBox: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  clearanceLabel: {
+    color: '#9ca3af',
+    fontSize: 10,
+    fontWeight: '600',
+    letterSpacing: 0.5,
+    marginBottom: 4,
+  },
+  clearanceValue: {
+    color: '#fbbf24',
+    fontSize: 24,
+    fontWeight: '800',
+  },
+  clearanceValueDanger: {
+    color: '#ef4444',
+    fontSize: 24,
+    fontWeight: '800',
+  },
+  clearanceDivider: {
+    width: 1,
+    height: 40,
+    backgroundColor: '#3f3f46',
+  },
+  bridgeWarning: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: '#7f1d1d',
+    borderRadius: 8,
+    padding: 12,
+  },
+  bridgeWarningText: {
+    color: '#fecaca',
+    fontSize: 13,
+    flex: 1,
+    lineHeight: 18,
+  },
+  noBridgeAlerts: {
+    alignItems: 'center',
+    paddingVertical: 40,
+    backgroundColor: '#27272a',
+    borderRadius: 12,
+  },
+  noBridgeTitle: {
+    color: '#22c55e',
+    fontSize: 20,
+    fontWeight: '700',
+    marginTop: 12,
+  },
+  noBridgeText: {
+    color: '#6b7280',
+    fontSize: 14,
+    marginTop: 8,
+    textAlign: 'center',
+    paddingHorizontal: 20,
+    lineHeight: 20,
+  },
+  bridgeDisclaimer: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: '#1c1917',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 8,
+  },
+  bridgeDisclaimerText: {
+    color: '#6b7280',
+    fontSize: 12,
+    flex: 1,
+    lineHeight: 16,
   },
 });

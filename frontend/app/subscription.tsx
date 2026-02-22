@@ -1,337 +1,657 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Platform,
-  SafeAreaView,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
   View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ActivityIndicator,
+  ScrollView,
   Linking,
+  Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
-import { buildUrl } from './apiConfig';
+import { router } from 'expo-router';
+import { useAuth } from '../contexts/AuthContext';
+import axios from 'axios';
 
-type PlanId = 'monthly' | 'yearly';
+const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
-const PLANS: Record<PlanId, { title: string; price: string; note: string; badge?: string }> = {
-  monthly: {
-    title: 'Monthly',
-    price: '$9.99/month',
-    note: 'Billed monthly',
-  },
-  yearly: {
-    title: 'Yearly',
-    price: '$59.99/year',
-    note: 'Save over 40% vs monthly',
-    badge: 'Best value',
-  },
-};
+interface Plan {
+  id: string;
+  name: string;
+  price: number;
+  currency: string;
+  interval: string;
+  trial_days: number;
+  features: string[];
+  savings?: string;
+}
 
 export default function SubscriptionScreen() {
-  const router = useRouter();
-  const [selectedPlan, setSelectedPlan] = useState<PlanId>('monthly');
-  const [loading, setLoading] = useState(false);
+  const { user, accessToken, refreshUser, isAuthenticated } = useAuth();
+  const [plans, setPlans] = useState<Plan[]>([]);
+  const [selectedPlan, setSelectedPlan] = useState<string>('yearly');
+  const [loading, setLoading] = useState(true);
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [trialLoading, setTrialLoading] = useState(false);
   const [error, setError] = useState('');
 
-  // Use the current origin for Stripe redirect URLs; default to production when unavailable (native)
-  const originUrl = useMemo(() => {
-    if (typeof window !== 'undefined' && window?.location?.origin) {
-      return window.location.origin;
-    }
-    return 'https://routecastweather.com';
+  useEffect(() => {
+    fetchPlans();
   }, []);
 
-  const handleSubscribe = async () => {
-    setError('');
-    setLoading(true);
-
+  const fetchPlans = async () => {
     try {
-      const response = await fetch(buildUrl('subscription/checkout'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan: selectedPlan, origin_url: originUrl }),
-      });
-
-      if (!response.ok) {
-        const bodyText = await response.text();
-        throw new Error(bodyText || 'Unable to start checkout.');
-      }
-
-      const data = await response.json();
-      const checkoutUrl = data.checkout_url || data.url;
-
-      if (!checkoutUrl) {
-        throw new Error('Checkout URL missing from response.');
-      }
-
-      if (Platform.OS === 'web') {
-        window.location.href = checkoutUrl;
-      } else {
-        const canOpen = await Linking.canOpenURL(checkoutUrl);
-        if (!canOpen) {
-          throw new Error('Unable to open checkout.');
-        }
-        await Linking.openURL(checkoutUrl);
-      }
+      const response = await axios.get(`${API_BASE}/api/subscription/plans`);
+      setPlans(response.data.plans);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unable to start checkout.';
-      setError(message);
-      if (Platform.OS !== 'web') {
-        Alert.alert('Checkout error', message);
-      }
+      console.log('Error fetching plans:', err);
+      setError('Failed to load subscription plans');
     } finally {
       setLoading(false);
     }
   };
 
-  const renderPlanCard = (planId: PlanId) => {
-    const plan = PLANS[planId];
-    const isSelected = selectedPlan === planId;
+  const handleStartTrial = async () => {
+    if (!isAuthenticated) {
+      router.push('/signup');
+      return;
+    }
 
-    return (
-      <TouchableOpacity
-        key={planId}
-        activeOpacity={0.8}
-        onPress={() => setSelectedPlan(planId)}
-        style={[styles.planCard, isSelected && styles.planCardSelected]}
-      >
-        <View style={styles.planHeaderRow}>
-          <View style={styles.planTitleRow}>
-            <Ionicons name={planId === 'yearly' ? 'ribbon' : 'calendar'} size={22} color={isSelected ? '#0f172a' : '#eab308'} />
-            <Text style={[styles.planTitle, isSelected && styles.planTitleSelected]}>{plan.title}</Text>
-          </View>
-          {plan.badge && (
-            <View style={styles.badge}>
-              <Text style={styles.badgeText}>{plan.badge}</Text>
-            </View>
-          )}
-        </View>
-        <Text style={[styles.planPrice, isSelected && styles.planPriceSelected]}>{plan.price}</Text>
-        <Text style={[styles.planNote, isSelected && styles.planNoteSelected]}>{plan.note}</Text>
-      </TouchableOpacity>
-    );
+    setTrialLoading(true);
+    setError('');
+
+    try {
+      await axios.post(
+        `${API_BASE}/api/subscription/start-trial`,
+        {},
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+      await refreshUser();
+      router.replace('/');
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to start trial');
+    } finally {
+      setTrialLoading(false);
+    }
   };
 
+  const handleCheckout = async (planId: string) => {
+    if (!isAuthenticated) {
+      router.push('/signup');
+      return;
+    }
+
+    setCheckoutLoading(true);
+    setError('');
+
+    try {
+      // Get the current origin for redirect URLs
+      const origin = Platform.OS === 'web' 
+        ? window.location.origin 
+        : 'https://app.routecastweather.com';
+
+      const response = await axios.post(
+        `${API_BASE}/api/subscription/checkout`,
+        { 
+          plan: planId,
+          origin_url: origin
+        },
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+
+      const { checkout_url } = response.data;
+
+      if (Platform.OS === 'web') {
+        window.location.href = checkout_url;
+      } else {
+        await Linking.openURL(checkout_url);
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to start checkout');
+    } finally {
+      setCheckoutLoading(false);
+    }
+  };
+
+  const isPremium = user?.is_premium;
+  const isTrialing = user?.subscription_status === 'trialing';
+  const canStartTrial = user?.trial_available && !isPremium && !isTrialing;
+
+  if (loading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#eab308" />
+      </View>
+    );
+  }
+
+  // Already premium - show success state
+  if (isPremium && !isTrialing) {
+    return (
+      <View style={styles.container}>
+        <SafeAreaView style={styles.safeArea}>
+          <View style={styles.premiumContent}>
+            <TouchableOpacity
+              style={styles.backButton}
+              onPress={() => router.back()}
+            >
+              <Ionicons name="arrow-back" size={24} color="#fff" />
+            </TouchableOpacity>
+
+            <View style={styles.premiumIconContainer}>
+              <Ionicons name="star" size={48} color="#eab308" />
+            </View>
+
+            <Text style={styles.premiumTitle}>You're Premium!</Text>
+            <Text style={styles.premiumSubtitle}>
+              You have full access to all Routecast features
+            </Text>
+
+            <View style={styles.premiumInfoBox}>
+              <View style={styles.premiumInfoRow}>
+                <Ionicons name="calendar" size={20} color="#a1a1aa" />
+                <Text style={styles.premiumInfoText}>
+                  Plan: {user?.subscription_plan?.charAt(0).toUpperCase() + user?.subscription_plan?.slice(1)}
+                </Text>
+              </View>
+              {user?.subscription_expiration && (
+                <View style={styles.premiumInfoRow}>
+                  <Ionicons name="time" size={20} color="#a1a1aa" />
+                  <Text style={styles.premiumInfoText}>
+                    Renews: {new Date(user.subscription_expiration).toLocaleDateString()}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            <TouchableOpacity
+              style={styles.manageButton}
+              onPress={() => router.push('/account')}
+            >
+              <Ionicons name="settings-outline" size={20} color="#eab308" />
+              <Text style={styles.manageButtonText}>Manage Subscription</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.continueButton}
+              onPress={() => router.replace('/')}
+            >
+              <Text style={styles.continueButtonText}>Continue to App</Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      </View>
+    );
+  }
+
   return (
-    <SafeAreaView style={styles.container}>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.header}>
-          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-            <Ionicons name="arrow-back" size={22} color="#60a5fa" />
-            <Text style={styles.backText}>Back</Text>
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Upgrade to Premium</Text>
-          <View style={styles.placeholder} />
-        </View>
-
-        <View style={styles.heroCard}>
-          <Text style={styles.heroTitle}>Weather-smart routing without limits</Text>
-          <Text style={styles.heroSubtitle}>Start a 7-day free trial. Cancel anytime.</Text>
-          <View style={styles.bulletRow}>
-            <Ionicons name="cloud" size={18} color="#22d3ee" />
-            <Text style={styles.bulletText}>Live radar, alerts, and hazard-aware routing</Text>
-          </View>
-          <View style={styles.bulletRow}>
-            <Ionicons name="shield-checkmark" size={18} color="#22c55e" />
-            <Text style={styles.bulletText}>Premium tools for RVers & truckers</Text>
-          </View>
-          <View style={styles.bulletRow}>
-            <Ionicons name="sparkles" size={18} color="#fbbf24" />
-            <Text style={styles.bulletText}>All features included with one plan</Text>
-          </View>
-        </View>
-
-        <View style={styles.planGrid}>
-          {renderPlanCard('monthly')}
-          {renderPlanCard('yearly')}
-        </View>
-
-        {error ? (
-          <View style={styles.errorBanner}>
-            <Ionicons name="warning" size={18} color="#fcd34d" />
-            <Text style={styles.errorText}>{error}</Text>
-          </View>
-        ) : null}
-
-        <TouchableOpacity
-          activeOpacity={0.85}
-          onPress={handleSubscribe}
-          disabled={loading}
-          style={[styles.subscribeButton, loading && styles.subscribeButtonDisabled]}
+    <View style={styles.container}>
+      <SafeAreaView style={styles.safeArea}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
         >
-          {loading ? (
-            <ActivityIndicator color="#0f172a" />
-          ) : (
-            <Text style={styles.subscribeText}>Subscribe & Start Trial</Text>
-          )}
-        </TouchableOpacity>
+          {/* Back Button */}
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => router.back()}
+            data-testid="subscription-back-btn"
+          >
+            <Ionicons name="arrow-back" size={24} color="#fff" />
+          </TouchableOpacity>
 
-        <Text style={styles.legal}>You will not be charged until the 7-day trial ends. Payment method is collected today.</Text>
-      </ScrollView>
-    </SafeAreaView>
+          {/* Header */}
+          <View style={styles.header}>
+            <View style={styles.iconContainer}>
+              <Ionicons name="rocket" size={32} color="#1a1a1a" />
+            </View>
+            <Text style={styles.title}>Upgrade to Premium</Text>
+            <Text style={styles.subtitle}>
+              Unlock all features and drive with confidence
+            </Text>
+          </View>
+
+          {/* Trial Banner */}
+          {canStartTrial && (
+            <View style={styles.trialBanner}>
+              <View style={styles.trialBannerContent}>
+                <Ionicons name="gift" size={24} color="#22c55e" />
+                <View style={styles.trialBannerText}>
+                  <Text style={styles.trialBannerTitle}>7-Day Free Trial</Text>
+                  <Text style={styles.trialBannerSubtitle}>
+                    Try all premium features free. No credit card required.
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                style={[styles.trialButton, trialLoading && styles.buttonDisabled]}
+                onPress={handleStartTrial}
+                disabled={trialLoading}
+                data-testid="start-trial-btn"
+              >
+                {trialLoading ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <Text style={styles.trialButtonText}>Start Free Trial</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* Active Trial Banner */}
+          {isTrialing && user?.trial_days_remaining !== undefined && (
+            <View style={styles.activeTrialBanner}>
+              <Ionicons name="time" size={24} color="#eab308" />
+              <View style={styles.activeTrialText}>
+                <Text style={styles.activeTrialTitle}>Trial Active</Text>
+                <Text style={styles.activeTrialSubtitle}>
+                  {user.trial_days_remaining} days remaining
+                </Text>
+              </View>
+            </View>
+          )}
+
+          {/* Plans */}
+          <Text style={styles.sectionTitle}>Choose Your Plan</Text>
+          
+          <View style={styles.plansContainer}>
+            {plans.map((plan) => (
+              <TouchableOpacity
+                key={plan.id}
+                style={[
+                  styles.planCard,
+                  selectedPlan === plan.id && styles.planCardSelected
+                ]}
+                onPress={() => setSelectedPlan(plan.id)}
+                data-testid={`plan-${plan.id}`}
+              >
+                {plan.savings && (
+                  <View style={styles.savingsBadge}>
+                    <Text style={styles.savingsText}>{plan.savings}</Text>
+                  </View>
+                )}
+                
+                <View style={styles.planHeader}>
+                  <Text style={styles.planName}>{plan.name}</Text>
+                  <View style={styles.planPriceContainer}>
+                    <Text style={styles.planPrice}>${plan.price}</Text>
+                    <Text style={styles.planInterval}>/{plan.interval}</Text>
+                  </View>
+                </View>
+
+                <View style={styles.planFeatures}>
+                  {plan.features.map((feature, index) => (
+                    <View key={index} style={styles.featureRow}>
+                      <Ionicons name="checkmark-circle" size={18} color="#22c55e" />
+                      <Text style={styles.featureText}>{feature}</Text>
+                    </View>
+                  ))}
+                </View>
+
+                {selectedPlan === plan.id && (
+                  <View style={styles.selectedIndicator}>
+                    <Ionicons name="checkmark-circle" size={24} color="#eab308" />
+                  </View>
+                )}
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {/* Error Message */}
+          {error && (
+            <View style={styles.errorContainer}>
+              <Ionicons name="alert-circle" size={18} color="#ef4444" />
+              <Text style={styles.errorText}>{error}</Text>
+            </View>
+          )}
+
+          {/* Checkout Button */}
+          <TouchableOpacity
+            style={[styles.checkoutButton, checkoutLoading && styles.buttonDisabled]}
+            onPress={() => handleCheckout(selectedPlan)}
+            disabled={checkoutLoading}
+            data-testid="checkout-btn"
+          >
+            {checkoutLoading ? (
+              <ActivityIndicator color="#1a1a1a" size="small" />
+            ) : (
+              <>
+                <Ionicons name="card" size={22} color="#1a1a1a" />
+                <Text style={styles.checkoutButtonText}>
+                  Subscribe - ${plans.find(p => p.id === selectedPlan)?.price || '0'}/{selectedPlan === 'yearly' ? 'year' : 'month'}
+                </Text>
+              </>
+            )}
+          </TouchableOpacity>
+
+          {/* Skip for now */}
+          <TouchableOpacity
+            style={styles.skipButton}
+            onPress={() => router.replace('/')}
+            data-testid="skip-subscription-btn"
+          >
+            <Text style={styles.skipButtonText}>Continue with free version</Text>
+          </TouchableOpacity>
+
+          {/* Terms */}
+          <Text style={styles.termsText}>
+            By subscribing, you agree to our Terms of Service and Privacy Policy.
+            Subscriptions auto-renew unless cancelled.
+          </Text>
+        </ScrollView>
+      </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0a0a0a',
+    backgroundColor: '#0f0f0f',
   },
-  content: {
-    padding: 20,
-    gap: 16,
-  },
-  header: {
-    flexDirection: 'row',
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: '#0f0f0f',
+    justifyContent: 'center',
     alignItems: 'center',
-    justifyContent: 'space-between',
+  },
+  safeArea: {
+    flex: 1,
+  },
+  scrollContent: {
+    padding: 20,
+    paddingTop: 12,
   },
   backButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: '#27272a',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  header: {
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  iconContainer: {
+    width: 72,
+    height: 72,
+    borderRadius: 20,
+    backgroundColor: '#eab308',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: '#ffffff',
+    marginBottom: 8,
+  },
+  subtitle: {
+    fontSize: 15,
+    color: '#a1a1aa',
+    textAlign: 'center',
+  },
+  trialBanner: {
+    backgroundColor: '#14532d',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 24,
+  },
+  trialBannerContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingVertical: 4,
+    gap: 12,
+    marginBottom: 12,
   },
-  backText: {
-    color: '#60a5fa',
-    fontSize: 15,
+  trialBannerText: {
+    flex: 1,
+  },
+  trialBannerTitle: {
+    color: '#22c55e',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  trialBannerSubtitle: {
+    color: '#86efac',
+    fontSize: 13,
+    marginTop: 2,
+  },
+  trialButton: {
+    backgroundColor: '#22c55e',
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  trialButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  activeTrialBanner: {
+    backgroundColor: '#422006',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  activeTrialText: {
+    flex: 1,
+  },
+  activeTrialTitle: {
+    color: '#eab308',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  activeTrialSubtitle: {
+    color: '#fcd34d',
+    fontSize: 13,
+    marginTop: 2,
+  },
+  sectionTitle: {
+    color: '#a1a1aa',
+    fontSize: 13,
     fontWeight: '600',
+    letterSpacing: 0.5,
+    marginBottom: 12,
+    textTransform: 'uppercase',
   },
-  headerTitle: {
-    color: '#e5e7eb',
+  plansContainer: {
+    gap: 12,
+    marginBottom: 20,
+  },
+  planCard: {
+    backgroundColor: '#27272a',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 2,
+    borderColor: 'transparent',
+    position: 'relative',
+  },
+  planCardSelected: {
+    borderColor: '#eab308',
+    backgroundColor: '#1c1917',
+  },
+  savingsBadge: {
+    position: 'absolute',
+    top: -10,
+    right: 12,
+    backgroundColor: '#22c55e',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  savingsText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  planHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  planName: {
+    color: '#fff',
     fontSize: 18,
     fontWeight: '700',
   },
-  placeholder: {
-    width: 60,
-  },
-  heroCard: {
-    backgroundColor: '#111827',
-    borderRadius: 14,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: '#1f2937',
-    gap: 10,
-  },
-  heroTitle: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '700',
-  },
-  heroSubtitle: {
-    color: '#9ca3af',
-    fontSize: 14,
-  },
-  bulletRow: {
+  planPriceContainer: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  bulletText: {
-    color: '#cbd5e1',
-    fontSize: 14,
-    flex: 1,
-  },
-  planGrid: {
-    flexDirection: 'row',
-    gap: 12,
-    flexWrap: 'wrap',
-  },
-  planCard: {
-    flex: 1,
-    backgroundColor: '#18181b',
-    borderRadius: 12,
-    padding: 14,
-    borderWidth: 1,
-    borderColor: '#27272a',
-    gap: 8,
-  },
-  planCardSelected: {
-    backgroundColor: '#fbbf24',
-    borderColor: '#f59e0b',
-  },
-  planHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  planTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  planTitle: {
-    color: '#fbbf24',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  planTitleSelected: {
-    color: '#0f172a',
+    alignItems: 'baseline',
+    flexWrap: 'nowrap',
   },
   planPrice: {
-    color: '#fff',
-    fontSize: 22,
-    fontWeight: '800',
-  },
-  planPriceSelected: {
-    color: '#0f172a',
-  },
-  planNote: {
-    color: '#9ca3af',
-    fontSize: 12,
-  },
-  planNoteSelected: {
-    color: '#0f172a',
-  },
-  badge: {
-    backgroundColor: '#0f172a',
-    borderRadius: 8,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  badgeText: {
-    color: '#fbbf24',
-    fontSize: 12,
+    color: '#eab308',
+    fontSize: 24,
     fontWeight: '700',
   },
-  errorBanner: {
-    backgroundColor: '#7f1d1d',
-    borderRadius: 10,
-    padding: 12,
+  planInterval: {
+    color: '#6b7280',
+    fontSize: 14,
+    flexShrink: 0,
+  },
+  planFeatures: {
+    gap: 8,
+  },
+  featureRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    borderWidth: 1,
-    borderColor: '#b91c1c',
+  },
+  featureText: {
+    color: '#d4d4d8',
+    fontSize: 13,
+  },
+  selectedIndicator: {
+    position: 'absolute',
+    top: 12,
+    left: 12,
+  },
+  errorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 16,
+    gap: 8,
   },
   errorText: {
-    color: '#fecdd3',
+    color: '#ef4444',
     fontSize: 13,
     flex: 1,
   },
-  subscribeButton: {
-    backgroundColor: '#22c55e',
+  checkoutButton: {
+    backgroundColor: '#eab308',
+    borderRadius: 10,
     paddingVertical: 16,
-    borderRadius: 12,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    marginBottom: 12,
   },
-  subscribeButtonDisabled: {
+  buttonDisabled: {
     opacity: 0.7,
   },
-  subscribeText: {
-    color: '#0f172a',
+  checkoutButtonText: {
+    color: '#1a1a1a',
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: '700',
   },
-  legal: {
-    color: '#9ca3af',
-    fontSize: 12,
+  skipButton: {
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  skipButtonText: {
+    color: '#6b7280',
+    fontSize: 14,
+  },
+  termsText: {
+    color: '#52525b',
+    fontSize: 11,
     textAlign: 'center',
-    lineHeight: 18,
-    paddingHorizontal: 12,
+    lineHeight: 16,
+  },
+  // Premium state styles
+  premiumContent: {
+    flex: 1,
+    padding: 24,
+    alignItems: 'center',
+  },
+  premiumIconContainer: {
+    width: 96,
+    height: 96,
+    borderRadius: 24,
+    backgroundColor: '#422006',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 24,
+    marginTop: 40,
+  },
+  premiumTitle: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: '#ffffff',
+    marginBottom: 8,
+  },
+  premiumSubtitle: {
+    fontSize: 15,
+    color: '#a1a1aa',
+    textAlign: 'center',
+    marginBottom: 32,
+  },
+  premiumInfoBox: {
+    backgroundColor: '#27272a',
+    borderRadius: 12,
+    padding: 16,
+    width: '100%',
+    gap: 12,
+    marginBottom: 24,
+  },
+  premiumInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  premiumInfoText: {
+    color: '#e4e4e7',
+    fontSize: 14,
+  },
+  manageButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: '#27272a',
+    borderRadius: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 24,
+    borderWidth: 1,
+    borderColor: '#eab308',
+    width: '100%',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  manageButtonText: {
+    color: '#eab308',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  continueButton: {
+    paddingVertical: 12,
+  },
+  continueButtonText: {
+    color: '#6b7280',
+    fontSize: 14,
   },
 });

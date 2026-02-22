@@ -3,7 +3,6 @@ import {
   View, 
   Text, 
   StyleSheet, 
-  Pressable,
   TouchableOpacity, 
   ScrollView, 
   Dimensions 
@@ -318,9 +317,9 @@ export default function UserGuideScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} style={styles.backButton}>
-          <Text style={styles.backText}>← Back</Text>
-        </Pressable>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <Ionicons name="arrow-back" size={24} color="#fff" />
+        </TouchableOpacity>
         <Text style={styles.headerTitle}>User Guide</Text>
         <View style={{ width: 40 }} />
       </View>
@@ -443,7 +442,9 @@ export default function UserGuideScreen() {
             <Ionicons name="diamond" size={24} color="#eab308" />
             <Text style={styles.pricingTitle}>Subscription Plans</Text>
           </View>
-          <Text style={styles.pricingSubtitle}>Start with a FREE 1-week trial</Text>
+          <Text style={styles.pricingSubtitle}>
+            All plans include a 7-day free trial with full access to every feature. After the trial ends, your subscription continues automatically unless canceled.
+          </Text>
           
           <View style={styles.pricingOptions}>
             <View style={styles.pricingOption}>
@@ -465,7 +466,7 @@ export default function UserGuideScreen() {
           </View>
           
           <Text style={styles.pricingFooter}>
-            All features included • Cancel anytime • Managed by Google Play
+            All features included • Cancel anytime
           </Text>
         </View>
 
@@ -501,15 +502,10 @@ const styles = StyleSheet.create({
     borderBottomColor: '#1f1f1f',
   },
   backButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: '#1f2937',
-  },
-  backText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   headerTitle: {
     color: '#fff',

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, forwardRef, useCallback, useRef } from 'react';
+import React, { useState, useEffect, forwardRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -15,9 +15,7 @@ import {
   Modal,
   Dimensions,
   Alert,
-  ToastAndroid,
 } from 'react-native';
-import * as Clipboard from 'expo-clipboard';
 
 // Custom TextInput that disables browser autofill on web
 const NoAutofillInput = forwardRef<any, TextInputProps>((props, ref) => {
@@ -42,18 +40,18 @@ const NoAutofillInput = forwardRef<any, TextInputProps>((props, ref) => {
 });
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { router, useFocusEffect, usePathname, useSegments } from 'expo-router';
-import Constants from 'expo-constants';
-import * as Notifications from 'expo-notifications';
+import { router } from 'expo-router';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { format } from 'date-fns';
 import { WebView } from 'react-native-webview';
-import { API_BASE, API_BASE_ERROR, API_BASE_SOURCE, buildUrl } from './apiConfig';
-import { getNotificationCounts } from './notificationHistory';
+import { useAuth } from '../contexts/AuthContext';
+import * as Notifications from 'expo-notifications';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
+
+const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 // Vehicle types for safety scoring
 const VEHICLE_TYPES = [
@@ -87,30 +85,24 @@ interface AutocompleteSuggestion {
 }
 
 export default function HomeScreen() {
+  const { user, isAuthenticated, isPremium, isLoading: authLoading } = useAuth();
+  
+  // Redirect non-authenticated web users to landing page
+  useEffect(() => {
+    if (Platform.OS === 'web' && !authLoading && !isAuthenticated) {
+      router.replace('/landing');
+    }
+  }, [isAuthenticated, authLoading]);
+  
   const [origin, setOrigin] = useState('');
   const [destination, setDestination] = useState('');
   const [loading, setLoading] = useState(false);
-  const perfRef = useRef<{ submit?: number; request?: number; response?: number }>({});
   const [error, setError] = useState('');
   const [alertsEnabled, setAlertsEnabled] = useState(false);
   const [recentRoutes, setRecentRoutes] = useState<SavedRoute[]>([]);
   const [favoriteRoutes, setFavoriteRoutes] = useState<SavedRoute[]>([]);
-  const [favoriteIds, setFavoriteIds] = useState<Set<string>>(new Set());
-  const [favoriteSignatures, setFavoriteSignatures] = useState<Set<string>>(new Set());
   const [showFavorites, setShowFavorites] = useState(false);
   const [saveMessage, setSaveMessage] = useState('');
-  const [pushToken, setPushToken] = useState<string | null>(null);
-  const [pushPermissionStatus, setPushPermissionStatus] = useState<Notifications.PermissionStatus | 'unsupported' | 'error' | null>(null);
-  const [pushToggleLoading, setPushToggleLoading] = useState(false);
-  const [pushDebugLines, setPushDebugLines] = useState<string[]>([]);
-  const [lastToggleAt, setLastToggleAt] = useState<string | null>(null);
-  const [lastRegisterResult, setLastRegisterResult] = useState<string | null>(null);
-  const [lastTestResult, setLastTestResult] = useState<string | null>(null);
-  const [notificationTotal, setNotificationTotal] = useState(0);
-  const [notificationUnseen, setNotificationUnseen] = useState(0);
-  const [healthStatus, setHealthStatus] = useState<string>('pending');
-  const [healthSnippet, setHealthSnippet] = useState<string>('');
-  const [healthStatusCode, setHealthStatusCode] = useState<number | null>(null);
   
   // Autocomplete state
   const [originSuggestions, setOriginSuggestions] = useState<AutocompleteSuggestion[]>([]);
@@ -122,8 +114,8 @@ export default function HomeScreen() {
   // Vehicle & Trucker mode
   const [vehicleType, setVehicleType] = useState('car');
   const [truckerMode, setTruckerMode] = useState(false);
-  const [vehicleHeightFt, setVehicleHeightFt] = useState('13.5');
   const [showVehicleSelector, setShowVehicleSelector] = useState(false);
+  const [vehicleHeight, setVehicleHeight] = useState('13.6'); // Default truck height in feet
   
   // Departure time
   const [departureTime, setDepartureTime] = useState(new Date());
@@ -138,97 +130,85 @@ export default function HomeScreen() {
   
   // Radar map state
   const [showRadarMap, setShowRadarMap] = useState(false);
+  
+  // Push notification state
+  const [pushLoading, setPushLoading] = useState(false);
 
-  const pathname = usePathname();
-  const segments = useSegments();
+  // Load push notification settings on mount
+  useEffect(() => {
+    loadPushSettings();
+  }, [isAuthenticated]);
 
-  const isProductionEnv = process.env.EXPO_PUBLIC_ENVIRONMENT === 'production' || process.env.NODE_ENV === 'production';
-  const showDebugPanels = !isProductionEnv && (__DEV__ || process.env.EXPO_PUBLIC_SHOW_DEBUG_PANELS === 'true');
-  const showApiBaseError = __DEV__ && !!API_BASE_ERROR;
-  const showTruckSpecs = truckerMode || ['semi', 'truck', 'trailer'].includes(vehicleType);
+  const loadPushSettings = async () => {
+    if (!isAuthenticated) return;
+    try {
+      const token = await AsyncStorage.getItem('access_token');
+      if (!token) return;
+      
+      const response = await axios.get(`${API_BASE}/api/push/settings`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setAlertsEnabled(response.data.push_enabled || false);
+    } catch (err) {
+      console.log('Failed to load push settings:', err);
+    }
+  };
+
+  const handleAlertsToggle = async (enabled: boolean) => {
+    if (!isAuthenticated) {
+      Alert.alert('Sign In Required', 'Please sign in to enable push notifications.');
+      return;
+    }
+    
+    setPushLoading(true);
+    try {
+      let pushToken = null;
+      
+      if (enabled) {
+        // Request permission
+        const { status: existingStatus } = await Notifications.getPermissionsAsync();
+        let finalStatus = existingStatus;
+        
+        if (existingStatus !== 'granted') {
+          const { status } = await Notifications.requestPermissionsAsync();
+          finalStatus = status;
+        }
+        
+        if (finalStatus !== 'granted') {
+          Alert.alert('Permission Denied', 'Please enable notifications in your device settings.');
+          setPushLoading(false);
+          return;
+        }
+        
+        // Get push token
+        const tokenData = await Notifications.getExpoPushTokenAsync();
+        pushToken = tokenData.data;
+      }
+      
+      // Save to backend
+      const token = await AsyncStorage.getItem('access_token');
+      await axios.post(`${API_BASE}/api/push/settings`, {
+        push_enabled: enabled,
+        push_token: pushToken,
+        platform: Platform.OS
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      setAlertsEnabled(enabled);
+    } catch (err) {
+      console.log('Failed to update push settings:', err);
+      Alert.alert('Error', 'Failed to update notification settings. Please try again.');
+    } finally {
+      setPushLoading(false);
+    }
+  };
 
   useEffect(() => {
     fetchRecentRoutes();
     fetchFavoriteRoutes();
     loadCachedRoute();
-    console.log('BACKEND:', process.env.EXPO_PUBLIC_BACKEND_URL);
-    console.log('[startup] API_BASE', API_BASE, 'source', API_BASE_SOURCE);
-    runHealthCheck();
   }, []);
-
-  useEffect(() => {
-    const loadPushPreferences = async () => {
-      try {
-        const storedEnabled = await AsyncStorage.getItem('pushAlertsEnabled');
-        if (storedEnabled !== null) {
-          setAlertsEnabled(storedEnabled === 'true');
-        }
-        const storedToken = await AsyncStorage.getItem('expoPushToken');
-        if (storedToken) {
-          setPushToken(storedToken);
-        }
-        const storedDebug = await AsyncStorage.getItem('pushDebugLog');
-        if (storedDebug) {
-          setPushDebugLines(JSON.parse(storedDebug));
-        }
-        const storedToggle = await AsyncStorage.getItem('pushLastToggleAt');
-        if (storedToggle) {
-          setLastToggleAt(storedToggle);
-        }
-        const storedRegister = await AsyncStorage.getItem('pushLastRegisterResult');
-        if (storedRegister) {
-          setLastRegisterResult(storedRegister);
-        }
-        const storedTest = await AsyncStorage.getItem('pushLastTestResult');
-        if (storedTest) {
-          setLastTestResult(storedTest);
-        }
-      } catch (e) {
-        console.log('[push] error loading stored preferences', e);
-      }
-    };
-
-    loadPushPreferences();
-
-    if (Platform.OS === 'android') {
-      Notifications.setNotificationChannelAsync('default', {
-        name: 'default',
-        importance: Notifications.AndroidImportance.MAX,
-      }).catch((err) => console.log('[push] channel setup error', err));
-
-      Notifications.setNotificationChannelAsync('weather-alerts', {
-        name: 'Weather Alerts',
-        importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 250, 250, 250],
-        sound: 'default',
-        lightColor: '#FF0000',
-        lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
-        bypassDnd: true,
-      }).catch((err) => console.log('[push] weather channel error', err));
-    }
-  }, []);
-
-  const refreshNotificationCounts = useCallback(async () => {
-    const { total, unseen } = await getNotificationCounts();
-    setNotificationTotal(total);
-    setNotificationUnseen(unseen);
-  }, []);
-
-  useFocusEffect(
-    useCallback(() => {
-      refreshNotificationCounts();
-    }, [refreshNotificationCounts]),
-  );
-
-  useEffect(() => {
-    refreshNotificationCounts();
-    const sub = Notifications.addNotificationReceivedListener(() => {
-      refreshNotificationCounts();
-    });
-    return () => {
-      sub.remove();
-    };
-  }, [refreshNotificationCounts]);
 
   const loadCachedRoute = async () => {
     try {
@@ -238,223 +218,8 @@ export default function HomeScreen() {
         // Optionally pre-fill from cache
       }
     } catch (e) {
-      // ignore cache errors
+      console.log('No cached route');
     }
-  };
-
-  const runHealthCheck = async () => {
-    const url = buildUrl('health');
-    try {
-      const res = await fetch(url, { method: 'GET' });
-      const text = await res.text();
-      const snippet = text.slice(0, 120);
-      setHealthStatusCode(res.status);
-      setHealthSnippet(snippet);
-      setHealthStatus(res.ok ? 'ok' : 'error');
-      console.log('[net] health', { base: API_BASE, status: res.status, body: snippet });
-    } catch (err) {
-      setHealthStatus('error');
-      setHealthSnippet(String(err).slice(0, 120));
-      console.log('[net] health error', { base: API_BASE, error: String(err) });
-    }
-  };
-
-  const showToast = (message: string) => {
-    if (Platform.OS === 'android') {
-      ToastAndroid.show(message, ToastAndroid.SHORT);
-    } else {
-      Alert.alert('Favorites', message);
-    }
-  };
-
-  const showPushMessage = (message: string) => {
-    if (Platform.OS === 'android') {
-      ToastAndroid.show(message, ToastAndroid.SHORT);
-    } else {
-      Alert.alert('Push Notifications', message);
-    }
-  };
-
-  const pushDebugLog = async (message: string) => {
-    console.log(message);
-    setPushDebugLines((prev) => {
-      const next = [...prev, `${new Date().toISOString()} ${message}`].slice(-50);
-      AsyncStorage.setItem('pushDebugLog', JSON.stringify(next)).catch((err) =>
-        console.log('[push] failed to persist debug log', err)
-      );
-      return next;
-    });
-  };
-
-  const registerForPushNotificationsAsync = async (): Promise<{
-    status: Notifications.PermissionStatus | 'unsupported' | 'error';
-    token: string | null;
-  }> => {
-    if (Platform.OS === 'web') {
-      pushDebugLog('[push] web platform - notifications unsupported');
-      setPushPermissionStatus('unsupported');
-      return { status: 'unsupported', token: null };
-    }
-
-    pushDebugLog('[push] before requesting permissions');
-    try {
-      const { status: existingStatus } = await Notifications.getPermissionsAsync();
-      let finalStatus = existingStatus;
-
-      if (existingStatus !== 'granted') {
-        const permissionResponse = await Notifications.requestPermissionsAsync();
-        finalStatus = permissionResponse.status;
-      }
-
-      pushDebugLog(`[push] permission status ${finalStatus}`);
-      setPushPermissionStatus(finalStatus);
-
-      if (finalStatus !== 'granted') {
-        return { status: finalStatus, token: null };
-      }
-
-      const projectId = Constants?.expoConfig?.extra?.eas?.projectId;
-      const tokenResponse = await Notifications.getExpoPushTokenAsync(
-        projectId ? { projectId } : undefined
-      );
-      pushDebugLog(`[push] obtained expo push token ${tokenResponse?.data}`);
-      setPushToken(tokenResponse?.data || null);
-      await AsyncStorage.setItem('expoPushToken', tokenResponse?.data || '');
-
-      return { status: finalStatus, token: tokenResponse?.data || null };
-    } catch (err) {
-      pushDebugLog(`[push] error during registration ${String(err)}`);
-      setPushPermissionStatus('error');
-      return { status: 'error', token: null };
-    }
-  };
-
-  const handleTogglePushNotifications = async (nextValue: boolean) => {
-    const previousValue = alertsEnabled;
-    setLastToggleAt(new Date().toISOString());
-    AsyncStorage.setItem('pushLastToggleAt', new Date().toISOString()).catch(() => {});
-    pushDebugLog(`[push] toggle pressed old=${previousValue} new=${nextValue}`);
-    setAlertsEnabled(nextValue);
-    setPushToggleLoading(true);
-
-    try {
-      if (nextValue) {
-        const { status, token } = await registerForPushNotificationsAsync();
-
-        if (status !== 'granted' || !token) {
-          pushDebugLog(`[push] permission denied or token missing status=${status}`);
-          setAlertsEnabled(false);
-          await AsyncStorage.setItem('pushAlertsEnabled', 'false');
-          showPushMessage(
-            status === 'unsupported'
-              ? 'Push notifications require a physical device; web/emulator will not prompt. Please try on a real device.'
-              : 'Push notifications need permission. Please enable in Settings.'
-          );
-          return;
-        }
-
-        pushDebugLog(`[push] saving token to backend token=${token}`);
-        try {
-          const response = await axios.post(buildUrl('notifications/register'), {
-            expoPushToken: token,
-            enabled: true,
-          });
-          const msg = JSON.stringify(response?.data || {});
-          setLastRegisterResult(msg);
-          AsyncStorage.setItem('pushLastRegisterResult', msg).catch(() => {});
-          pushDebugLog(`[push] backend save response ${msg}`);
-          await AsyncStorage.setItem('pushAlertsEnabled', 'true');
-          showPushMessage('Push weather alerts enabled');
-        } catch (backendErr) {
-          const errMsg = (backendErr as any)?.message || String(backendErr);
-          setLastRegisterResult(errMsg);
-          AsyncStorage.setItem('pushLastRegisterResult', errMsg).catch(() => {});
-          pushDebugLog(`[push] backend save failed ${errMsg}`);
-          setAlertsEnabled(false);
-          await AsyncStorage.setItem('pushAlertsEnabled', 'false');
-          showPushMessage('Could not save push token. Try again.');
-        }
-      } else {
-        pushDebugLog('[push] toggled off - clearing local state');
-        await AsyncStorage.setItem('pushAlertsEnabled', 'false');
-        setPushPermissionStatus(null);
-
-        if (pushToken) {
-          try {
-            const disableResponse = await axios.post(buildUrl('notifications/register'), {
-              expoPushToken: pushToken,
-              enabled: false,
-            });
-            const msg = JSON.stringify(disableResponse?.data || {});
-            setLastRegisterResult(msg);
-            AsyncStorage.setItem('pushLastRegisterResult', msg).catch(() => {});
-            pushDebugLog(`[push] backend disable response ${msg}`);
-          } catch (disableErr) {
-            const errMsg = (disableErr as any)?.message || String(disableErr);
-            setLastRegisterResult(errMsg);
-            AsyncStorage.setItem('pushLastRegisterResult', errMsg).catch(() => {});
-            pushDebugLog(`[push] backend disable failed ${errMsg}`);
-          }
-        }
-      }
-    } catch (err) {
-      pushDebugLog(`[push] toggle error ${String(err)}`);
-      setAlertsEnabled(previousValue);
-      showPushMessage('Unable to update push notifications right now.');
-    } finally {
-      setPushToggleLoading(false);
-    }
-  };
-
-  const handleSendTestNotification = async () => {
-    if (!pushToken) {
-      showPushMessage('Enable push alerts first so we can generate a token.');
-      return;
-    }
-
-    pushDebugLog(`[push] sending test notification for token ${pushToken}`);
-    try {
-      const response = await axios.post(buildUrl('notifications/send'), {});
-      const msg = JSON.stringify(response?.data || {});
-      setLastTestResult(msg);
-      AsyncStorage.setItem('pushLastTestResult', msg).catch(() => {});
-      pushDebugLog(`[push] test notification response ${msg}`);
-      showPushMessage(response?.data?.success ? 'Test notification sent (check device)' : 'Test notification failed');
-    } catch (err) {
-      const errMsg = (err as any)?.message || String(err);
-      setLastTestResult(errMsg);
-      AsyncStorage.setItem('pushLastTestResult', errMsg).catch(() => {});
-      pushDebugLog(`[push] test notification error ${errMsg}`);
-      showPushMessage('Test notification failed');
-    }
-  };
-
-  const copyPushDebugLogs = async () => {
-    const payload = [
-      `API_BASE: ${API_BASE}`,
-      `lastToggleAt: ${lastToggleAt || 'n/a'}`,
-      `permission: ${pushPermissionStatus || 'unknown'}`,
-      `tokenPresent: ${!!pushToken}`,
-      `lastRegister: ${lastRegisterResult || 'n/a'}`,
-      `lastTest: ${lastTestResult || 'n/a'}`,
-      'recentLogs:',
-      ...pushDebugLines.slice(-6),
-    ].join('\n');
-    await Clipboard.setStringAsync(payload);
-    showPushMessage('Push debug logs copied');
-  };
-
-  const stopsKey = (list?: StopPoint[]) => JSON.stringify(list || []);
-
-  const routeSignature = (route: { origin: string; destination: string; stops?: StopPoint[] }) =>
-    `${route.origin.trim()}__${route.destination.trim()}__${stopsKey(route.stops || [])}`;
-
-  const routesMatch = (route: SavedRoute, originText: string, destinationText: string, compareStops: StopPoint[]) => {
-    return (
-      route.origin === originText &&
-      route.destination === destinationText &&
-      stopsKey(route.stops) === stopsKey(compareStops)
-    );
   };
 
   // Debounced autocomplete function
@@ -472,7 +237,7 @@ export default function HomeScreen() {
 
     setAutocompleteLoading(true);
     try {
-      const response = await axios.get(buildUrl('geocode/autocomplete'), {
+      const response = await axios.get(`${API_BASE}/api/geocode/autocomplete`, {
         params: { query, limit: 5 }
       });
       
@@ -484,7 +249,7 @@ export default function HomeScreen() {
         setShowDestSuggestions(response.data.length > 0);
       }
     } catch (err) {
-      console.warn('Autocomplete error');
+      console.log('Autocomplete error:', err);
     } finally {
       setAutocompleteLoading(false);
     }
@@ -532,23 +297,19 @@ export default function HomeScreen() {
 
   const fetchRecentRoutes = async () => {
     try {
-      const path = buildUrl('routes/history');
-      const response = await axios.get(path);
+      const response = await axios.get(`${API_BASE}/api/routes/history`);
       setRecentRoutes(response.data.slice(0, 5));
     } catch (err) {
-      console.warn('Error fetching history');
+      console.log('Error fetching history:', err);
     }
   };
 
   const fetchFavoriteRoutes = async () => {
     try {
-      const path = buildUrl('routes/favorites');
-      const response = await axios.get(path);
+      const response = await axios.get(`${API_BASE}/api/routes/favorites`);
       setFavoriteRoutes(response.data);
-      setFavoriteIds(new Set(response.data.map((r: SavedRoute) => r.id)));
-      setFavoriteSignatures(new Set(response.data.map((r: SavedRoute) => routeSignature(r))));
     } catch (err) {
-      console.warn('Error fetching favorites');
+      console.log('Error fetching favorites:', err);
     }
   };
 
@@ -560,100 +321,35 @@ export default function HomeScreen() {
 
     Keyboard.dismiss();
     setLoading(true);
-    perfRef.current.submit = Date.now();
     setError('');
 
-    let requestData: any;
-
     try {
-      const parsedHeight = parseFloat(vehicleHeightFt);
-      const vehicleHeight = Number.isFinite(parsedHeight) && parsedHeight > 0 ? parsedHeight : 13.5;
-      const resolvedMode = truckerMode || vehicleType === 'semi' || vehicleType === 'truck' ? 'truck' : vehicleType === 'rv' ? 'boondocker' : 'standard';
-      const truckProfile = resolvedMode === 'truck'
-        ? {
-            vehicle_height_ft: vehicleHeight,
-            vehicle_weight_lbs: 80000,
-            vehicle_length_ft: 53,
-            axle_count: 5,
-            hazmat: false,
-          }
-        : undefined;
-      const boondockerPrefs = resolvedMode === 'boondocker'
-        ? {
-            avoid_highways: true,
-            avoid_tolls: true,
-            prefer_campgrounds: true,
-          }
-        : undefined;
-
-      requestData = {
+      const requestData: any = {
         origin: origin.trim(),
         destination: destination.trim(),
         stops: stops,
-        push_token: pushToken || undefined,
         vehicle_type: vehicleType,
         trucker_mode: truckerMode,
-        mode: resolvedMode,
-        ...truckProfile,
-        ...boondockerPrefs,
+        vehicle_height_ft: truckerMode ? parseFloat(vehicleHeight) || 13.6 : null,
       };
       
       if (useCustomTime) {
         requestData.departure_time = departureTime.toISOString();
       }
 
-      perfRef.current.request = Date.now();
-      console.log('[route-request]', {
-        endpoint: buildUrl('route/weather'),
-        mode: resolvedMode,
-        vehicleType,
-        trucker_mode: truckerMode,
-        truckProfile,
-        boondockerPrefs,
-        perf: { submit: perfRef.current.submit, request: perfRef.current.request },
-      });
-
-      const response = await axios.post(buildUrl('route/weather'), requestData);
-      perfRef.current.response = Date.now();
-      console.log('[route-response]', {
-        endpoint: buildUrl('route/weather'),
-        ms_total: perfRef.current.response - (perfRef.current.submit || perfRef.current.response),
-        ms_to_response: perfRef.current.response - (perfRef.current.request || perfRef.current.response),
-      });
-
+      const response = await axios.post(`${API_BASE}/api/route/weather`, requestData);
+      
       // Cache the route for offline
       await AsyncStorage.setItem('lastRoute', JSON.stringify(response.data));
 
       router.push({
         pathname: '/route',
-        params: { routeData: JSON.stringify(response.data), perf: JSON.stringify(perfRef.current) },
+        params: { routeData: JSON.stringify(response.data) },
       });
     } catch (err: any) {
-      const status = err?.response?.status;
-      const body = err?.response?.data;
-
-      const summarizeBody = () => {
-        if (!body) return '';
-        if (typeof body === 'string') return body.slice(0, 500);
-        try {
-          return JSON.stringify(body).slice(0, 500);
-        } catch {
-          return '[unserializable body]';
-        }
-      };
-
-      const detail = summarizeBody();
-      console.error('[route/weather] request failed', {
-        status,
-        url: buildUrl('route/weather'),
-        detail: detail || err?.message,
-        request: requestData,
-      });
-
+      console.error('Error:', err);
       setError(
-        (typeof body === 'object' && body?.detail) ||
-          detail ||
-          err?.message ||
+        err.response?.data?.detail ||
           'Failed to get weather data. Please try again.'
       );
     } finally {
@@ -669,271 +365,30 @@ export default function HomeScreen() {
     }
   };
 
-  const toggleFavorite = async (route: SavedRoute) => {
-    if (!route?.id) {
-      return;
-    }
-
-    const currentlyFavorite = favoriteIds.has(route.id);
-    const signature = routeSignature(route);
-
-    console.log('[fav] pressed', {
-      id: route.id,
-      origin: route.origin,
-      destination: route.destination,
-      wasFavorited: currentlyFavorite,
-      newFavorited: !currentlyFavorite,
-      signature,
-    });
-
-    // Optimistic UI update
-    setFavoriteIds((prev) => {
-      const next = new Set(prev);
-      if (currentlyFavorite) {
-        next.delete(route.id);
-      } else {
-        next.add(route.id);
-      }
-      return next;
-    });
-
-    setFavoriteSignatures((prev) => {
-      const next = new Set(prev);
-      if (currentlyFavorite) {
-        next.delete(signature);
-      } else {
-        next.add(signature);
-      }
-      return next;
-    });
-
-    setFavoriteRoutes((prev) => {
-      if (currentlyFavorite) {
-        return prev.filter((r) => r.id !== route.id);
-      }
-      const exists = prev.some((r) => r.id === route.id);
-      return exists ? prev : [...prev, route];
-    });
-
-    try {
-      if (currentlyFavorite) {
-        await axios.delete(buildUrl(`routes/favorites/${route.id}`));
-      } else {
-        await axios.post(buildUrl('routes/favorites'), {
-          origin: route.origin,
-          destination: route.destination,
-          stops: route.stops || [],
-        });
-      }
-
-      // Sync store with server response
-      fetchFavoriteRoutes();
-      console.log('[fav] save result', { ok: true, status: 'success' });
-    } catch (err) {
-      // Revert optimistic change on error
-      setFavoriteIds((prev) => {
-        const next = new Set(prev);
-        if (currentlyFavorite) {
-          next.add(route.id);
-        } else {
-          next.delete(route.id);
-        }
-        return next;
-      });
-
-      setFavoriteSignatures((prev) => {
-        const next = new Set(prev);
-        if (currentlyFavorite) {
-          next.add(signature);
-        } else {
-          next.delete(signature);
-        }
-        return next;
-      });
-
-      setFavoriteRoutes((prev) => {
-        if (currentlyFavorite) {
-          const exists = prev.some((r) => r.id === route.id);
-          return exists ? prev : [...prev, route];
-        }
-        return prev.filter((r) => r.id !== route.id);
-      });
-
-      console.error('Error updating favorite:', err);
-      console.log('[fav] save result', { ok: false, status: 'error', body: String(err) });
-      showToast('Failed to update favorite. Please try again.');
-    }
-  };
-
-  const toggleCurrentRouteFavorite = async () => {
-    const trimmedOrigin = origin.trim();
-    const trimmedDestination = destination.trim();
-
-    if (!trimmedOrigin || !trimmedDestination) {
+  const addToFavorites = async () => {
+    if (!origin.trim() || !destination.trim()) {
       setError('Enter a route first to save as favorite');
       return;
     }
 
-    const existing = favoriteRoutes.find((r) =>
-      routesMatch(r, trimmedOrigin, trimmedDestination, stops)
-    );
-
-    const tempId = `temp-${Date.now()}`;
-    const optimisticRoute: SavedRoute = existing || {
-      id: tempId,
-      origin: trimmedOrigin,
-      destination: trimmedDestination,
-      stops,
-      created_at: new Date().toISOString(),
-      is_favorite: true,
-    };
-
-    const currentlyFavorite = !!existing;
-    const signature = routeSignature({ origin: trimmedOrigin, destination: trimmedDestination, stops });
-
-    console.log('[fav] pressed', {
-      id: existing?.id || null,
-      origin: trimmedOrigin,
-      destination: trimmedDestination,
-      stopsCount: stops.length,
-      wasFavorited: currentlyFavorite,
-      newFavorited: !currentlyFavorite,
-      signature,
-    });
-
-    // Optimistic state change
-    setFavoriteIds((prev) => {
-      const next = new Set(prev);
-      if (currentlyFavorite && existing) {
-        next.delete(existing.id);
-      } else {
-        next.add(optimisticRoute.id);
-      }
-      return next;
-    });
-
-    setFavoriteSignatures((prev) => {
-      const next = new Set(prev);
-      if (currentlyFavorite) {
-        next.delete(signature);
-      } else {
-        next.add(signature);
-      }
-      return next;
-    });
-
-    setFavoriteRoutes((prev) => {
-      if (currentlyFavorite && existing) {
-        return prev.filter((r) => r.id !== existing.id);
-      }
-      return [...prev, optimisticRoute];
-    });
-
     try {
-      if (currentlyFavorite && existing) {
-        await axios.delete(buildUrl(`routes/favorites/${existing.id}`));
-      } else {
-        const res = await axios.post(buildUrl('routes/favorites'), {
-          origin: trimmedOrigin,
-          destination: trimmedDestination,
-          stops,
-        });
-
-        if (res?.data?.id) {
-          const savedRoute: SavedRoute = res.data;
-          setFavoriteIds((prev) => {
-            const next = new Set(prev);
-            next.delete(optimisticRoute.id);
-            next.add(savedRoute.id);
-            return next;
-          });
-
-          setFavoriteRoutes((prev) =>
-            prev.map((r) => (r.id === optimisticRoute.id ? savedRoute : r))
-          );
-        }
-      }
-
+      await axios.post(`${API_BASE}/api/routes/favorites`, {
+        origin: origin.trim(),
+        destination: destination.trim(),
+        stops: stops,
+      });
       fetchFavoriteRoutes();
-      console.log('[fav] save result', { ok: true, status: 'success' });
     } catch (err) {
-      console.log('[fav] save result', { ok: false, status: 'error', body: String(err) });
-      // Revert on failure
-      setFavoriteIds((prev) => {
-        const next = new Set(prev);
-        if (currentlyFavorite && existing) {
-          next.add(existing.id);
-        } else {
-          next.delete(optimisticRoute.id);
-        }
-        return next;
-      });
-
-      setFavoriteSignatures((prev) => {
-        const next = new Set(prev);
-        if (currentlyFavorite) {
-          next.add(signature);
-        } else {
-          next.delete(signature);
-        }
-        return next;
-      });
-
-      setFavoriteRoutes((prev) => {
-        if (currentlyFavorite && existing) {
-          const exists = prev.some((r) => r.id === existing.id);
-          return exists ? prev : [...prev, existing];
-        }
-        return prev.filter((r) => r.id !== optimisticRoute.id);
-      });
-
       console.error('Error saving favorite:', err);
-      showToast('Failed to update favorite. Please try again.');
     }
   };
 
-  const removeFavorite = async (routeId: string) => {
-    const route = favoriteRoutes.find((r) => r.id === routeId);
-    const signature = route ? routeSignature(route) : null;
-
-    console.log('[fav] pressed remove', { id: routeId, signature });
-
-    setFavoriteRoutes((prev) => prev.filter((r) => r.id !== routeId));
-    setFavoriteIds((prev) => {
-      const next = new Set(prev);
-      next.delete(routeId);
-      return next;
-    });
-    if (signature) {
-      setFavoriteSignatures((prev) => {
-        const next = new Set(prev);
-        next.delete(signature);
-        return next;
-      });
-    }
-
+  const removeFavorite = async (id: string) => {
     try {
-      await axios.delete(buildUrl(`routes/favorites/${routeId}`));
+      await axios.delete(`${API_BASE}/api/routes/favorites/${id}`);
       fetchFavoriteRoutes();
-      console.log('[fav] save result', { ok: true, status: 'removed', id: routeId });
     } catch (err) {
-      console.log('[fav] save result', { ok: false, status: 'remove-error', body: String(err) });
-      if (route) {
-        setFavoriteRoutes((prev) => [...prev, route]);
-        setFavoriteIds((prev) => {
-          const next = new Set(prev);
-          next.add(routeId);
-          return next;
-        });
-        if (signature) {
-          setFavoriteSignatures((prev) => {
-            const next = new Set(prev);
-            next.add(signature);
-            return next;
-          });
-        }
-      }
-      showToast('Failed to remove favorite. Please try again.');
+      console.error('Error removing favorite:', err);
     }
   };
 
@@ -1164,21 +619,8 @@ export default function HomeScreen() {
     `;
   };
 
-  const trimmedOrigin = origin.trim();
-  const trimmedDestination = destination.trim();
-  const currentFavoriteForInput = favoriteRoutes.find((r) =>
-    routesMatch(r, trimmedOrigin, trimmedDestination, stops)
-  );
-  const currentRouteSignature = routeSignature({ origin: trimmedOrigin, destination: trimmedDestination, stops });
-  const isCurrentRouteFavorite = favoriteSignatures.has(currentRouteSignature) || !!currentFavoriteForInput;
-
   return (
     <View style={styles.container}>
-      {showApiBaseError && (
-        <View style={styles.bannerError}>
-          <Text style={styles.bannerErrorText}>Backend URL missing. Set EXPO_PUBLIC_BACKEND_URL.</Text>
-        </View>
-      )}
       <View style={styles.mapBackground}>
         <View style={styles.mapOverlay} />
       </View>
@@ -1212,37 +654,26 @@ export default function HomeScreen() {
                   <Text style={styles.radarHomeBtnText}>Radar</Text>
                 </TouchableOpacity>
                 <TouchableOpacity 
-                  style={styles.favoriteButton}
-                  onPress={toggleCurrentRouteFavorite}
+                  style={styles.accountButton}
+                  onPress={() => router.push('/account')}
+                  data-testid="account-btn"
                 >
-                  <Ionicons
-                    name={isCurrentRouteFavorite ? 'heart' : 'heart-outline'}
-                    size={24}
-                    color={isCurrentRouteFavorite ? '#ef4444' : '#eab308'}
-                  />
+                  {isAuthenticated ? (
+                    <View style={styles.accountLoggedIn}>
+                      <Ionicons name="person" size={18} color="#eab308" />
+                      {isPremium && <View style={styles.premiumDot} />}
+                    </View>
+                  ) : (
+                    <Ionicons name="person-outline" size={22} color="#a1a1aa" />
+                  )}
                 </TouchableOpacity>
               </View>
 
               {/* App Description */}
               <View style={styles.descriptionBox}>
                 <Text style={styles.descriptionText}>
-                  Weather-aware routing with live alerts and hazard intelligence for every mile. Start your 7-day free trial and drive with confidence.
+                  Plan your road trip with confidence. See real-time weather conditions, alerts, and AI-powered recommendations for every mile of your drive.
                 </Text>
-              </View>
-
-              <View style={styles.ctaRow}>
-                <TouchableOpacity style={styles.primaryCta} onPress={() => router.push('/subscription')}>
-                  <Ionicons name="sparkles" size={20} color="#0f172a" />
-                  <View style={styles.ctaTextGroup}>
-                    <Text style={styles.primaryCtaText}>Start Free Trial</Text>
-                    <Text style={styles.primaryCtaSub}>7-day premium access, cancel anytime</Text>
-                  </View>
-                  <Ionicons name="arrow-forward" size={18} color="#0f172a" />
-                </TouchableOpacity>
-
-                <TouchableOpacity style={styles.secondaryCta} onPress={() => router.push('/user-guide')}>
-                  <Text style={styles.secondaryCtaText}>Learn More</Text>
-                </TouchableOpacity>
               </View>
 
               {/* Origin Input */}
@@ -1261,9 +692,19 @@ export default function HomeScreen() {
                     onFocus={() => origin.length >= 2 && setShowOriginSuggestions(originSuggestions.length > 0)}
                     onBlur={() => setTimeout(() => setShowOriginSuggestions(false), 200)}
                     returnKeyType="next"
+                    data-testid="origin-input"
                   />
                   {autocompleteLoading && origin.length >= 2 && (
                     <ActivityIndicator size="small" color="#eab308" style={{ marginRight: 8 }} />
+                  )}
+                  {origin.length > 0 && (
+                    <TouchableOpacity 
+                      onPress={() => { setOrigin(''); setOriginSuggestions([]); setShowOriginSuggestions(false); }} 
+                      style={styles.clearButton}
+                      data-testid="clear-origin-btn"
+                    >
+                      <Ionicons name="close-circle" size={18} color="#6b7280" />
+                    </TouchableOpacity>
                   )}
                 </View>
                 {/* Origin Suggestions Dropdown */}
@@ -1331,9 +772,19 @@ export default function HomeScreen() {
                     onBlur={() => setTimeout(() => setShowDestSuggestions(false), 200)}
                     returnKeyType="done"
                     onSubmitEditing={handleGetWeather}
+                    data-testid="destination-input"
                   />
                   {autocompleteLoading && destination.length >= 2 && (
                     <ActivityIndicator size="small" color="#eab308" style={{ marginRight: 8 }} />
+                  )}
+                  {destination.length > 0 && (
+                    <TouchableOpacity 
+                      onPress={() => { setDestination(''); setDestSuggestions([]); setShowDestSuggestions(false); }} 
+                      style={styles.clearButton}
+                      data-testid="clear-destination-btn"
+                    >
+                      <Ionicons name="close-circle" size={18} color="#6b7280" />
+                    </TouchableOpacity>
                   )}
                   <TouchableOpacity onPress={swapLocations} style={styles.swapButton}>
                     <Ionicons name="swap-vertical" size={20} color="#60a5fa" />
@@ -1405,7 +856,7 @@ export default function HomeScreen() {
                   <Ionicons name="bus-outline" size={22} color="#f59e0b" />
                   <View>
                     <Text style={styles.alertsText}>Trucker Mode</Text>
-                    <Text style={styles.truckerSubtext}>Wind & height warnings</Text>
+                    <Text style={styles.truckerSubtext}>Bridge clearance & wind warnings</Text>
                   </View>
                 </View>
                 <Switch
@@ -1416,33 +867,25 @@ export default function HomeScreen() {
                 />
               </View>
 
-              {showTruckSpecs && (
-                <View style={styles.truckerSpecs}>
-                  <Text style={styles.truckerLabel}>Vehicle Height (ft)</Text>
-                  <TextInput
-                    value={vehicleHeightFt}
-                    onChangeText={setVehicleHeightFt}
-                    keyboardType="decimal-pad"
-                    placeholder="e.g., 13.5"
-                    placeholderTextColor="#6b7280"
-                    style={styles.truckerInput}
-                  />
-                  <Text style={styles.truckerHelper}>Used for low-clearance routing and warnings.</Text>
-                </View>
-              )}
-
-              {showDebugPanels && (
-                <View style={styles.healthCard}>
-                  <Text style={styles.healthTitle}>Health Check</Text>
-                  <Text style={styles.healthLine}>API Base: {API_BASE}</Text>
-                  <Text style={styles.healthLine}>Source: {API_BASE_SOURCE}</Text>
-                  {API_BASE_ERROR ? <Text style={styles.healthLine}>Base Warning: {API_BASE_ERROR}</Text> : null}
-                  <Text style={styles.healthLine}>Status: {healthStatus} ({healthStatusCode ?? 'n/a'})</Text>
-                  <Text style={styles.healthLine}>Body: {healthSnippet || 'pending...'}</Text>
-                  <TouchableOpacity style={styles.healthButton} onPress={runHealthCheck}>
-                    <Ionicons name="refresh" size={16} color="#0f172a" />
-                    <Text style={styles.healthButtonText}>Refresh Health</Text>
-                  </TouchableOpacity>
+              {/* Vehicle Height Input - shows when Trucker Mode is on */}
+              {truckerMode && (
+                <View style={styles.vehicleHeightContainer}>
+                  <View style={styles.vehicleHeightRow}>
+                    <Ionicons name="resize-outline" size={20} color="#f59e0b" />
+                    <Text style={styles.vehicleHeightLabel}>Vehicle Height</Text>
+                  </View>
+                  <View style={styles.vehicleHeightInputRow}>
+                    <TextInput
+                      style={styles.vehicleHeightInput}
+                      value={vehicleHeight}
+                      onChangeText={setVehicleHeight}
+                      keyboardType="decimal-pad"
+                      placeholder="13.6"
+                      placeholderTextColor="#6b7280"
+                    />
+                    <Text style={styles.vehicleHeightUnit}>feet</Text>
+                  </View>
+                  <Text style={styles.vehicleHeightHint}>Enter total height for bridge clearance alerts</Text>
                 </View>
               )}
 
@@ -1452,74 +895,14 @@ export default function HomeScreen() {
                   <Ionicons name="notifications-outline" size={22} color="#eab308" />
                   <Text style={styles.alertsText}>Push Weather Alerts</Text>
                 </View>
-                <View style={styles.alertsActions}>
-                  <TouchableOpacity
-                    style={styles.notificationButton}
-                    onPress={() => router.push('/notifications' as any)}
-                    accessibilityRole="button"
-                    accessibilityLabel="Open notification history"
-                  >
-                    <Ionicons name="notifications" size={20} color="#eab308" />
-                    <Text style={styles.notificationText}>
-                      {notificationTotal ? `${notificationTotal}` : 'History'}
-                    </Text>
-                    {notificationUnseen > 0 ? (
-                      <View style={styles.notificationBadge}>
-                        <Text style={styles.notificationBadgeText}>
-                          {notificationUnseen > 99 ? '99+' : notificationUnseen}
-                        </Text>
-                      </View>
-                    ) : null}
-                  </TouchableOpacity>
-                  <Switch
-                    value={alertsEnabled}
-                    onValueChange={handleTogglePushNotifications}
-                    disabled={pushToggleLoading}
-                    trackColor={{ false: '#3f3f46', true: '#eab30880' }}
-                    thumbColor={alertsEnabled ? '#eab308' : '#71717a'}
-                  />
-                </View>
+                <Switch
+                  value={alertsEnabled}
+                  onValueChange={handleAlertsToggle}
+                  trackColor={{ false: '#3f3f46', true: '#eab30880' }}
+                  thumbColor={alertsEnabled ? '#eab308' : '#71717a'}
+                  disabled={pushLoading}
+                />
               </View>
-
-              <View style={styles.pushActionsRow}>
-                <Text style={styles.pushStatusText}>
-                  {alertsEnabled
-                    ? `Push alerts on${pushPermissionStatus ? ` (perm: ${pushPermissionStatus})` : ''}`
-                    : 'Push alerts off'}
-                </Text>
-                {__DEV__ && (
-                  <TouchableOpacity
-                    style={[
-                      styles.pushTestButton,
-                      (!pushToken || !alertsEnabled || pushToggleLoading) && styles.pushTestButtonDisabled,
-                    ]}
-                    onPress={handleSendTestNotification}
-                    disabled={!pushToken || !alertsEnabled || pushToggleLoading}
-                  >
-                    <Ionicons name="paper-plane-outline" size={16} color="#eab308" />
-                    <Text style={styles.pushTestButtonText}>Send Test Notification</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-
-              {showDebugPanels && (
-                <View style={styles.pushDebugSection}>
-                  <Text style={styles.debugTitle}>Push Debug</Text>
-                  <Text style={styles.debugLine}>Last toggle: {lastToggleAt || 'n/a'}</Text>
-                  <Text style={styles.debugLine}>Permission: {pushPermissionStatus || 'unknown'}</Text>
-                  <Text style={styles.debugLine}>Token present: {pushToken ? 'yes' : 'no'}</Text>
-                  <Text style={styles.debugLine}>Last register: {lastRegisterResult || 'n/a'}</Text>
-                  <Text style={styles.debugLine}>Last test: {lastTestResult || 'n/a'}</Text>
-                  <Text style={styles.debugLine}>Recent logs:</Text>
-                  {pushDebugLines.slice(-6).map((line, idx) => (
-                    <Text key={idx} style={styles.debugLine}>• {line}</Text>
-                  ))}
-                  <TouchableOpacity style={styles.copyLogsButton} onPress={copyPushDebugLogs}>
-                    <Ionicons name="copy-outline" size={16} color="#0f172a" />
-                    <Text style={styles.copyLogsButtonText}>Copy Debug Logs</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
 
               {/* Error Message */}
               {error ? (
@@ -1528,22 +911,6 @@ export default function HomeScreen() {
                   <Text style={styles.errorText}>{error}</Text>
                 </View>
               ) : null}
-
-              {loading && (
-                <View style={styles.skeletonContainer}>
-                  <View style={styles.skeletonRow}>
-                    <View style={styles.skeletonBadge} />
-                    <View style={styles.skeletonLineLong} />
-                  </View>
-                  <View style={styles.skeletonRow}>
-                    <View style={styles.skeletonBadge} />
-                    <View style={styles.skeletonLineShort} />
-                  </View>
-                  <View style={styles.skeletonRow}>
-                    <View style={styles.skeletonLineLong} />
-                  </View>
-                </View>
-              )}
 
               {/* Check Route Button */}
               <TouchableOpacity
@@ -1561,6 +928,35 @@ export default function HomeScreen() {
                   </>
                 )}
               </TouchableOpacity>
+
+              {/* Quick Access Buttons */}
+              <View style={styles.quickAccessRow}>
+                <TouchableOpacity
+                  style={styles.quickAccessBtn}
+                  onPress={() => router.push('/boondockers')}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="bonfire" size={24} color="#10b981" />
+                  <Text style={styles.quickAccessText}>Boondockers</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.quickAccessBtn}
+                  onPress={() => router.push('/tractor-trailer')}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="bus" size={24} color="#f59e0b" />
+                  <Text style={styles.quickAccessText}>Truck Drivers</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.quickAccessBtn}
+                  onPress={() => router.push('/how-to-use')}
+                  activeOpacity={0.8}
+                  data-testid="how-to-use-btn"
+                >
+                  <Ionicons name="help-circle" size={24} color="#8b5cf6" />
+                  <Text style={styles.quickAccessText}>How To Use</Text>
+                </TouchableOpacity>
+              </View>
             </View>
 
             {/* Tabs for Recent/Favorites */}
@@ -1875,7 +1271,6 @@ export default function HomeScreen() {
           </View>
         </Modal>
       )}
-
     </View>
   );
 }
@@ -1884,15 +1279,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#0f0f0f',
-  },
-  bannerError: {
-    backgroundColor: '#ef4444',
-    padding: 10,
-    alignItems: 'center',
-  },
-  bannerErrorText: {
-    color: '#fff',
-    fontWeight: '700',
   },
   mapBackground: {
     ...StyleSheet.absoluteFillObject,
@@ -1949,6 +1335,21 @@ const styles = StyleSheet.create({
   favoriteButton: {
     padding: 8,
   },
+  accountButton: {
+    padding: 8,
+  },
+  accountLoggedIn: {
+    position: 'relative',
+  },
+  premiumDot: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#22c55e',
+  },
   descriptionBox: {
     backgroundColor: 'rgba(234, 179, 8, 0.1)',
     borderRadius: 10,
@@ -1961,46 +1362,6 @@ const styles = StyleSheet.create({
     color: '#d4d4d8',
     fontSize: 12,
     lineHeight: 18,
-  },
-  ctaRow: {
-    gap: 10,
-    marginBottom: 16,
-  },
-  primaryCta: {
-    backgroundColor: '#22c55e',
-    borderRadius: 12,
-    padding: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    justifyContent: 'space-between',
-  },
-  ctaTextGroup: {
-    flex: 1,
-    gap: 2,
-  },
-  primaryCtaText: {
-    color: '#0f172a',
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  primaryCtaSub: {
-    color: '#0f172a',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  secondaryCta: {
-    borderRadius: 12,
-    padding: 12,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#3f3f46',
-    backgroundColor: '#18181b',
-  },
-  secondaryCtaText: {
-    color: '#e5e7eb',
-    fontSize: 14,
-    fontWeight: '700',
   },
   inputSection: {
     marginBottom: 12,
@@ -2033,6 +1394,10 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     paddingVertical: 12,
     fontWeight: '500',
+  },
+  clearButton: {
+    padding: 6,
+    marginRight: 4,
   },
   swapButton: {
     padding: 8,
@@ -2102,29 +1467,6 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     marginBottom: 12,
   },
-  alertsActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  notificationButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-    backgroundColor: '#0b1224',
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#1f2937',
-  },
-  notificationText: { color: '#e5e7eb', marginLeft: 6, fontSize: 14, fontWeight: '600' },
-  notificationBadge: {
-    marginLeft: 6,
-    backgroundColor: '#ef4444',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 8,
-    minWidth: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  notificationBadgeText: { color: '#fff', fontSize: 12, fontWeight: '700' },
   alertsLeft: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2134,103 +1476,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#ffffff',
-  },
-  pushDebugSection: {
-    backgroundColor: '#1f2937',
-    borderRadius: 10,
-    padding: 10,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#374151',
-    gap: 4,
-  },
-  debugTitle: {
-    color: '#e5e7eb',
-    fontWeight: '700',
-    fontSize: 13,
-  },
-  debugLine: {
-    color: '#cbd5e1',
-    fontSize: 12,
-  },
-  copyLogsButton: {
-    marginTop: 6,
-    backgroundColor: '#eab308',
-    borderRadius: 8,
-    paddingVertical: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-  },
-  copyLogsButtonText: {
-    color: '#0f172a',
-    fontWeight: '700',
-    fontSize: 13,
-  },
-  pushActionsRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
-    gap: 10,
-  },
-  pushStatusText: {
-    color: '#a1a1aa',
-    fontSize: 12,
-    flex: 1,
-  },
-  pushTestButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#27272a',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    gap: 6,
-    borderWidth: 1,
-    borderColor: '#3f3f46',
-  },
-  pushTestButtonDisabled: {
-    opacity: 0.6,
-  },
-  pushTestButtonText: {
-    color: '#eab308',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  healthCard: {
-    backgroundColor: '#1f2937',
-    borderRadius: 10,
-    padding: 10,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#374151',
-    gap: 4,
-  },
-  healthTitle: {
-    color: '#e5e7eb',
-    fontWeight: '700',
-    fontSize: 13,
-  },
-  healthLine: {
-    color: '#cbd5e1',
-    fontSize: 12,
-  },
-  healthButton: {
-    marginTop: 6,
-    backgroundColor: '#22c55e',
-    borderRadius: 8,
-    paddingVertical: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-  },
-  healthButtonText: {
-    color: '#0f172a',
-    fontWeight: '700',
-    fontSize: 13,
   },
   errorContainer: {
     flexDirection: 'row',
@@ -2245,36 +1490,6 @@ const styles = StyleSheet.create({
     color: '#ef4444',
     fontSize: 13,
     flex: 1,
-  },
-  skeletonContainer: {
-    backgroundColor: '#1f2937',
-    padding: 12,
-    borderRadius: 12,
-    marginBottom: 10,
-    gap: 8,
-  },
-  skeletonRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  skeletonBadge: {
-    width: 28,
-    height: 28,
-    borderRadius: 8,
-    backgroundColor: '#334155',
-  },
-  skeletonLineLong: {
-    flex: 1,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#334155',
-  },
-  skeletonLineShort: {
-    width: 120,
-    height: 12,
-    borderRadius: 6,
-    backgroundColor: '#334155',
   },
   button: {
     backgroundColor: '#eab308',
@@ -2516,31 +1731,6 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     fontSize: 11,
   },
-  truckerSpecs: {
-    backgroundColor: '#111827',
-    borderRadius: 10,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: '#f59e0b20',
-    marginBottom: 12,
-    gap: 8,
-  },
-  truckerLabel: {
-    color: '#e5e7eb',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  truckerInput: {
-    backgroundColor: '#1f2937',
-    color: '#fff',
-    padding: 12,
-    borderRadius: 8,
-    fontSize: 15,
-  },
-  truckerHelper: {
-    color: '#9ca3af',
-    fontSize: 12,
-  },
   vehicleModalSubtext: {
     color: '#a1a1aa',
     fontSize: 13,
@@ -2589,6 +1779,163 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 8,
   },
+  // AI Chat styles
+  chatFab: {
+    position: 'absolute',
+    right: 20,
+    bottom: 30,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#eab308',
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+  },
+  chatModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'flex-end',
+  },
+  chatModalContent: {
+    backgroundColor: '#1f1f23',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    height: '80%',
+    paddingBottom: 20,
+  },
+  chatHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#3f3f46',
+  },
+  chatHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  chatTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  chatMessages: {
+    flex: 1,
+    padding: 16,
+  },
+  chatWelcome: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  chatWelcomeText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  chatWelcomeSubtext: {
+    color: '#6b7280',
+    fontSize: 14,
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  chatBubble: {
+    maxWidth: '85%',
+    padding: 12,
+    borderRadius: 16,
+    marginBottom: 10,
+  },
+  userBubble: {
+    backgroundColor: '#2563eb',
+    alignSelf: 'flex-end',
+    borderBottomRightRadius: 4,
+  },
+  aiBubble: {
+    backgroundColor: '#3f3f46',
+    alignSelf: 'flex-start',
+    borderBottomLeftRadius: 4,
+  },
+  chatBubbleText: {
+    color: '#fff',
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  chatTyping: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 8,
+  },
+  chatTypingText: {
+    color: '#6b7280',
+    fontSize: 12,
+  },
+  chatSuggestions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    padding: 12,
+    gap: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#3f3f46',
+  },
+  chatSuggestionBtn: {
+    backgroundColor: '#27272a',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#3f3f46',
+  },
+  chatSuggestionText: {
+    color: '#a1a1aa',
+    fontSize: 12,
+  },
+  chatInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    gap: 10,
+  },
+  chatInput: {
+    flex: 1,
+    backgroundColor: '#27272a',
+    borderRadius: 24,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    color: '#fff',
+    fontSize: 14,
+    borderWidth: 1,
+    borderColor: '#3f3f46',
+  },
+  chatInputFull: {
+    flex: 1,
+    backgroundColor: '#27272a',
+    borderRadius: 24,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    color: '#fff',
+    fontSize: 15,
+    borderWidth: 1,
+    borderColor: '#3f3f46',
+  },
+  chatSendBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#eab308',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  chatSendBtnDisabled: {
+    backgroundColor: '#3f3f46',
+  },
   // Radar button and modal styles
   radarHomeBtn: {
     flexDirection: 'row',
@@ -2634,5 +1981,74 @@ const styles = StyleSheet.create({
   },
   radarWebView: {
     flex: 1,
+  },
+  quickAccessRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 12,
+  },
+  quickAccessBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#27272a',
+    paddingVertical: 14,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#3f3f46',
+  },
+  quickAccessText: {
+    color: '#e4e4e7',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  vehicleHeightContainer: {
+    backgroundColor: '#1c1917',
+    borderRadius: 10,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#f59e0b30',
+  },
+  vehicleHeightRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 10,
+  },
+  vehicleHeightLabel: {
+    color: '#f59e0b',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  vehicleHeightInputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  vehicleHeightInput: {
+    flex: 1,
+    backgroundColor: '#27272a',
+    color: '#fff',
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    fontSize: 18,
+    fontWeight: '700',
+    textAlign: 'center',
+    borderWidth: 1,
+    borderColor: '#3f3f46',
+  },
+  vehicleHeightUnit: {
+    color: '#a1a1aa',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  vehicleHeightHint: {
+    color: '#6b7280',
+    fontSize: 12,
+    marginTop: 8,
+    textAlign: 'center',
   },
 });
