@@ -410,6 +410,71 @@ async def handle_invoice_failed(db, data: dict, now: datetime):
     })
 
 
+
+async def handle_trial_will_end(db, data: dict):
+    """Handle trial ending soon - send reminder email."""
+    subscription_id = data.get("id")
+    customer_id = data.get("customer")
+    trial_end = data.get("trial_end")
+    
+    logger.info(f"Trial will end for subscription {subscription_id}")
+    
+    # Find user by Stripe customer ID
+    user = await db.users.find_one({"stripe_customer_id": customer_id})
+    
+    if not user:
+        # Try finding by subscription ID
+        user = await db.users.find_one({"stripe_subscription_id": subscription_id})
+    
+    if not user:
+        logger.warning(f"No user found for trial_will_end: customer={customer_id}")
+        return
+    
+    user_id = user.get("user_id")
+    email = user.get("email")
+    
+    # Log the event
+    await db.subscription_logs.insert_one({
+        "user_id": user_id,
+        "action": "trial_will_end",
+        "provider": "stripe",
+        "stripe_subscription_id": subscription_id,
+        "trial_end": trial_end,
+        "timestamp": datetime.now(timezone.utc)
+    })
+    
+    # Send reminder email (if SendGrid is configured)
+    try:
+        sendgrid_key = os.environ.get("SENDGRID_API_KEY")
+        if sendgrid_key and email:
+            import sendgrid
+            from sendgrid.helpers.mail import Mail, Email, To, Content
+            
+            sg = sendgrid.SendGridAPIClient(api_key=sendgrid_key)
+            from_email = Email("noreply@routecastweather.com")
+            to_email = To(email)
+            subject = "Your RouteCast trial ends soon"
+            content = Content(
+                "text/html",
+                f"""
+                <h2>Your RouteCast trial ends soon</h2>
+                <p>Hi there,</p>
+                <p>Your 7-day free trial is ending soon. After your trial ends, 
+                your subscription will automatically convert to a paid plan.</p>
+                <p>If you'd like to continue using RouteCast Premium, no action is needed.</p>
+                <p>If you'd prefer to cancel, you can do so from your account settings 
+                before your trial ends.</p>
+                <p>Thanks for trying RouteCast!</p>
+                """
+            )
+            mail = Mail(from_email, to_email, subject, content)
+            sg.client.mail.send.post(request_body=mail.get())
+            logger.info(f"Trial reminder email sent to {email}")
+    except Exception as e:
+        logger.warning(f"Failed to send trial reminder email: {e}")
+
+
+
 @router.post("/webhook")
 async def stripe_webhook(
     request: Request,
