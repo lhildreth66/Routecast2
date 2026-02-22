@@ -61,14 +61,14 @@ async def register_push_token(
 ):
     """
     Register a push notification token.
-
+    
     Works for both authenticated and anonymous users.
     Anonymous users get a generated ID.
     """
     from server import db
-
+    
     user_id = user.get("sub") if user else f"anon_{request.token[-12:]}"
-
+    
     push_service = PushNotificationService(db)
     success = await push_service.register_push_token(
         user_id=user_id,
@@ -76,7 +76,7 @@ async def register_push_token(
         platform=request.platform,
         device_info=request.device_info
     )
-
+    
     if success:
         return {"success": True, "user_id": user_id}
     else:
@@ -90,14 +90,86 @@ async def unregister_push_token(
 ):
     """Unregister a push token (requires auth)."""
     from server import db
-
+    
     push_service = PushNotificationService(db)
     success = await push_service.unregister_push_token(
         user_id=user["sub"],
         push_token=token
     )
-
+    
     return {"success": success}
+
+
+
+class PushSettingsRequest(BaseModel):
+    push_enabled: bool
+    push_token: Optional[str] = None
+    platform: str = "unknown"
+
+
+@router.get("/settings")
+async def get_push_settings(
+    user: dict = Depends(get_current_user)
+):
+    """Get push notification settings for current user."""
+    from server import db
+    
+    user_record = await db.users.find_one(
+        {"user_id": user["sub"]},
+        {"push_enabled": 1, "push_token": 1, "push_platform": 1}
+    )
+    
+    if not user_record:
+        return {"push_enabled": False, "push_token": None, "platform": None}
+    
+    return {
+        "push_enabled": user_record.get("push_enabled", False),
+        "push_token": user_record.get("push_token"),
+        "platform": user_record.get("push_platform")
+    }
+
+
+@router.post("/settings")
+async def update_push_settings(
+    request: PushSettingsRequest,
+    user: dict = Depends(get_current_user)
+):
+    """Update push notification settings for current user."""
+    from server import db
+    
+    update_data = {
+        "push_enabled": request.push_enabled,
+        "push_platform": request.platform
+    }
+    
+    if request.push_token:
+        update_data["push_token"] = request.push_token
+    
+    # If disabling, also register/unregister token
+    push_service = PushNotificationService(db)
+    
+    if request.push_enabled and request.push_token:
+        await push_service.register_push_token(
+            user_id=user["sub"],
+            push_token=request.push_token,
+            platform=request.platform
+        )
+    elif not request.push_enabled and request.push_token:
+        await push_service.unregister_push_token(
+            user_id=user["sub"],
+            push_token=request.push_token
+        )
+    
+    await db.users.update_one(
+        {"user_id": user["sub"]},
+        {"$set": update_data}
+    )
+    
+    return {
+        "success": True,
+        "push_enabled": request.push_enabled
+    }
+
 
 
 @router.post("/monitors", response_model=dict)
@@ -107,17 +179,17 @@ async def create_route_monitor(
 ):
     """
     Create a route weather monitor.
-
+    
     Premium feature - checks user subscription status.
     """
     from server import db
-
+    
     # Fetch full user from database to check subscription
     user_record = await db.users.find_one({"user_id": user["sub"]})
-
+    
     if not user_record:
         raise HTTPException(status_code=404, detail="User not found")
-
+    
     # Check subscription status
     sub_status = user_record.get("subscription_status", "inactive")
     if sub_status not in ["active", "trialing"]:
@@ -125,21 +197,21 @@ async def create_route_monitor(
             status_code=403,
             detail="Route monitoring requires a premium subscription"
         )
-
+    
     # Check user's monitor limit
     push_service = PushNotificationService(db)
     monitor_service = RouteMonitorService(db, push_service)
     existing = await monitor_service.get_user_monitors(user["sub"])
-
+    
     # Free trial: 3 monitors, Premium: 10 monitors
     max_monitors = 3 if sub_status == "trialing" else 10
-
+    
     if len(existing) >= max_monitors:
         raise HTTPException(
             status_code=400,
             detail=f"Maximum of {max_monitors} active monitors allowed"
         )
-
+    
     # Create the monitor
     monitor_id = await monitor_service.create_route_monitor(
         user_id=user["sub"],
@@ -149,11 +221,11 @@ async def create_route_monitor(
         departure_time=request.departure_time,
         alert_preferences=request.alert_preferences
     )
-
+    
     return {
         "success": True,
         "monitor_id": monitor_id,
-        "message": f"Route monitor created. You'll receive alerts starting 24 hours before departure."
+        "message": "Route monitor created. You'll receive alerts starting 24 hours before departure."
     }
 
 
@@ -163,12 +235,12 @@ async def list_route_monitors(
 ):
     """List all active route monitors for the current user."""
     from server import db
-
+    
     push_service = PushNotificationService(db)
     monitor_service = RouteMonitorService(db, push_service)
-
+    
     monitors = await monitor_service.get_user_monitors(user["sub"])
-
+    
     return {
         "monitors": monitors,
         "total": len(monitors)
@@ -182,15 +254,15 @@ async def cancel_route_monitor(
 ):
     """Cancel a route monitor."""
     from server import db
-
+    
     push_service = PushNotificationService(db)
     monitor_service = RouteMonitorService(db, push_service)
-
+    
     success = await monitor_service.cancel_monitor(
         user_id=user["sub"],
         monitor_id=monitor_id
     )
-
+    
     if success:
         return {"success": True, "message": "Monitor cancelled"}
     else:
@@ -203,9 +275,9 @@ async def send_test_notification(
 ):
     """Send a test notification to the current user's devices."""
     from server import db
-
+    
     push_service = PushNotificationService(db)
-
+    
     result = await push_service.send_to_user(
         user_id=user["sub"],
         title="Test Notification",
@@ -213,5 +285,5 @@ async def send_test_notification(
         data={"type": "test"},
         channel_id="general"
     )
-
+    
     return result

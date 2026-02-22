@@ -66,8 +66,8 @@ export default function AccountScreen() {
       'Are you sure you want to sign out?',
       [
         { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Sign Out',
+        { 
+          text: 'Sign Out', 
           style: 'destructive',
           onPress: async () => {
             await logout();
@@ -80,7 +80,7 @@ export default function AccountScreen() {
 
   const getSubscriptionBadge = () => {
     if (!user) return null;
-
+    
     if (user.is_premium) {
       if (user.subscription_status === 'trialing') {
         return { label: 'TRIAL', color: '#eab308', bgColor: '#422006' };
@@ -238,18 +238,7 @@ export default function AccountScreen() {
               )}
             </View>
 
-            {/* Subscription Actions */}
-            {!user.is_premium && (
-              <TouchableOpacity
-                style={styles.upgradeButton}
-                onPress={() => router.push('/subscription')}
-                data-testid="upgrade-btn"
-              >
-                <Ionicons name="rocket" size={20} color="#1a1a1a" />
-                <Text style={styles.upgradeButtonText}>Upgrade to Premium</Text>
-              </TouchableOpacity>
-            )}
-
+            {/* Manage Subscription - only for premium Stripe users */}
             {user.is_premium && user.subscription_provider === 'stripe' && (
               <TouchableOpacity
                 style={[styles.manageButton, loading && styles.buttonDisabled]}
