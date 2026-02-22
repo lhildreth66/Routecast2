@@ -238,18 +238,7 @@ export default function AccountScreen() {
               )}
             </View>
 
-            {/* Subscription Actions */}
-            {!user.is_premium && (
-              <TouchableOpacity
-                style={styles.upgradeButton}
-                onPress={() => router.push('/subscription')}
-                data-testid="upgrade-btn"
-              >
-                <Ionicons name="rocket" size={20} color="#1a1a1a" />
-                <Text style={styles.upgradeButtonText}>Upgrade to Premium</Text>
-              </TouchableOpacity>
-            )}
-
+            {/* Manage Subscription - only for premium Stripe users */}
             {user.is_premium && user.subscription_provider === 'stripe' && (
               <TouchableOpacity
                 style={[styles.manageButton, loading && styles.buttonDisabled]}
