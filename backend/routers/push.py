@@ -14,7 +14,7 @@ from routers.auth import get_current_user_optional, get_current_user
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/push", tags=["Push Notifications"])
+router = APIRouter(tags=["Push Notifications"])
 
 
 # Request/Response Models
