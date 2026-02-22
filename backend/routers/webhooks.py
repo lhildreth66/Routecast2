@@ -44,6 +44,9 @@ async def process_stripe_event(db, event_type: str, data: dict):
         
         elif event_type == "invoice.payment_failed":
             await handle_invoice_failed(db, data, now)
+        
+        elif event_type == "customer.subscription.trial_will_end":
+            await handle_trial_will_end(db, data)
             
     except Exception as e:
         logger.error(f"Error processing Stripe event {event_type}: {e}")
