@@ -40,7 +40,11 @@ from notifications import NotificationService, ExpoPushClient, router as notific
 from notifications.smart_delay import SmartDelayOptimizer
 from common.features import SMART_DELAY_ALERTS
 from radar_alerts import radar_router  # Weather radar & alerts integration
-from backend.routers.push import router as push_router
+# Allow import both as package (backend.server) and module (server)
+try:
+    from backend.routers.push import router as push_router
+except ModuleNotFoundError:
+    from routers.push import router as push_router
 
 # Google Gemini for chat
 try:
