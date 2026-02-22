@@ -225,7 +225,7 @@ async def create_route_monitor(
     return {
         "success": True,
         "monitor_id": monitor_id,
-        "message": f"Route monitor created. You'll receive alerts starting 24 hours before departure."
+        "message": "Route monitor created. You'll receive alerts starting 24 hours before departure."
     }
 
 
