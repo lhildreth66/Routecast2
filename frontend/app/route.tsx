@@ -1565,6 +1565,51 @@ const styles = StyleSheet.create({
   alertInfo: {
     flex: 1,
   },
+  alertBadges: {
+    flexDirection: 'row',
+    gap: 6,
+    marginBottom: 4,
+  },
+  alertSourceBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  alertSourceNWS: {
+    backgroundColor: '#1d4ed8',
+  },
+  alertSourceSystem: {
+    backgroundColor: '#6b7280',
+  },
+  alertSourceText: {
+    color: '#fff',
+    fontSize: 9,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  alertSeverityBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  severityExtreme: {
+    backgroundColor: '#dc2626',
+  },
+  severityHigh: {
+    backgroundColor: '#ea580c',
+  },
+  severityMedium: {
+    backgroundColor: '#ca8a04',
+  },
+  severityLow: {
+    backgroundColor: '#16a34a',
+  },
+  alertSeverityText: {
+    color: '#fff',
+    fontSize: 9,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
   alertCountdown: {
     color: '#fff',
     fontSize: 16,
