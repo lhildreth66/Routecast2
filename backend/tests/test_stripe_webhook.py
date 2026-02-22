@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL')
 if not BASE_URL:
     # Fallback for testing environment
-    BASE_URL = "https://premium-access-sync.preview.emergentagent.com"
+    BASE_URL = "https://premium-toggle.preview.emergentagent.com"
 
 BASE_URL = BASE_URL.rstrip('/')
 

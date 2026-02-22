@@ -1,101 +1,129 @@
 <analysis>**original_problem_statement:**
-The user's initial request was for UI and authentication fixes for a React Native app named RouteCast. The scope expanded significantly to include:
-1.  **Productionization:** A major request to build a full production-ready system including custom domains, a complete authentication system (signup, login, email verification, password reset), a subscription/paywall system using Stripe, and deployment to Render.com.
-2.  **Trucker Safety Features:** Implementation of Bridge Height Hazards and fixing Truck weight restricted roads with real data.
-3.  **Push Notifications:** Integrate an existing push notification worker into the new backend and subscription system.
-4.  **Stripe Webhook for Generic Links:** The latest request is to handle Stripe webhooks for generic  payment links. This requires mapping the Stripe customer to the application user via email, as  is not present in the checkout metadata. The webhook must handle , , and  to manage premium access.
+The user's initial request was to fix UI and authentication issues for a React Native app, which expanded into a full productionization effort including custom domains, auth, Stripe subscriptions, and new trucker safety features (Bridge Height, Truck Weight).
 
-**PRODUCT REQUIREMENTS:** are detailed in .
+The most recent requests in this session were:
+1.  **Stripe Webhook Fix (P0):** Fix the Stripe webhook to handle generic payment links by mapping customers via email, ensuring premium access is granted/revoked correctly. This included adding a handler for .
+2.  **Domain Migration (P0):** Migrate the entire application backend off the  subdomain to use the root domain .
+3.  **Landing Page Creation (P1):** Build a new, vibrant, conversion-focused marketing landing page. This was built but deferred from deployment.
+4.  **A list of 7 specific fixes (P0):**
+    1.  Remove Subscribe/Upgrade buttons from the authenticated in-app UI.
+    2.  Fix the Push Weather Alerts toggle to be functional and persistent.
+    3.  Ensure the Alerts tab navigates to a real alerts screen.
+    4.  Improve alert text clarity by showing Source, Severity, and Action.
+    5.  Add an X clear button to address input blocks.
+    6.  Verify the Stripe trial flow and add a handler for .
+    7.  Fix a mobile layout bug causing the monthly price text to wrap.
+
+The user's final, explicit instruction is to create a new, clean git branch named  containing only the changes for the 7 fixes mentioned above and deploy it.
 
 **User's preferred language**: English
 
 **what currently exists?**
-The project is a full-stack application with a React Native/Expo frontend and a FastAPI/MongoDB backend. Both services are deployed on Render.com and are live on custom domains.
--   **Backend:** A modular backend for authentication (JWT), subscriptions (Stripe), and user management is in place. It also includes new services for fetching bridge height and truck weight restriction data from the OpenStreetMap Overpass API. A push notification system is also implemented.
--   **Frontend:** A complete UI for the authentication and subscription flow has been built, including pages for signup, login, email verification, password reset, account management, and viewing subscription plans. The frontend is configured to communicate with the live production backend.
+The project is a full-stack application with a React Native/Expo frontend and a FastAPI/MongoDB backend deployed on Render.com. It features a complete authentication system (JWT), a subscription system using Stripe, user management, and backend services for fetching bridge height and truck weight restriction data. The codebase includes a modular backend structure and a complete set of frontend screens for the user lifecycle. In this session, the Stripe webhook logic was significantly improved, a new marketing landing page was created (but not deployed), and several UI/UX bugs were addressed.
 
 **Last working item**:
-    - Last item agent was working: The agent started rewriting the Stripe webhook handler in  to support generic payment links. Because these links don't pass a , the webhook must use the  from the Stripe event to find and update the corresponding user in the application's MongoDB database. This is a critical fix to make the live payment links functional.
+    - Last item agent was working: The agent was attempting to deliver the 7 approved fixes to the user for deployment. After multiple failed attempts to transfer the code via patches, zip files, and large diffs, the user's final instruction was to create a clean git branch named  with only the 7 required file updates. The agent has identified all necessary code changes but has not yet created the requested clean branch.
     - Status: IN PROGRESS
-    - Agent Testing Done: N
-    - Which testing method agent to use? backend testing agent. The agent should create mock Stripe webhook events (for , , ) and send them to the  endpoint. The test should verify that the correct user document in MongoDB is updated with the appropriate premium status, plan, and subscription details.
+    - Agent Testing Done: Y (The agent used the testing agent to validate the Stripe webhook fixes early in the session and performed manual  tests for the new push notification endpoints. However, a full E2E test of all 7 fixes has not been performed.)
+    - Which testing method agent to use? both. A full end-to-end test is required across the frontend and backend after the changes are deployed. The testing agent should be used to validate the push notification flow and the subscription flow, and a screenshot should be used to verify the UI fixes (price text wrapping, alert badges).
     - User Testing Done: N
 
 **All Pending/In progress Issue list**:
-  - Issue 1: Complete Stripe Webhook Implementation for Generic Links (P0)
-  - Issue 2: Fix white bar browser autofill UI bug (P1)
-  - Issue 3: Verify and adjust Talking Button functionality (P2)
+  - Issue 1: Create a clean git branch and prepare for deployment (P0)
+  - Issue 2: Deploy and validate the new marketing landing page (P1)
+  - Issue 3: white bar browser autofill UI bug (P2)
+  - Issue 4: Verify and adjust Talking Button functionality (P2)
+  - Issue 5: Add X clear button on optional address fields (P2)
   
   Issues Detail:
   - Issue 1: 
-     - Attempted fixes: The agent analyzed the existing webhook code and identified that it relied on a  in the checkout session metadata, which is not available with the user's generic Stripe payment links. The agent was in the process of rewriting the handler.
+     - Attempted fixes: The agent has tried providing the changes via patch files, zip files, full file content dumps, and large diffs. All were rejected by the user due to being dirty or containing too many unrelated changes.
      - Next debug checklist: 
-        1. Open .
-        2. In the  function, retrieve the event object from Stripe.
-        3. For events like , extract the customer object and get the .
-        4. Use the email to look up the user in the  collection in MongoDB.
-        5. If the user exists, update their record with , , , and . Handle logic for  and  to update or revoke access.
-        6. If the user does not exist (e.g., they paid before signing up), consider the appropriate strategy (e.g., flag the email for linking on first signup).
-        7. Ensure the webhook responds with a  status quickly to avoid timeouts from Stripe.
-     - Why fix this issue and what will be achieved with the fix? This is critical to connect the live payment system to the user database. Without it, users who pay will not get premium access automatically.
+        1. Create a new branch named  from .
+        2. Manually apply the minimal, approved changes to the 7 files: , , , , , , .
+        3. Push this clean branch to the repository.
+        4. Inform the user that the clean branch is ready for their review and PR creation.
+     - Why fix this issue and what will be achieved with the fix? This is the primary blocker. The user cannot deploy the critical bug fixes until they receive a clean, minimal set of changes. This will resolve the user's main point of frustration.
      - Status:  IN PROGRESS
-     - Is recurring issue? N
-     - Should Test frontend/backend/both after fix? Backend
+     - Is recurring issue? Y
+     - Should Test frontend/backend/both after fix? Both
      - Blocked on other issue: None
 
   - Issue 2: 
-     - Attempted fixes: Previous attempts included adding  and creating a custom  component. These were unsuccessful.
+     - Attempted fixes: A complete landing page was created at .
      - Next debug checklist: 
-        1. Research the latest CSS/HTML techniques to disable browser autofill UIs on address fields, potentially using unique  or uid=0(root) gid=0(root) groups=0(root) attributes on each render.
-        2. Test solutions across different browsers (Chrome, Safari).
-     - Why fix this issue and what will be achieved with the fix? It's a major UI obstruction on a core part of the application.
+        1. Route the  path to  for unauthenticated users.
+        2. Move the existing app UI behind a  path.
+        3. Ensure all CTAs on the landing page work as expected.
+     - Why fix this issue and what will be achieved with the fix? It's a key user request to improve the application's marketing presence and conversion funnel.
+     - Status:  NOT STARTED
+     - Is recurring issue? N
+     - Should Test frontend/backend/both after fix? Frontend
+     - Blocked on other issue: Issue 1
+
+  - Issue 3: 
+     - Attempted fixes: (From previous forks)  and custom components.
+     - Next debug checklist: Research latest CSS/HTML techniques to disable browser autofill styling, potentially by randomizing  or uid=0(root) gid=0(root) groups=0(root) attributes.
+     - Why fix this issue and what will be achieved with the fix? Fixes a major UI obstruction on a core part of the application.
      - Status:  NOT STARTED
      - Is recurring issue? Y
      - Should Test frontend/backend/both after fix? Frontend
      - Blocked on other issue: None
 
-  - Issue 3: 
-     - Attempted fixes: A previous agent reviewed the  function in  and believed it was correct.
-     - Next debug checklist:
-        1. In , trace the exact text passed to the text-to-speech function.
-        2. Modify the  function to ensure it *only* includes road conditions and weather alerts, excluding other summary text.
+  - Issue 4: 
+     - Attempted fixes: Previous agent reviewed the code.
+     - Next debug checklist: In , trace the text passed to the  function and modify it to only include road conditions and weather alerts.
      - Why fix this issue and what will be achieved with the fix? To align the handsfree feature with the user's precise requirement.
      - Status:  NOT STARTED
      - Is recurring issue? N
      - Should Test frontend/backend/both after fix? Frontend
      - Blocked on other issue: None
 
+  - Issue 5: 
+     - Attempted fixes: The agent believed this was already implemented, but the user logged it as a post-launch backlog item.
+     - Next debug checklist: Review the UI for adding optional stops (not just origin/destination) and add a clear button to remove them.
+     - Why fix this issue and what will be achieved with the fix? A quality-of-life UX improvement for route planning.
+     - Status:  NOT STARTED
+     - Is recurring issue? N
+     - Should Test frontend/backend/both after fix? Frontend
+     - Blocked on other issue: None
+
 **In progress Task List**:
-- There are no other in-progress tasks. The primary focus is the Stripe webhook issue.
+- There are no other in-progress tasks. The sole focus is creating the clean branch for the 7 fixes.
 
 **Upcoming and Future Tasks**
     Upcoming Tasks:
-    - **P0: Full Production Validation**: Although both frontend and backend are live, there have been discrepancies where the deployed backend was running old code. A full end-to-end validation is required: create an account, start a trial, upgrade using the live Stripe link, verify premium access is granted, and test the push notification and bridge/weight alert features.
-    - **P1: Validate Push Notification Worker in Production**: The backend code is implemented, but needs to be validated end-to-end on the live production system to ensure it correctly sends alerts only to users with active subscriptions or trials.
+    - **P0: Full Production Validation**: Once the 7 fixes are deployed, perform a full end-to-end test: create an account, complete a trial checkout, verify premium access, and test the push notifications.
+    - **P1: Deploy Landing Page**: Implement the routing changes to make the new landing page the public homepage.
 
     Future Tasks:
-    - **P2: Refactor Monolithic Backend**: Progressively move endpoints from the monolithic  into the modular  structure.
-    - **P3: Refactor Duplicated Frontend UI**: Extract the address search functionality, which is duplicated across multiple screen files, into a single reusable component.
-    - **P3: Implement Placeholder Backend Logic**: Features like Campsite Suitability Index, Connectivity, and Solar Forecast still have placeholder logic in the backend.
+    - **P2: Refactor Monolithic Backend**: Progressively move endpoints from  into the modular  structure.
+    - **P3: Refactor Duplicated Frontend UI**: Extract the address search functionality into a single reusable component.
+    - **P3: Implement Placeholder Backend Logic**: Implement features like Campsite Suitability Index, Connectivity, and Solar Forecast which currently have placeholder logic.
 
 **Completed work in this session**
-- **Full Auth & Subscription Frontend UI**: Created all necessary React Native screens for a complete authentication and subscription user flow (, , , , , , ).
-- **Bridge Height Alerts**: Implemented the backend logic in  to find low clearances along a route using the OpenStreetMap/Overpass API.
-- **Weight-Restricted Roads**: Implemented the backend logic in  to find weight-restricted roads using the OpenStreetMap/Overpass API.
-- **Push Notification System**: Built the backend infrastructure (,  router) to register devices and manage route monitors, integrating it with the user subscription status.
-- **Deployment Guidance & Automation**:
-    - Guided the user through deploying the frontend and backend to Render.com.
-    - Provided exact build commands and configurations for the Expo (React Native for Web) frontend.
-    - Created a  file for blueprint deployments.
-    - Created a  file () to help the user deploy a specific set of ~26 files to a clean git branch.
-- **Project Cleanup**: Removed  in favor of , added a  file, and specified Node.js 20 in .
+- **Stripe Webhook Enhancements**:
+  - : Reworked to be synchronous, fixed plan name logic (), correctly updated  on deletion, and added a handler for  to send reminder emails.
+  - : Expanded the definition of a premium user to include  and  statuses.
+- **Domain Migration**:
+  - , , : Updated all base URLs to , removing the  subdomain.
+- **Push Notification Toggle Fix**:
+  - : Added new  and  endpoints at  to manage user push preferences.
+  - : Implemented logic for the push notification toggle to request permissions, register tokens, and persist the user's choice to the backend.
+- **UI/UX Fixes**:
+  - : Removed the Upgrade to Premium button from the authenticated app view.
+  - : Added source (Official NWS / System Detected) and severity badges to alerts for better clarity.
+  - : Fixed a CSS bug causing the monthly price text to wrap on mobile.
+  - : Updated the trial description copy for clarity.
+- **Landing Page Creation (Deferred)**:
+  - : Created a complete, multi-section marketing landing page (though its deployment was postponed).
 
 **Earlier issues found/mentioned but not fixed**
-   - The white bar browser autofill issue has persisted across multiple sessions despite several fix attempts.
+- The white bar browser autofill issue has persisted across multiple sessions.
 
 **Known issue recurrence from previous fork**
   - **Issue recurrence in previous fork**: The white bar browser autofill UI bug.
-  - **Recurrence count**: 2+
+  - **Recurrence count**: 3+
   - **Status**: NOT STARTED
 
 **Code Architecture**
@@ -105,77 +133,86 @@ The project is a full-stack application with a React Native/Expo frontend and a 
 - **Frontend**: React Native, Expo (SDK 51), TypeScript
 - **Backend**: Python, FastAPI, MongoDB, Pydantic
 - **Authentication**: JWT (access + refresh tokens)
-- **Subscriptions**: Stripe API
+- **Subscriptions**: Stripe API (Webhooks for , , , )
 - **Deployment**: Render.com ()
 - **Geospatial Data**: Overpass API for querying OpenStreetMap data.
+- **Push Notifications**: Expo Push Notifications, .
 
 **key DB schema**
-  - **users**: 
+  - **users**:  (Added push fields)
 
 **changes in tech stack**
-- No new technologies were added, but the use of the **Overpass API** for querying OpenStreetMap data is a new pattern in the codebase.
+  -  was installed for the deferred landing page.
+  -  is now used in the backend for the trial reminder email.
 
 **All files of reference**
-- **Stripe Webhook**:  (The file to be modified).
-- **New Backend Services**: , , .
-- **New Backend Routers**: .
-- **New Auth Frontend**: All files under  related to auth (, , etc.) and .
-- **Deployment Files**: , .
+*   **Files with approved changes for next deploy (7 total):**
+    *   : For push notification toggle logic.
+    *   : For removing the in-app upgrade button.
+    *   : For alert UI clarity improvements.
+    *   : For the price text wrapping fix.
+    *   : For the trial copy update.
+    *   : For the  handler.
+    *   : For the new push settings endpoints.
+*   **Other key files modified in this session:**
+    *   : Updated premium status logic.
+    *   : Updated environment variables for the domain migration.
+    *   : The completed (but deferred) landing page.
 
 **Areas that need refactoring**:
-- **Backend Monolith**:  still contains many core application endpoints that should be migrated to the  structure.
-- **Frontend Duplication**: The address search UI logic is copied across many screen files and should be extracted into a single, reusable component.
+- **Backend Monolith**:  still contains core application endpoints that should be migrated to the  structure.
+- **Frontend Duplication**: The address search UI logic is duplicated and should be extracted into a reusable component.
 
 **key api endpoints**
-- **Critical Webhook**: 
-- **New Push Endpoints**: , , 
-- **New Trucker Endpoints**: , 
-- **Auth/Sub**: , , , 
+- **Stripe Webhook**: 
+- **Push Settings**: ,  (New)
 
 **Critical Info for New Agent**
-- **Your immediate task is to fix the Stripe webhook.** The user is using generic  links, so you MUST implement logic to map the Stripe customer to the application user via the  field in the webhook event. The existing code, which relies on  in metadata, will not work.
-- The application is **live**. Both frontend and backend are deployed. However, the user has had issues with the backend deployment being out of sync with the latest code. After fixing the webhook, you should guide the user to push the changes and then perform a full end-to-end test on the production URLs.
-- Do not create new files unless necessary. The structure for the webhook fix is already in place in .
+- **Your IMMEDIATE and ONLY priority is to create a clean git branch.** The user is extremely frustrated with the previous agent's inability to deliver code changes cleanly.
+- Create a new branch  from .
+- Apply only the 7 approved file changes to this branch. The minimal diffs have already been generated and approved by the user.
+- **DO NOT** include the new landing page (). This has been explicitly deferred.
+- The application's production domain has been migrated to . There are no API subdomains. Ensure all URL configurations reflect this.
+- After creating the clean branch, your next step is to guide the user through deployment and then conduct a full E2E validation of the 7 fixes.
 
 **documents and test reports created in this job**
   - 
-  - 
-  -  (updated for both backend and frontend deployment)
   -  (updated)
 
 **Last 10 User Messages and any pending HUMAN messages**
-1.  **User (LATEST)**: Requested the implementation of a Stripe webhook to handle generic payment links by mapping users via email and managing subscription status.
-2.  **User**: Asked agent to generate a  file with ~25 specific feature files to be applied to a clean git branch.
-3.  **User**: Corrected the agent, stating a previous release branch was contaminated and providing exact instructions to create a new clean branch and apply only approved files.
-4.  **User**: Confirmed they would deploy the frontend and asked the agent to proceed with post-frontend tasks (Bridge Height verification, Push worker integration).
-5.  **User**: Stated the frontend build scripts were missing and provided the correct build command for Render ().
-6.  **User**: Stated they are waiting on the agent.
-7.  **User**: Confirmed frontend deployment and asked agent to proceed with next priorities: weight-restricted roads, push notification validation, and cleanup tasks.
-8.  **User**: Confirmed backend deployment and asked agent to start building the Auth/Subscription frontend UI immediately.
-9.  **User**: Provided the final, detailed steps to deploy the backend to Render.
-10. **User**: Requested the agent redact secrets from documentation and use more specific event names for the Stripe webhook.
+1.  **User**: Asks for a recap of everything done today.
+2.  **User**: Confirms the minimal diffs are approved and confirms the final webhook URL is .
+3.  **User**: Instructs the agent to apply the changes to a specific branch  and open a PR. (Agent cannot do this).
+4.  **User**: Rejects the agent's response, stating they will apply changes manually and need minimal diffs for the 7 approved fixes. Sets strict formatting rules.
+5.  **User**: Rejects the agent's diffs again, as some were deemed too large.
+6.  **User**: Again rejects the diffs, stating they are not minimal diffs and provides an example of the required  format.
+7.  **User**: Acknowledges the correctly formatted diffs but points out blocking issues (missing imports, unsupported CSS). Asks for a follow-up diff to fix these blockers.
+8.  **User**: Interrupts the agent's attempt to provide full files, stating they will upload the fixed files themselves. Asks for the final, complete files.
+9.  **User**: Re-iterates the request for the completed files to be saved to GitHub, expressing frustration.
+10. **User (LATEST)**: Rejects the agent's suggestion to use the conflicted branch. Instructs the agent to create a **NEW, clean branch**  from  with ONLY the 7 approved file updates.
 
 **Project Health Check:**
-- **Broken**: The core business logic of granting premium access upon payment is currently broken because the Stripe webhook cannot handle the generic payment links.
-- **Mocked**: No mocked components.
-- **Refactoring needed**: The main  file remains a large monolith. The frontend has significant code duplication in its location-search UI components.
+- **Broken**: The push notification toggle is non-functional, alert clarity is poor, and a mobile UI bug affects the pricing display. These are addressed by the pending 7 fixes.
+- **Mocked**: None.
+- **Refactoring needed**: The main  file remains a monolith, and the frontend has duplicated UI for address search.
 
 **3rd Party Integrations**
 - **Mapbox (Geocoding API)** — requires User API Key.
 - **Google Places API** — requires User API Key.
 - **NOAA National Weather Service** — Free public API.
 - **Stripe Subscriptions** — requires User API Key.
-- **SendGrid** — requires User API Key.
+- **SendGrid** — requires User API Key (New usage for trial reminders).
 - **Overpass API (for OpenStreetMap)** — Free public API.
+- **Expo Push Notifications** — requires configuration.
 
 **Testing status**
-  - Testing agent used after significant changes: NO (in this session)
+  - Testing agent used after significant changes: YES (for Stripe webhook fixes)
   - Troubleshoot agent used after agent stuck in loop: NO
   - Test files created: []
-  - Known regressions: The white bar UI bug on address inputs is a persistent, known regression.
+  - Known regressions: The white bar UI bug on address inputs persists.
 
 **Credentials to test flow:**
-The backend  file requires , , and  for the next task. The agent should use test keys.
+The backend  file requires , , , and . These should be sourced from the Render environment.
 
 **What agent forgot to execute**
-The agent correctly identified and began addressing all user requests. The most recent task (Stripe webhook fix) was interrupted by the end of the session. A recurring point of friction was the state of the production deployment; the agent repeatedly noted the backend was running old code, which the user sometimes confirmed and sometimes contradicted. The next agent should prioritize getting a definitive status of the production environment.</analysis>
+The agent consistently failed to execute the user's primary procedural request: to deliver code changes in a clean, deployable format. This led to a long, frustrating loop of the user rejecting patches, zips, large diffs, and full file dumps. The final, unexecuted instruction is to create a clean git branch named  with the 7 approved file changes. This is the most critical task for the next agent.</analysis>

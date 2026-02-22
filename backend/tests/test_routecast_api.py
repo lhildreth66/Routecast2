@@ -7,7 +7,7 @@ import pytest
 import requests
 import os
 
-BASE_URL = os.environ.get('EXPO_PUBLIC_BACKEND_URL', 'https://premium-access-sync.preview.emergentagent.com')
+BASE_URL = os.environ.get('EXPO_PUBLIC_BACKEND_URL', 'https://premium-toggle.preview.emergentagent.com')
 
 class TestHealthAndBasicEndpoints:
     """Basic API health and connectivity tests"""
