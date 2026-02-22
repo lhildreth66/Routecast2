@@ -507,6 +507,7 @@ const styles = StyleSheet.create({
   planPriceContainer: {
     flexDirection: 'row',
     alignItems: 'baseline',
+    flexWrap: 'nowrap',
   },
   planPrice: {
     color: '#eab308',
@@ -516,6 +517,7 @@ const styles = StyleSheet.create({
   planInterval: {
     color: '#6b7280',
     fontSize: 14,
+    flexShrink: 0,
   },
   planFeatures: {
     gap: 8,
