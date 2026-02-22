@@ -40,6 +40,7 @@ from notifications import NotificationService, ExpoPushClient, router as notific
 from notifications.smart_delay import SmartDelayOptimizer
 from common.features import SMART_DELAY_ALERTS
 from radar_alerts import radar_router  # Weather radar & alerts integration
+from backend.routers.push import router as push_router
 
 # Google Gemini for chat
 try:
@@ -8424,4 +8425,9 @@ app.include_router(
     notifications_router,
     prefix="/api/notifications",
     tags=["notifications"],
+)
+app.include_router(
+    push_router,
+    prefix="/api/push",
+    tags=["push"],
 )
