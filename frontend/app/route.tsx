@@ -945,6 +945,26 @@ export default function RouteScreen() {
                         color="#fff" 
                       />
                       <View style={styles.alertInfo}>
+                        {/* Source and Severity badges */}
+                        <View style={styles.alertBadges}>
+                          <View style={[styles.alertSourceBadge, alert.source === 'nws' ? styles.alertSourceNWS : styles.alertSourceSystem]}>
+                            <Text style={styles.alertSourceText}>
+                              {alert.source === 'nws' ? 'Official NWS' : 'System Detected'}
+                            </Text>
+                          </View>
+                          <View style={[
+                            styles.alertSeverityBadge,
+                            alert.severity === 'extreme' ? styles.severityExtreme :
+                            alert.severity === 'high' ? styles.severityHigh :
+                            alert.severity === 'medium' ? styles.severityMedium : styles.severityLow
+                          ]}>
+                            <Text style={styles.alertSeverityText}>
+                              {alert.severity === 'extreme' ? 'Warning' :
+                               alert.severity === 'high' ? 'Warning' :
+                               alert.severity === 'medium' ? 'Watch' : 'Advisory'}
+                            </Text>
+                          </View>
+                        </View>
                         <Text style={styles.alertCountdown}>{alert.countdown_text}</Text>
                         <Text style={styles.alertMessage}>{alert.message}</Text>
                       </View>
