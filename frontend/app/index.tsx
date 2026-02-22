@@ -130,6 +130,79 @@ export default function HomeScreen() {
   
   // Radar map state
   const [showRadarMap, setShowRadarMap] = useState(false);
+  
+  // Push notification state
+  const [pushLoading, setPushLoading] = useState(false);
+
+  // Load push notification settings on mount
+  useEffect(() => {
+    loadPushSettings();
+  }, [isAuthenticated]);
+
+  const loadPushSettings = async () => {
+    if (!isAuthenticated) return;
+    try {
+      const token = await AsyncStorage.getItem('access_token');
+      if (!token) return;
+      
+      const response = await axios.get(`${API_BASE}/api/push/settings`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setAlertsEnabled(response.data.push_enabled || false);
+    } catch (err) {
+      console.log('Failed to load push settings:', err);
+    }
+  };
+
+  const handleAlertsToggle = async (enabled: boolean) => {
+    if (!isAuthenticated) {
+      Alert.alert('Sign In Required', 'Please sign in to enable push notifications.');
+      return;
+    }
+    
+    setPushLoading(true);
+    try {
+      let pushToken = null;
+      
+      if (enabled) {
+        // Request permission
+        const { status: existingStatus } = await Notifications.getPermissionsAsync();
+        let finalStatus = existingStatus;
+        
+        if (existingStatus !== 'granted') {
+          const { status } = await Notifications.requestPermissionsAsync();
+          finalStatus = status;
+        }
+        
+        if (finalStatus !== 'granted') {
+          Alert.alert('Permission Denied', 'Please enable notifications in your device settings.');
+          setPushLoading(false);
+          return;
+        }
+        
+        // Get push token
+        const tokenData = await Notifications.getExpoPushTokenAsync();
+        pushToken = tokenData.data;
+      }
+      
+      // Save to backend
+      const token = await AsyncStorage.getItem('access_token');
+      await axios.post(`${API_BASE}/api/push/settings`, {
+        push_enabled: enabled,
+        push_token: pushToken,
+        platform: Platform.OS
+      }, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      
+      setAlertsEnabled(enabled);
+    } catch (err) {
+      console.log('Failed to update push settings:', err);
+      Alert.alert('Error', 'Failed to update notification settings. Please try again.');
+    } finally {
+      setPushLoading(false);
+    }
+  };
 
   useEffect(() => {
     fetchRecentRoutes();
