@@ -11,7 +11,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 SENDGRID_API_KEY = os.environ.get('SENDGRID_API_KEY', '')
-SENDER_EMAIL = os.environ.get('SENDER_EMAIL', 'noreply@routecastweather.com')
+SENDER_EMAIL = os.environ.get('SEND_FROM_EMAIL') or os.environ.get('SENDER_EMAIL', 'no-reply@routecastweather.com')
+SENDER_NAME = os.environ.get('SEND_FROM_NAME', 'Routecast')
 APP_URL = os.environ.get('APP_URL', 'https://app.routecastweather.com')
 
 
@@ -26,7 +27,7 @@ def _send_email(to: str, subject: str, html_content: str) -> bool:
         return True  # Return True in dev to not block flow
 
     message = Mail(
-        from_email=SENDER_EMAIL,
+        from_email=f"{SENDER_NAME} <{SENDER_EMAIL}>",
         to_emails=to,
         subject=subject,
         html_content=html_content
@@ -264,3 +265,9 @@ def send_subscription_confirmation_email(email: str, plan: str, name: Optional[s
     """
 
     return _send_email(email, f"Your RouteCast {plan_display} subscription is active!", html_content)
+
+
+def send_test_email(to: str, subject: str, text: str) -> bool:
+    """Send a simple test email for operational checks."""
+    html_content = f"<p>{text}</p>"
+    return _send_email(to, subject, html_content)

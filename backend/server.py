@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException
+from fastapi import FastAPI, APIRouter, HTTPException, Header
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
@@ -40,6 +40,7 @@ from notifications import NotificationService, ExpoPushClient, router as notific
 from notifications.smart_delay import SmartDelayOptimizer
 from common.features import SMART_DELAY_ALERTS
 from radar_alerts import radar_router  # Weather radar & alerts integration
+from services.email_service import send_test_email, EmailDeliveryError
 # Allow import both as package (backend.server) and module (server)
 try:
     from backend.routers.push import router as push_router
@@ -322,6 +323,7 @@ NOAA_HEADERS = {
     'User-Agent': NOAA_USER_AGENT,
     'Accept': 'application/geo+json'
 }
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN")
 
 # Create the main app
 app = FastAPI()
@@ -3293,6 +3295,25 @@ Be concise and practical."""
     return getattr(response_obj, "text", None) or None
 
 # ==================== API Routes ====================
+
+
+class TestEmailRequest(BaseModel):
+    to: str
+    subject: str = "Routecast test"
+    text: str = "Hello from Routecast"
+
+
+@api_router.post("/email/test")
+async def send_test_email_endpoint(payload: TestEmailRequest, x_admin_token: Optional[str] = Header(None)):
+    if not ADMIN_TOKEN or x_admin_token != ADMIN_TOKEN:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    try:
+        sent = send_test_email(payload.to, payload.subject, payload.text)
+    except EmailDeliveryError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    return {"sent": sent}
 
 @api_router.get("/")
 async def root():
