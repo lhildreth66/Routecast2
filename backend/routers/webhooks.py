@@ -164,7 +164,7 @@ async def handle_checkout_completed(db, data: dict, now: datetime):
             "created_at": now,
             "resolved": False
         })
-        logger.warning(f"No user found for checkout, saved for manual resolution")
+        logger.warning("No user found for checkout, saved for manual resolution")
         return
     
     user_id = user["user_id"]
@@ -459,7 +459,7 @@ async def handle_trial_will_end(db, data: dict):
             subject = "Your RouteCast trial ends soon"
             content = Content(
                 "text/html",
-                f"""
+                """
                 <h2>Your RouteCast trial ends soon</h2>
                 <p>Hi there,</p>
                 <p>Your 7-day free trial is ending soon. After your trial ends, 
