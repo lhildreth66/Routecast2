@@ -897,9 +897,10 @@ export default function HomeScreen() {
                 </View>
                 <Switch
                   value={alertsEnabled}
-                  onValueChange={setAlertsEnabled}
+                  onValueChange={handleAlertsToggle}
                   trackColor={{ false: '#3f3f46', true: '#eab30880' }}
                   thumbColor={alertsEnabled ? '#eab308' : '#71717a'}
+                  disabled={pushLoading}
                 />
               </View>
 
