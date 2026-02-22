@@ -1,4 +1,4 @@
-import React, { useState, useEffect, forwardRef } from 'react';
+import React, { useState, useEffect, forwardRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import {
   Switch,
   Modal,
   Dimensions,
+  Alert,
 } from 'react-native';
 
 // Custom TextInput that disables browser autofill on web
