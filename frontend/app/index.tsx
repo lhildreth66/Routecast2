@@ -90,7 +90,7 @@ export default function HomeScreen() {
   // Redirect non-authenticated web users to landing page
   useEffect(() => {
     if (Platform.OS === 'web' && !authLoading && !isAuthenticated) {
-      router.replace('/landing');
+      router.replace('/login');
     }
   }, [isAuthenticated, authLoading]);
   
