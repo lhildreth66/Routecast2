@@ -442,7 +442,9 @@ export default function UserGuideScreen() {
             <Ionicons name="diamond" size={24} color="#eab308" />
             <Text style={styles.pricingTitle}>Subscription Plans</Text>
           </View>
-          <Text style={styles.pricingSubtitle}>Start with a FREE 1-week trial</Text>
+          <Text style={styles.pricingSubtitle}>
+            All plans include a 7-day free trial with full access to every feature. After the trial ends, your subscription continues automatically unless canceled.
+          </Text>
           
           <View style={styles.pricingOptions}>
             <View style={styles.pricingOption}>
@@ -464,7 +466,7 @@ export default function UserGuideScreen() {
           </View>
           
           <Text style={styles.pricingFooter}>
-            All features included • Cancel anytime • Managed by Google Play
+            All features included • Cancel anytime
           </Text>
         </View>
 
