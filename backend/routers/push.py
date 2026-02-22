@@ -100,6 +100,78 @@ async def unregister_push_token(
     return {"success": success}
 
 
+
+class PushSettingsRequest(BaseModel):
+    push_enabled: bool
+    push_token: Optional[str] = None
+    platform: str = "unknown"
+
+
+@router.get("/settings")
+async def get_push_settings(
+    user: dict = Depends(get_current_user)
+):
+    """Get push notification settings for current user."""
+    from server import db
+    
+    user_record = await db.users.find_one(
+        {"user_id": user["sub"]},
+        {"push_enabled": 1, "push_token": 1, "push_platform": 1}
+    )
+    
+    if not user_record:
+        return {"push_enabled": False, "push_token": None, "platform": None}
+    
+    return {
+        "push_enabled": user_record.get("push_enabled", False),
+        "push_token": user_record.get("push_token"),
+        "platform": user_record.get("push_platform")
+    }
+
+
+@router.post("/settings")
+async def update_push_settings(
+    request: PushSettingsRequest,
+    user: dict = Depends(get_current_user)
+):
+    """Update push notification settings for current user."""
+    from server import db
+    
+    update_data = {
+        "push_enabled": request.push_enabled,
+        "push_platform": request.platform
+    }
+    
+    if request.push_token:
+        update_data["push_token"] = request.push_token
+    
+    # If disabling, also register/unregister token
+    push_service = PushNotificationService(db)
+    
+    if request.push_enabled and request.push_token:
+        await push_service.register_push_token(
+            user_id=user["sub"],
+            push_token=request.push_token,
+            platform=request.platform
+        )
+    elif not request.push_enabled and request.push_token:
+        await push_service.unregister_push_token(
+            user_id=user["sub"],
+            push_token=request.push_token
+        )
+    
+    await db.users.update_one(
+        {"user_id": user["sub"]},
+        {"$set": update_data}
+    )
+    
+    return {
+        "success": True,
+        "push_enabled": request.push_enabled
+    }
+
+
+
 @router.post("/monitors", response_model=dict)
 async def create_route_monitor(
     request: CreateMonitorRequest,
