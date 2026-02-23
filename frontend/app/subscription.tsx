@@ -46,10 +46,6 @@ export default function SubscriptionScreen() {
     setMounted(true);
   }, []);
 
-  useEffect(() => {
-    setMounted(true);
-  }, []);
-
   const fetchPlans = async () => {
     try {
       const response = await axios.get(`${API_BASE}/api/subscription/plans`);
