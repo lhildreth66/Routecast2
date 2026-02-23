@@ -67,7 +67,7 @@ export default function AccountScreen() {
     setLogoutLoading(true);
     try {
       await logout();
-      router.replace('/');
+      router.replace('/login');
     } catch (err) {
       setError('Failed to sign out. Please try again.');
     } finally {

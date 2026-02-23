@@ -86,14 +86,14 @@ interface AutocompleteSuggestion {
 }
 
 export default function HomeScreen() {
-  const { user, isAuthenticated, isPremium, isLoading: authLoading } = useAuth();
+  const { user, isAuthenticated, isPremium, isLoading: authLoading, hasHydrated } = useAuth();
   
   // Redirect non-authenticated web users to landing page
   useEffect(() => {
-    if (Platform.OS === 'web' && !authLoading && !isAuthenticated) {
+    if (Platform.OS === 'web' && hasHydrated && !authLoading && !isAuthenticated) {
       router.replace('/login');
     }
-  }, [isAuthenticated, authLoading]);
+  }, [isAuthenticated, authLoading, hasHydrated]);
   
   const [origin, setOrigin] = useState('');
   const [destination, setDestination] = useState('');

@@ -23,6 +23,7 @@ interface AuthContextType {
   accessToken: string | null;
   refreshToken: string | null;
   isLoading: boolean;
+  hasHydrated: boolean;
   isAuthenticated: boolean;
   isPremium: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
@@ -39,6 +40,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [hasHydrated, setHasHydrated] = useState(false);
 
   // Load stored tokens on mount
   useEffect(() => {
@@ -60,6 +62,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       console.log('Error loading stored auth:', error);
     } finally {
+      setHasHydrated(true);
       setIsLoading(false);
     }
   };
@@ -92,6 +95,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       await AsyncStorage.setItem('accessToken', access_token);
       await AsyncStorage.setItem('refreshToken', refresh_token);
+      await AsyncStorage.setItem('access_token', access_token);
+      await AsyncStorage.setItem('refresh_token', refresh_token);
 
       setAccessToken(access_token);
       setRefreshToken(refresh_token);
@@ -135,6 +140,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       await AsyncStorage.setItem('accessToken', access_token);
       await AsyncStorage.setItem('refreshToken', refresh_token);
+      await AsyncStorage.setItem('access_token', access_token);
+      await AsyncStorage.setItem('refresh_token', refresh_token);
 
       setAccessToken(access_token);
       setRefreshToken(refresh_token);
@@ -183,6 +190,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       await AsyncStorage.setItem('accessToken', access_token);
       await AsyncStorage.setItem('refreshToken', new_refresh);
+      await AsyncStorage.setItem('access_token', access_token);
+      await AsyncStorage.setItem('refresh_token', new_refresh);
 
       setAccessToken(access_token);
       setRefreshToken(new_refresh);
@@ -200,6 +209,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     accessToken,
     refreshToken,
     isLoading,
+    hasHydrated,
     isAuthenticated: !!user,
     isPremium: user?.is_premium || false,
     login,
