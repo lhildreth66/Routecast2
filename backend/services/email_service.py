@@ -277,10 +277,11 @@ def send_test_email(to: str, subject: str, text: str) -> bool:
 def send_contact_email(name: str, email: str, message: str, client_ip: str, user_agent: str) -> bool:
     """Send contact form submission to support."""
     subject = f"RouteCast Contact: {name} <{email}>"
+    message_html = message.replace("\n", "<br/>")
     html_content = f"""
     <p><strong>Name:</strong> {name}</p>
     <p><strong>Email:</strong> {email}</p>
-    <p><strong>Message:</strong><br/>{message.replace('\n', '<br/>')}</p>
+    <p><strong>Message:</strong><br/>{message_html}</p>
     <hr/>
     <p><strong>IP:</strong> {client_ip}</p>
     <p><strong>User-Agent:</strong> {user_agent}</p>
