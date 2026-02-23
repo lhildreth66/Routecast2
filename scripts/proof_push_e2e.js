@@ -12,13 +12,17 @@
  *   ROUTECAST_EMAIL=you@example.com ROUTECAST_PASS=yourpass node scripts/proof_push_e2e.js
  *
  * Optional overrides:
- *   ROUTECAST_API=https://routecast-backend.onrender.com   (default)
+ *   ROUTECAST_API=https://routecast-backend.onrender.com   (default – matches all config files in this repo)
+ *                                                          Override to your custom domain if needed, e.g.
+ *                                                          ROUTECAST_API=https://api.routecastweather.com
  *   RECEIPT_DELAY_MS=3000                                  (default: 3 s)
  */
 
 const https = require('https');
 const http = require('http');
 
+// Canonical prod URL as used in frontend/app/apiConfig.ts and frontend/eas.json.
+// Override via ROUTECAST_API if your deployment uses a custom domain.
 const API   = (process.env.ROUTECAST_API  || 'https://routecast-backend.onrender.com').replace(/\/$/, '');
 const EMAIL = process.env.ROUTECAST_EMAIL || '';
 const PASS  = process.env.ROUTECAST_PASS  || '';
@@ -81,19 +85,21 @@ async function fetchActiveNwsCoordinate() {
     const features = (res.body.features || []);
     for (const f of features) {
       const geom = f.geometry;
-      // Polygon
-      if (geom?.type === 'Polygon' && geom.coordinates?.[0]?.length) {
-        const ring = geom.coordinates[0];
-        const mid  = ring[Math.floor(ring.length / 2)];
-        return { lat: mid[1], lon: mid[0], event: f.properties?.event };
+      // Polygon – use ring[1]: the first non-closing vertex, guaranteed on the polygon boundary.
+      // ring[0] == ring[last] (GeoJSON closing duplicate), so ring[1] is the cleanest
+      // unambiguous boundary point without any centroid calculation.
+      if (geom?.type === 'Polygon' && geom.coordinates?.[0]?.length >= 2) {
+        const ring  = geom.coordinates[0];
+        const pt    = ring[1]; // first non-closing vertex
+        return { lat: pt[1], lon: pt[0], event: f.properties?.event };
       }
-      // MultiPolygon
-      if (geom?.type === 'MultiPolygon' && geom.coordinates?.[0]?.[0]?.length) {
-        const ring = geom.coordinates[0][0];
-        const mid  = ring[Math.floor(ring.length / 2)];
-        return { lat: mid[1], lon: mid[0], event: f.properties?.event };
+      // MultiPolygon – same strategy on the first ring of the first polygon
+      if (geom?.type === 'MultiPolygon' && geom.coordinates?.[0]?.[0]?.length >= 2) {
+        const ring  = geom.coordinates[0][0];
+        const pt    = ring[1];
+        return { lat: pt[1], lon: pt[0], event: f.properties?.event };
       }
-      // Point (rare but valid)
+      // Point – already an exact coordinate
       if (geom?.type === 'Point' && geom.coordinates?.length === 2) {
         return { lat: geom.coordinates[1], lon: geom.coordinates[0], event: f.properties?.event };
       }
@@ -240,12 +246,22 @@ async function fetchActiveNwsCoordinate() {
     );
 
     if (monitorRes.status === 200 && monitorRes.body.ok) {
+      // route-monitor/start only REGISTERS the monitor in MongoDB.
+      // It does NOT immediately fetch NWS alerts or send a push.
+      // The background worker (run_route_alerts_worker.py, 15-min interval)
+      // fires the actual push on its next cycle.
       pass(
-        'POST /api/notifications/route-monitor/start',
+        'POST /api/notifications/route-monitor/start  [monitor registered]',
         `monitor_id=${monitorRes.body.monitor_id}  points=${monitorRes.body.points}`,
       );
-      info('Backend will fire a push within the next worker cycle (≤15 min).');
-      info('Watch the device – you should receive a weather-alert notification.');
+      info('⏱  Push delivery is NOT immediate – the background worker fires ≤15 min from now.');
+      info('Watch the device over the next 15 min for a weather-alert notification.');
+      info('This step confirms the endpoint accepted the monitor; device arrival is Step 5.');
+      console.log('');
+      info('NOTE: to force an immediate dispatch without waiting for the worker,');
+      info('a /api/notifications/route-monitor/check-now endpoint does not yet exist.');
+      info('That endpoint can be added to backend/notifications/__init__.py to call');
+      info('get_route_alert_service().worker.run_once() synchronously.');
     } else {
       fail(
         'POST /api/notifications/route-monitor/start',
