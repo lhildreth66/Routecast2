@@ -36,6 +36,11 @@ export default function SignupScreen() {
   const handleSignup = async () => {
     setError('');
 
+    if (!name.trim()) {
+      setError('Please enter your name');
+      return;
+    }
+
     if (!email.trim() || !password.trim()) {
       setError('Please fill in all required fields');
       return;
@@ -59,7 +64,7 @@ export default function SignupScreen() {
 
     setLoading(true);
 
-    const result = await signup(email.trim(), password, name.trim() || undefined);
+    const result = await signup(email.trim(), password, name.trim());
 
     setLoading(false);
 
@@ -102,9 +107,9 @@ export default function SignupScreen() {
 
             {/* Signup Form */}
             <View style={styles.form}>
-              {/* Name Input (Optional) */}
+              {/* Name Input */}
               <View style={styles.inputSection}>
-                <Text style={styles.inputLabel}>NAME (OPTIONAL)</Text>
+                <Text style={styles.inputLabel}>NAME *</Text>
                 <View style={styles.inputWrapper}>
                   <Ionicons name="person-outline" size={20} color="#a1a1aa" style={styles.inputIcon} />
                   <TextInput
