@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Header
+from fastapi import FastAPI, APIRouter, HTTPException, Header, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 import re
 import random
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, EmailStr
 from typing import List, Optional, Dict, Any, Tuple, Callable, TypeVar, Set, Awaitable, Literal
 
 T = TypeVar("T")
@@ -40,7 +40,7 @@ from notifications import NotificationService, ExpoPushClient, router as notific
 from notifications.smart_delay import SmartDelayOptimizer
 from common.features import SMART_DELAY_ALERTS
 from radar_alerts import radar_router  # Weather radar & alerts integration
-from services.email_service import send_test_email, EmailDeliveryError
+from services.email_service import send_test_email, send_contact_email, EmailDeliveryError
 # Allow import both as package (backend.server) and module (server)
 try:
     from backend.routers.push import router as push_router
@@ -84,6 +84,7 @@ _route_context_cache: Dict[str, Dict[str, Any]] = {}
 _overpass_response_cache: Dict[str, Dict[str, Any]] = {}
 _noaa_weather_cache: Dict[str, Dict[str, Any]] = {}
 _noaa_alerts_cache: Dict[str, Dict[str, Any]] = {}
+_contact_rate_limits: Dict[str, List[float]] = {}
 
 # Track NOAA cache behavior for one-run diagnostics
 _noaa_cache_stats = {
@@ -135,6 +136,17 @@ def _snapshot_noaa_cache_stats() -> Dict[str, int]:
 def _bucket_coord(value: float, grid: float = 0.25) -> float:
     """Snap coordinate to a simple grid to improve cache hit rate."""
     return round(value / grid) * grid
+
+
+def _check_contact_rate_limit(ip: str, limit: int = 5, window_seconds: int = 3600):
+    now = time.time()
+    timestamps = _contact_rate_limits.get(ip, [])
+    # prune old entries
+    timestamps = [ts for ts in timestamps if now - ts < window_seconds]
+    if len(timestamps) >= limit:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many requests. Please try again later.")
+    timestamps.append(now)
+    _contact_rate_limits[ip] = timestamps
 
 
 async def cached_geocode(location: str) -> Optional[Dict[str, float]]:
@@ -3297,10 +3309,36 @@ Be concise and practical."""
 # ==================== API Routes ====================
 
 
+class ContactRequest(BaseModel):
+    name: str = Field(..., min_length=2, max_length=80)
+    email: EmailStr
+    message: str = Field(..., min_length=10, max_length=3000)
+    company: Optional[str] = Field(default="")
+
+
 class TestEmailRequest(BaseModel):
     to: str
     subject: str = "Routecast test"
     text: str = "Hello from Routecast"
+
+
+@api_router.post("/contact")
+async def contact(payload: ContactRequest, request: Request):
+    # Honeypot: ignore submissions that fill the hidden field
+    if payload.company:
+        return {"ok": True}
+
+    client_ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (request.client.host if request.client else "unknown")
+    user_agent = request.headers.get("user-agent", "unknown")
+
+    _check_contact_rate_limit(client_ip)
+
+    try:
+        sent = send_contact_email(payload.name, payload.email, payload.message, client_ip, user_agent)
+    except EmailDeliveryError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+    return {"ok": sent}
 
 
 @api_router.post("/email/test")

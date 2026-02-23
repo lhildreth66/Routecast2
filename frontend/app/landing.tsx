@@ -491,13 +491,13 @@ export default function LandingPage() {
               <Text style={styles.footerBrandText}>RouteCast</Text>
             </View>
             <View style={styles.footerLinks}>
-              <TouchableOpacity>
+              <TouchableOpacity onPress={() => router.push('/privacy')}>
                 <Text style={styles.footerLink}>Privacy Policy</Text>
               </TouchableOpacity>
-              <TouchableOpacity>
+              <TouchableOpacity onPress={() => router.push('/terms')}>
                 <Text style={styles.footerLink}>Terms of Service</Text>
               </TouchableOpacity>
-              <TouchableOpacity>
+              <TouchableOpacity onPress={() => router.push('/contact')}>
                 <Text style={styles.footerLink}>Contact</Text>
               </TouchableOpacity>
             </View>

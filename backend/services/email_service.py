@@ -14,6 +14,7 @@ SENDGRID_API_KEY = os.environ.get('SENDGRID_API_KEY', '')
 SENDER_EMAIL = os.environ.get('SEND_FROM_EMAIL') or os.environ.get('SENDER_EMAIL', 'no-reply@routecastweather.com')
 SENDER_NAME = os.environ.get('SEND_FROM_NAME', 'Routecast')
 APP_URL = os.environ.get('APP_URL', 'https://app.routecastweather.com')
+CONTACT_TO_EMAIL = os.environ.get('CONTACT_TO_EMAIL', 'support@routecastweather.com')
 
 
 class EmailDeliveryError(Exception):
@@ -271,3 +272,17 @@ def send_test_email(to: str, subject: str, text: str) -> bool:
     """Send a simple test email for operational checks."""
     html_content = f"<p>{text}</p>"
     return _send_email(to, subject, html_content)
+
+
+def send_contact_email(name: str, email: str, message: str, client_ip: str, user_agent: str) -> bool:
+    """Send contact form submission to support."""
+    subject = f"RouteCast Contact: {name} <{email}>"
+    html_content = f"""
+    <p><strong>Name:</strong> {name}</p>
+    <p><strong>Email:</strong> {email}</p>
+    <p><strong>Message:</strong><br/>{message.replace('\n', '<br/>')}</p>
+    <hr/>
+    <p><strong>IP:</strong> {client_ip}</p>
+    <p><strong>User-Agent:</strong> {user_agent}</p>
+    """
+    return _send_email(CONTACT_TO_EMAIL, subject, html_content)
