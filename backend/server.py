@@ -47,6 +47,11 @@ try:
 except ModuleNotFoundError:
     from routers.push import router as push_router
 
+try:
+    from backend.routers.auth import router as auth_router
+except ModuleNotFoundError:
+    from routers.auth import router as auth_router
+
 # Google Gemini for chat
 try:
     from google import genai
@@ -8493,4 +8498,9 @@ app.include_router(
     push_router,
     prefix="/api/push",
     tags=["push"],
+)
+app.include_router(
+    auth_router,
+    prefix="/api",
+    tags=["auth"],
 )
