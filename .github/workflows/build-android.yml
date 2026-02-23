@@ -1,4 +1,4 @@
-name: Build Android App
+name: Build Web App
 
 on:
   push:
@@ -12,7 +12,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -20,45 +20,31 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Setup Java
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+          node-version: '18'
+          cache: 'yarn'
+          cache-dependency-path: frontend/yarn.lock
 
       - name: Install dependencies
         working-directory: frontend
-        run: npm ci
+        run: yarn install --frozen-lockfile
 
-      - name: Expo prebuild (generates Android project)
+      - name: Export web app
         working-directory: frontend
-        run: npx expo prebuild --platform android --clean
+        run: npx expo export --platform web
 
-      - name: Build APK with Gradle
-        working-directory: frontend/android
-        run: ./gradlew assembleRelease
-
-      - name: Upload APK
+      - name: Upload web dist
         uses: actions/upload-artifact@v4
         with:
-          name: android-app-${{ github.sha }}
-          path: frontend/android/app/build/outputs/apk/release/app-release.apk
+          name: web-dist-${{ github.sha }}
+          path: frontend/dist
           retention-days: 30
 
       - name: Build summary
         run: |
           echo "## Build Complete ✅" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Platform:** Android APK" >> $GITHUB_STEP_SUMMARY
-          echo "**Build Method:** Gradle (100% FREE)" >> $GITHUB_STEP_SUMMARY
+          echo "**Platform:** Web (mobile-compatible)" >> $GITHUB_STEP_SUMMARY
           echo "**Commit:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
-          echo "**APK:** frontend/android/app/build/outputs/apk/release/app-release.apk" >> $GITHUB_STEP_SUMMARY
+          echo "**Dist:** frontend/dist" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Download the artifact from the Actions tab above." >> $GITHUB_STEP_SUMMARY
+          echo "Render auto-deploys from this branch on every push." >> $GITHUB_STEP_SUMMARY
