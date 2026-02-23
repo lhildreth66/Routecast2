@@ -1,8 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
-
-const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+import { buildUrl, API_BASE } from '../app/apiConfig';
 
 interface User {
   user_id: string;
@@ -67,7 +66,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const fetchUserProfile = async (token: string) => {
     try {
-      const response = await axios.get(`${API_BASE}/api/auth/me`, {
+      const response = await axios.get(buildUrl('auth/me'), {
         headers: { Authorization: `Bearer ${token}` }
       });
       setUser(response.data);
@@ -84,7 +83,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async (email: string, password: string): Promise<{ success: boolean; error?: string }> => {
     try {
-      const response = await axios.post(`${API_BASE}/api/auth/login`, {
+      const response = await axios.post(buildUrl('auth/login'), {
         email,
         password
       });
@@ -108,7 +107,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signup = async (email: string, password: string, name?: string): Promise<{ success: boolean; error?: string }> => {
     try {
-      const response = await axios.post(`${API_BASE}/api/auth/signup`, {
+      const response = await axios.post(buildUrl('auth/signup'), {
         email,
         password,
         name
@@ -149,7 +148,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       if (!refreshToken) return false;
 
-      const response = await axios.post(`${API_BASE}/api/auth/refresh`, {
+      const response = await axios.post(buildUrl('auth/refresh'), {
         refresh_token: refreshToken
       });
 
