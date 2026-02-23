@@ -355,8 +355,8 @@ app.add_middleware(
         "https://routecastweather.com",
         "https://www.routecastweather.com",
     ],
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -8463,6 +8463,7 @@ async def startup_db_client():
         mongo_ok = await connect_to_mongo()
         if mongo_ok:
             logger.info("[startup] MongoDB connected db=%s", db_name)
+            app.state.db = db
             # Ensure TTL index on route_contexts so old entries auto-expire
             try:
                 await db.route_contexts.create_index("expires_at", expireAfterSeconds=0)
