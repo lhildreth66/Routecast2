@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -89,6 +89,29 @@ interface HazardAlert {
   message: string;
   recommendation: string;
   countdown_text: string;
+  id?: string;
+  alert_id?: string;
+  event?: string;
+  headline?: string;
+  full_description?: string;
+  description?: string;
+  instruction?: string;
+  areaDesc?: string;
+  onset?: string;
+  expires?: string;
+  location_name?: string;
+  driver_action?: string;
+  properties?: {
+    event?: string;
+    headline?: string;
+    description?: string;
+    instruction?: string;
+    areaDesc?: string;
+    onset?: string;
+    expires?: string;
+  };
+  source?: string;
+  alert_level?: string;
 }
 
 interface BridgeClearanceAlert {
@@ -366,6 +389,10 @@ export default function RouteScreen() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'conditions' | 'directions' | 'alerts' | 'bridges'>('conditions');
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const alerts = useMemo(() => {
+    const list = (routeData as any)?.alerts ?? routeData?.hazard_alerts ?? [];
+    return Array.isArray(list) ? list : [];
+  }, [routeData]);
   
   // Radar map state
   const [showRadarMap, setShowRadarMap] = useState(false);
@@ -433,9 +460,9 @@ export default function RouteScreen() {
     }
     
     // Hazards
-    if (routeData.hazard_alerts?.length > 0) {
-      parts.push(`${routeData.hazard_alerts.length} weather hazards along your route.`);
-      routeData.hazard_alerts.slice(0, 3).forEach(alert => {
+    if (alerts?.length > 0) {
+      parts.push(`${alerts.length} weather hazards along your route.`);
+      alerts.slice(0, 3).forEach(alert => {
         parts.push(`${alert.countdown_text}. ${alert.recommendation}`);
       });
     }
@@ -681,9 +708,9 @@ export default function RouteScreen() {
         >
           <Ionicons name="warning" size={16} color={activeTab === 'alerts' ? '#ef4444' : '#6b7280'} />
           <Text style={[styles.tabText, activeTab === 'alerts' && styles.tabTextActive]}>Alerts</Text>
-          {routeData.hazard_alerts?.length > 0 && (
+          {alerts?.length > 0 && (
             <View style={styles.tabBadge}>
-              <Text style={styles.tabBadgeText}>{routeData.hazard_alerts.length}</Text>
+              <Text style={styles.tabBadgeText}>{alerts.length}</Text>
             </View>
           )}
         </TouchableOpacity>
@@ -917,13 +944,23 @@ export default function RouteScreen() {
             <Text style={styles.sectionTitle}>⚠️ Weather Alerts Along Route</Text>
             <Text style={styles.sectionSubtitle}>Tap any alert to see full details</Text>
             
-            {routeData.hazard_alerts && routeData.hazard_alerts.length > 0 ? (
-              routeData.hazard_alerts.map((alert, index) => {
+            {alerts && alerts.length > 0 ? (
+              alerts.map((alert, index) => {
                 const isExpanded = expandedCards.has(index + 1000); // Use offset to differentiate from road cards
+                const props = alert.properties || {};
+                const eventTitle = alert.event || props.event || alert.headline || props.headline || alert.message || 'Weather Alert';
+                const what = alert.full_description || alert.description || props.description || alert.message;
+                const where = alert.areaDesc || props.areaDesc || alert.location_name;
+                const onset = alert.onset || props.onset;
+                const expires = alert.expires || props.expires;
+                const whenText = [onset, expires].filter(Boolean).join(' → ');
+                const impacts = alert.recommendation || alert.driver_action;
+                const precautions = alert.instruction || props.instruction;
+                const alertKey = alert.id || alert.alert_id || index;
                 
                 return (
                   <TouchableOpacity 
-                    key={index} 
+                    key={alertKey} 
                     style={[
                       styles.alertCard,
                       alert.severity === 'extreme' ? styles.alertExtreme :
@@ -966,7 +1003,7 @@ export default function RouteScreen() {
                           </View>
                         </View>
                         <Text style={styles.alertCountdown}>{alert.countdown_text}</Text>
-                        <Text style={styles.alertMessage}>{alert.message}</Text>
+                        <Text style={styles.alertMessage}>{eventTitle}</Text>
                       </View>
                       <Ionicons 
                         name={isExpanded ? "chevron-up" : "chevron-down"} 
@@ -979,22 +1016,33 @@ export default function RouteScreen() {
                     {isExpanded && (
                       <View style={styles.alertExpandedContent}>
                         <View style={styles.alertFullDescription}>
-                          <Text style={styles.alertFullTitle}>Full Alert Details:</Text>
+                          <Text style={styles.alertFullTitle}>{eventTitle}</Text>
                           <Text style={styles.alertFullText}>
-                            {alert.full_description || alert.description || 
-                             `This ${alert.message || 'weather alert'} is active for your route area. ` +
-                             `Exercise caution and monitor local weather updates. ` +
-                             `Conditions may include reduced visibility, slippery roads, or other hazards.`}
+                            {what || 'Full alert details unavailable. Monitor local NWS updates.'}
                           </Text>
                         </View>
-                        
-                        {alert.instruction && (
-                          <View style={styles.alertInstructionBox}>
-                            <Text style={styles.alertInstructionTitle}>📋 What To Do:</Text>
-                            <Text style={styles.alertInstructionText}>{alert.instruction}</Text>
-                          </View>
-                        )}
-                        
+
+                        <View style={styles.nwsDetailRow}>
+                          <Text style={styles.nwsDetailLabel}>WHAT</Text>
+                          <Text style={styles.nwsDetailText}>{what || 'See above for description.'}</Text>
+                        </View>
+                        <View style={styles.nwsDetailRow}>
+                          <Text style={styles.nwsDetailLabel}>WHERE</Text>
+                          <Text style={styles.nwsDetailText}>{where || 'Route vicinity'}</Text>
+                        </View>
+                        <View style={styles.nwsDetailRow}>
+                          <Text style={styles.nwsDetailLabel}>WHEN</Text>
+                          <Text style={styles.nwsDetailText}>{whenText || 'Active now'}</Text>
+                        </View>
+                        <View style={styles.nwsDetailRow}>
+                          <Text style={styles.nwsDetailLabel}>IMPACTS</Text>
+                          <Text style={styles.nwsDetailText}>{impacts || 'Expect travel impacts along this route segment.'}</Text>
+                        </View>
+                        <View style={styles.nwsDetailRow}>
+                          <Text style={styles.nwsDetailLabel}>PRECAUTIONARY ACTIONS</Text>
+                          <Text style={styles.nwsDetailText}>{precautions || 'Follow local guidance and adjust driving to conditions.'}</Text>
+                        </View>
+
                         <View style={styles.alertAction}>
                           <Ionicons name="checkmark-circle" size={16} color="#22c55e" />
                           <Text style={styles.alertRec}>{alert.recommendation}</Text>
@@ -1670,6 +1718,24 @@ const styles = StyleSheet.create({
     color: '#bbf7d0',
     fontSize: 12,
     flex: 1,
+  },
+  nwsDetailRow: {
+    marginTop: 8,
+    padding: 10,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0,0,0,0.2)',
+  },
+  nwsDetailLabel: {
+    color: '#fbbf24',
+    fontSize: 11,
+    fontWeight: '700',
+    marginBottom: 4,
+    letterSpacing: 0.5,
+  },
+  nwsDetailText: {
+    color: '#fff',
+    fontSize: 12,
+    lineHeight: 18,
   },
   alertMeta: {
     flexDirection: 'row',

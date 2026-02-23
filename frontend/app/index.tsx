@@ -52,6 +52,7 @@ import * as Notifications from 'expo-notifications';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+const IS_WEB = Platform.OS === 'web';
 
 // Vehicle types for safety scoring
 const VEHICLE_TYPES = [
@@ -140,7 +141,7 @@ export default function HomeScreen() {
   }, [isAuthenticated]);
 
   const loadPushSettings = async () => {
-    if (!isAuthenticated) return;
+    if (!isAuthenticated || IS_WEB) return;
     try {
       const token = await AsyncStorage.getItem('access_token');
       if (!token) return;
@@ -155,6 +156,12 @@ export default function HomeScreen() {
   };
 
   const handleAlertsToggle = async (enabled: boolean) => {
+    if (IS_WEB) {
+      Alert.alert('Mobile Only', 'Push notifications are available on the mobile app.');
+      setAlertsEnabled(false);
+      return;
+    }
+
     if (!isAuthenticated) {
       Alert.alert('Sign In Required', 'Please sign in to enable push notifications.');
       return;
@@ -890,19 +897,31 @@ export default function HomeScreen() {
               )}
 
               {/* Weather Alerts Toggle */}
-              <View style={styles.alertsToggle}>
-                <View style={styles.alertsLeft}>
-                  <Ionicons name="notifications-outline" size={22} color="#eab308" />
-                  <Text style={styles.alertsText}>Push Weather Alerts</Text>
+              {IS_WEB ? (
+                <View style={styles.alertsToggleDisabled}>
+                  <View style={styles.alertsLeft}>
+                    <Ionicons name="notifications-off-outline" size={22} color="#f97316" />
+                    <View>
+                      <Text style={styles.alertsText}>Push Weather Alerts</Text>
+                      <Text style={styles.webOnlyText}>Push notifications available on mobile app only.</Text>
+                    </View>
+                  </View>
                 </View>
-                <Switch
-                  value={alertsEnabled}
-                  onValueChange={handleAlertsToggle}
-                  trackColor={{ false: '#3f3f46', true: '#eab30880' }}
-                  thumbColor={alertsEnabled ? '#eab308' : '#71717a'}
-                  disabled={pushLoading}
-                />
-              </View>
+              ) : (
+                <View style={styles.alertsToggle}>
+                  <View style={styles.alertsLeft}>
+                    <Ionicons name="notifications-outline" size={22} color="#eab308" />
+                    <Text style={styles.alertsText}>Push Weather Alerts</Text>
+                  </View>
+                  <Switch
+                    value={alertsEnabled}
+                    onValueChange={handleAlertsToggle}
+                    trackColor={{ false: '#3f3f46', true: '#eab30880' }}
+                    thumbColor={alertsEnabled ? '#eab308' : '#71717a'}
+                    disabled={pushLoading}
+                  />
+                </View>
+              )}
 
               {/* Error Message */}
               {error ? (
@@ -1467,6 +1486,15 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     marginBottom: 12,
   },
+  alertsToggleDisabled: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    marginBottom: 12,
+    backgroundColor: 'rgba(249, 115, 22, 0.08)',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+  },
   alertsLeft: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1476,6 +1504,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#ffffff',
+  },
+  webOnlyText: {
+    color: '#fbbf24',
+    fontSize: 12,
+    marginTop: 2,
   },
   errorContainer: {
     flexDirection: 'row',
