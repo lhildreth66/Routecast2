@@ -195,26 +195,28 @@ export default function HomeScreen() {
         }
 
         if (finalStatus !== 'granted') {
-          // Permission denied: revert + inform user
-          console.log('[push-toggle] permission denied – reverting');
-          setAlertsEnabled(false);
+          // Permission denied: keep toggle ON (preference saved), show Settings nudge.
+          // Do NOT revert – the user's intent is recorded so when they later grant
+          // permission the token will be captured on next app open.
+          console.log('[push-toggle] permission denied – saving preference anyway, showing settings nudge');
           Alert.alert(
-            'Notifications Disabled',
-            'Please enable notifications in your device Settings to receive weather alerts.',
+            'Enable Notifications in Settings',
+            'Notifications are currently disabled for this app. Go to Settings → Notifications → Routecast and turn them on.',
+            [{ text: 'OK' }],
           );
-          return;
-        }
-
-        // ── 2. Get device push token (best-effort; don't revert on failure) ─
-        try {
-          const tokenData = await Notifications.getExpoPushTokenAsync();
-          pushToken = tokenData.data;
-          console.log('[push-toggle] push token obtained:', pushToken?.slice(0, 20), '...');
-        } catch (tokenErr) {
-          // Common in Expo Go / simulators – save preference without a token.
-          // The token will be captured the next time the user opens the app on
-          // a real device with a valid EAS project ID.
-          console.warn('[push-toggle] push token unavailable (Expo Go / sim?):', tokenErr);
+          // Fall through to backend save (pushToken stays null – that is fine)
+        } else {
+          // ── 2. Get device push token (best-effort; never revert on failure) ─
+          try {
+            const tokenData = await Notifications.getExpoPushTokenAsync();
+            pushToken = tokenData.data;
+            console.log('[push-toggle] push token obtained:', pushToken?.slice(0, 20), '...');
+          } catch (tokenErr) {
+            // Common in Expo Go / simulators – save preference without a token.
+            // The token will be captured the next time the user opens the app on
+            // a real device with a valid EAS project ID.
+            console.warn('[push-toggle] push token unavailable (Expo Go / sim?):', tokenErr);
+          }
         }
       }
 
