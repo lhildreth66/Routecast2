@@ -107,13 +107,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signup = async (email: string, password: string, name?: string): Promise<{ success: boolean; error?: string }> => {
     try {
-      const response = await axios.post(buildUrl('auth/signup'), {
-        email,
-        password,
-        name
+      const response = await fetch(buildUrl('auth/signup'), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email, password, name }),
       });
 
-      const { access_token, refresh_token } = response.data;
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        const detail = data?.detail;
+        const message = typeof detail === 'string'
+          ? detail
+          : Array.isArray(detail)
+            ? detail.map((d: any) => d?.msg || d?.detail).filter(Boolean).join('; ')
+            : 'Signup failed. Please try again.';
+        return { success: false, error: message || 'Signup failed. Please try again.' };
+      }
+
+      const { access_token, refresh_token } = data;
+
+      if (!access_token || !refresh_token) {
+        return { success: false, error: 'Signup failed. Please try again.' };
+      }
 
       await AsyncStorage.setItem('accessToken', access_token);
       await AsyncStorage.setItem('refreshToken', refresh_token);
@@ -125,7 +143,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       return { success: true };
     } catch (error: any) {
-      const message = error.response?.data?.detail || 'Signup failed. Please try again.';
+      const message = typeof error?.message === 'string' ? error.message : 'Signup failed. Please try again.';
       return { success: false, error: message };
     }
   };
