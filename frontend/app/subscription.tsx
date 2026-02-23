@@ -88,9 +88,9 @@ export default function SubscriptionScreen() {
 
     try {
       // Get the current origin for redirect URLs
-      const origin = Platform.OS === 'web' 
+      const origin = Platform.OS === 'web' && typeof window !== 'undefined'
         ? window.location.origin 
-        : 'https://app.routecastweather.com';
+        : 'https://routecastweather.com';
 
       const response = await axios.post(
         `${API_BASE}/api/subscription/checkout`,
@@ -103,7 +103,7 @@ export default function SubscriptionScreen() {
 
       const { checkout_url } = response.data;
 
-      if (Platform.OS === 'web') {
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
         window.location.href = checkout_url;
       } else {
         await Linking.openURL(checkout_url);
