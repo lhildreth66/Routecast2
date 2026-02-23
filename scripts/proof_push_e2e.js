@@ -70,6 +70,38 @@ function fail(label, detail = '') {
 }
 function info(msg) { console.log(`       ${msg}`); }
 
+// ── pick a coordinate inside any currently-active NWS alert polygon ──────────
+async function fetchActiveNwsCoordinate() {
+  try {
+    const res = await request(
+      'https://api.weather.gov/alerts/active?status=actual&limit=5',
+      { headers: { 'User-Agent': 'Routecast-E2E-Test/1.0 (github.com/lhildreth66/Routecast2)' } },
+    );
+    if (res.status !== 200) return null;
+    const features = (res.body.features || []);
+    for (const f of features) {
+      const geom = f.geometry;
+      // Polygon
+      if (geom?.type === 'Polygon' && geom.coordinates?.[0]?.length) {
+        const ring = geom.coordinates[0];
+        const mid  = ring[Math.floor(ring.length / 2)];
+        return { lat: mid[1], lon: mid[0], event: f.properties?.event };
+      }
+      // MultiPolygon
+      if (geom?.type === 'MultiPolygon' && geom.coordinates?.[0]?.[0]?.length) {
+        const ring = geom.coordinates[0][0];
+        const mid  = ring[Math.floor(ring.length / 2)];
+        return { lat: mid[1], lon: mid[0], event: f.properties?.event };
+      }
+      // Point (rare but valid)
+      if (geom?.type === 'Point' && geom.coordinates?.length === 2) {
+        return { lat: geom.coordinates[1], lon: geom.coordinates[0], event: f.properties?.event };
+      }
+    }
+  } catch (_) { /* network failure – caller handles null */ }
+  return null;
+}
+
 // ── main ─────────────────────────────────────────────────────────────────────
 (async () => {
   console.log('\n══════════════════════════════════════════════════════');
@@ -185,40 +217,68 @@ function info(msg) { console.log(`       ${msg}`); }
     }
   }
 
-  // ── STEP 4: manual device confirmation ───────────────────────────────────
+  // ── STEP 4: route-monitor against a live NWS alert coordinate ────────────
+  console.log('');
+  console.log('[ Step 4 ]  Route-monitor start using live NWS alert coordinate');
+
+  const nwsCoord = await fetchActiveNwsCoordinate();
+  if (!nwsCoord) {
+    console.log('       ⚠️  No active NWS alert polygons right now – skipping route-monitor test.');
+    console.log('          Re-run during an active weather event to exercise this path.');
+  } else {
+    info(`Active NWS alert : ${nwsCoord.event}`);
+    info(`Coordinate used  : lat=${nwsCoord.lat.toFixed(4)}, lon=${nwsCoord.lon.toFixed(4)}`);
+
+    const monitorRes = await request(
+      `${API}/api/notifications/route-monitor/start`,
+      { method: 'POST', headers: { Authorization: `Bearer ${token}` } },
+      {
+        routeId:      'e2e-nws-test',
+        pushToken:    REAL_TOKEN,
+        samplePoints: [{ lat: nwsCoord.lat, lon: nwsCoord.lon }],
+      },
+    );
+
+    if (monitorRes.status === 200 && monitorRes.body.ok) {
+      pass(
+        'POST /api/notifications/route-monitor/start',
+        `monitor_id=${monitorRes.body.monitor_id}  points=${monitorRes.body.points}`,
+      );
+      info('Backend will fire a push within the next worker cycle (≤15 min).');
+      info('Watch the device – you should receive a weather-alert notification.');
+    } else {
+      fail(
+        'POST /api/notifications/route-monitor/start',
+        `HTTP ${monitorRes.status} – ${JSON.stringify(monitorRes.body)}`,
+      );
+    }
+  }
+
+  // ── STEP 5: manual device confirmation ───────────────────────────────────
   console.log('');
   console.log('══════════════════════════════════════════════════════');
-  console.log('  Step 4 – Manual device confirmation (cannot automate)');
+  console.log('  Step 5 – Manual device confirmation (cannot automate)');
   console.log('══════════════════════════════════════════════════════');
   console.log('');
   console.log('  FOREGROUND (app open on device):');
-  console.log('    • The in-app notification handler must fire.');
-  console.log('    • In a dev-client build, Metro will log:');
-  console.log('        [Notifications] received: { request: { content: { title: "🚛 Routecast E2E Test" ... } } }');
-  console.log('    • A banner/toast should appear if setNotificationHandler is configured');
-  console.log('      with shouldShowAlert: true  (it is – see frontend/lib/services/notifications.ts).');
+  console.log('    • A banner/toast should appear for the test push from Step 2.');
+  console.log('      (setNotificationHandler has shouldShowAlert: true)');
   console.log('');
-  console.log('  BACKGROUND (app backgrounded or device locked):');
-  console.log('    • OS notification tray should show:');
-  console.log('        Title : 🚛 Routecast E2E Test');
-  console.log(`        Body  : Delivery verified at <timestamp>`);
-  console.log('    • Tapping the notification should open the app.');
+  console.log('  BACKGROUND / LOCKED:');
+  console.log('    • OS tray should show "🚛 Routecast E2E Test".');
+  console.log('    • Tapping it should open the app.');
   console.log('');
-  console.log('  REAL NWS ALERT ROUTE:');
-  console.log('    1. In the app, plan a route through an area with an active NWS alert');
-  console.log('       (e.g. a tornado or winter storm watch region).');
-  console.log('    2. Confirm the Alerts tab shows the alert card.');
-  console.log('    3. If route monitoring is enabled for your account, the backend worker');
-  console.log('       (run_route_alerts_worker.py, 15-min interval) will fire a push.');
-  console.log('    4. To force an immediate check without waiting 15 min:');
-  console.log(`       curl -X POST ${API}/api/notifications/route-monitor/start \\`);
-  console.log('            -H "Authorization: Bearer <token>" \\');
-  console.log('            -H "Content-Type: application/json" \\');
-  console.log('            -d \'{"routeId":"test-001","pushToken":"<your-token>",');
-  console.log('                 "samplePoints":[{"lat":35.2,"lon":-97.4}]}\'');
+  console.log('  ROUTE ALERT PUSH (from Step 4):');
+  console.log('    • Within ≤15 min a weather-alert push should arrive');
+  console.log('      if NWS alerts are active at the sampled coordinate.');
+  console.log('    • Tapping it should open the Alerts tab.');
+  console.log('');
+  console.log('  Once both notifications are confirmed on device →');
+  console.log('  resume DEPLOYMENT_CHECKLIST.md § 9 (Testing Checklist)');
+  console.log('  and then do the store build.');
   console.log('');
   console.log('══════════════════════════════════════════════════════');
   console.log('  Backend-verifiable steps PASSED');
-  console.log('  Complete Step 4 manually on a physical device.');
+  console.log('  Complete Step 5 manually on a physical device.');
   console.log('══════════════════════════════════════════════════════\n');
 })();
