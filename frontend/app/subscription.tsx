@@ -36,9 +36,14 @@ export default function SubscriptionScreen() {
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [trialLoading, setTrialLoading] = useState(false);
   const [error, setError] = useState('');
+  const [mounted, setMounted] = React.useState(false);
 
   useEffect(() => {
     fetchPlans();
+  }, []);
+
+  useEffect(() => {
+    setMounted(true);
   }, []);
 
   const fetchPlans = async () => {
@@ -114,6 +119,8 @@ export default function SubscriptionScreen() {
       setCheckoutLoading(false);
     }
   };
+
+  if (!mounted) return null;
 
   const isPremium = user?.is_premium;
   const isTrialing = user?.subscription_status === 'trialing';
