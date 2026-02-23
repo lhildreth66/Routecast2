@@ -87,6 +87,7 @@ interface AutocompleteSuggestion {
 
 export default function HomeScreen() {
   const { user, isAuthenticated, isPremium, isLoading: authLoading, hasHydrated } = useAuth();
+  const isMobileWeb = IS_WEB && SCREEN_WIDTH < 768;
   
   // Redirect non-authenticated web users to landing page
   useEffect(() => {
@@ -156,7 +157,7 @@ export default function HomeScreen() {
   };
 
   const handleAlertsToggle = async (enabled: boolean) => {
-    if (IS_WEB) {
+    if (IS_WEB && !isMobileWeb) {
       Alert.alert('Mobile Only', 'Push notifications are available on the mobile app.');
       setAlertsEnabled(false);
       return;
@@ -897,7 +898,7 @@ export default function HomeScreen() {
               )}
 
               {/* Weather Alerts Toggle */}
-              {IS_WEB ? (
+              {IS_WEB && !isMobileWeb ? (
                 <View style={styles.alertsToggleDisabled}>
                   <View style={styles.alertsLeft}>
                     <Ionicons name="notifications-off-outline" size={22} color="#f97316" />
@@ -956,7 +957,7 @@ export default function HomeScreen() {
                   activeOpacity={0.85}
                 >
                   <View style={styles.quickAccessIconCircle}>
-                    <Ionicons name="bonfire" size={26} color="#10b981" />
+                    <Ionicons name="bonfire" size={22} color="#10b981" />
                   </View>
                   <Text style={styles.quickAccessText} numberOfLines={1}>Boondockers</Text>
                 </TouchableOpacity>
@@ -966,7 +967,7 @@ export default function HomeScreen() {
                   activeOpacity={0.85}
                 >
                   <View style={styles.quickAccessIconCircle}>
-                    <Ionicons name="bus" size={26} color="#f59e0b" />
+                    <Ionicons name="bus" size={22} color="#f59e0b" />
                   </View>
                   <Text style={styles.quickAccessText} numberOfLines={1}>Truck Drivers</Text>
                 </TouchableOpacity>
@@ -977,7 +978,7 @@ export default function HomeScreen() {
                   data-testid="how-to-use-btn"
                 >
                   <View style={styles.quickAccessIconCircle}>
-                    <Ionicons name="help-circle" size={26} color="#8b5cf6" />
+                    <Ionicons name="help-circle" size={22} color="#8b5cf6" />
                   </View>
                   <Text style={styles.quickAccessText} numberOfLines={1}>How To Use</Text>
                 </TouchableOpacity>
@@ -2040,11 +2041,12 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#3f3f46',
+    overflow: 'hidden',
   },
   quickAccessIconCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: '#18181b',
