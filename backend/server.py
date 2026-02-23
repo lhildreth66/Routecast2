@@ -49,8 +49,15 @@ except ModuleNotFoundError:
 
 try:
     from backend.routers.auth import router as auth_router
-except ModuleNotFoundError:
-    from routers.auth import router as auth_router
+except ModuleNotFoundError as e:
+    logging.getLogger(__name__).error(f"Failed to import auth_router: {e}")
+    auth_router = None
+
+try:
+    from routers.auth import router as auth_router  # fallback when running as module
+except ModuleNotFoundError as e:
+    logging.getLogger(__name__).error(f"Failed to import auth_router fallback: {e}")
+    auth_router = None
 
 # Google Gemini for chat
 try:
@@ -8499,8 +8506,9 @@ app.include_router(
     prefix="/api/push",
     tags=["push"],
 )
-app.include_router(
-    auth_router,
-    prefix="/api",
-    tags=["auth"],
-)
+if auth_router:
+    app.include_router(
+        auth_router,
+        prefix="/api",
+        tags=["auth"],
+    )
