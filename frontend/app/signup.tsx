@@ -16,7 +16,7 @@ import { router } from 'expo-router';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function SignupScreen() {
-  const { signup } = useAuth();
+  const { signup, hasHydrated } = useAuth();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -32,6 +32,10 @@ export default function SignupScreen() {
     if (!/[0-9]/.test(pass)) return 'Password must contain a number';
     return null;
   };
+
+  if (!hasHydrated) {
+    return null;
+  }
 
   const handleSignup = async () => {
     setError('');

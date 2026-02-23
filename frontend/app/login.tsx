@@ -16,14 +16,24 @@ import { router } from 'expo-router';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function LoginScreen() {
-  const { login } = useAuth();
+  // AuthProvider already gates children on hasHydrated, so by the time
+  // this screen renders, hydration is always complete. The destructure
+  // of hasHydrated is kept for the early-return below as a fallback.
+  const { login, hasHydrated } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  // Defensive guard – should never be true since AuthProvider blocks children
+  // until hydration completes, but keeps hook ordering intact.
+  if (!hasHydrated) {
+    return null;
+  }
+
   const handleLogin = async () => {
+    if (loading) return;
     if (!email.trim() || !password.trim()) {
       setError('Please enter both email and password');
       return;
@@ -34,13 +44,13 @@ export default function LoginScreen() {
 
     const result = await login(email.trim(), password);
 
-    setLoading(false);
-
     if (result.success) {
       router.replace('/');
-    } else {
-      setError(result.error || 'Login failed');
+      return;
     }
+
+    setLoading(false);
+    setError(result.error || 'Login failed');
   };
 
   return (

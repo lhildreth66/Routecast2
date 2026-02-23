@@ -86,16 +86,19 @@ interface AutocompleteSuggestion {
 }
 
 export default function HomeScreen() {
-  const { user, isAuthenticated, isPremium, isLoading: authLoading, hasHydrated } = useAuth();
+  const { user, isAuthenticated, accessToken, isPremium, isLoading: authLoading, hasHydrated } = useAuth();
   const isMobileWeb = IS_WEB && SCREEN_WIDTH < 768;
-  
-  // Redirect non-authenticated web users to landing page
+
+  // Redirect non-authenticated web users to login once hydration is done.
+  // NOTE: this hook must stay ABOVE all other hooks to preserve hook ordering.
+  // AuthProvider already blocks children until hasHydrated=true, so this
+  // effect only runs in environments where the guard below actually renders.
   useEffect(() => {
-    if (Platform.OS === 'web' && hasHydrated && !authLoading && !isAuthenticated) {
+    if (Platform.OS === 'web' && hasHydrated && !authLoading && !accessToken) {
       router.replace('/login');
     }
-  }, [isAuthenticated, authLoading, hasHydrated]);
-  
+  }, [accessToken, authLoading, hasHydrated]);
+
   const [origin, setOrigin] = useState('');
   const [destination, setDestination] = useState('');
   const [loading, setLoading] = useState(false);
@@ -357,7 +360,28 @@ export default function HomeScreen() {
         requestData.departure_time = departureTime.toISOString();
       }
 
-      const response = await axios.post(`${API_BASE}/api/route/weather`, requestData);
+      const routeWeatherUrl = `${API_BASE}/api/route/weather`;
+      console.log('Route request →', { url: routeWeatherUrl, requestData });
+
+      const response = await axios.post(routeWeatherUrl, requestData);
+      const alertsList = response.data?.alerts ?? response.data?.hazard_alerts ?? [];
+      const hazardAlertsLength = Array.isArray(response.data?.hazard_alerts)
+        ? response.data.hazard_alerts.length
+        : 0;
+      const rawLength = JSON.stringify(response.data || {}).length;
+      console.log('Route response data (raw)', response.data);
+      console.log('Route response ←', {
+        url: response.request?.responseURL || routeWeatherUrl,
+        status: response.status,
+        rawLength,
+        alertsLength: Array.isArray(alertsList) ? alertsList.length : 0,
+        hazardAlertsLength,
+        firstAlertEvent:
+          (alertsList?.[0]?.event) ||
+          (alertsList?.[0]?.headline) ||
+          (alertsList?.[0]?.properties?.event) ||
+          null,
+      });
       
       // Cache the route for offline
       await AsyncStorage.setItem('lastRoute', JSON.stringify(response.data));
