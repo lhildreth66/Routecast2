@@ -94,7 +94,9 @@ export default function HomeScreen() {
   // AuthProvider already blocks children until hasHydrated=true, so this
   // effect only runs in environments where the guard below actually renders.
   useEffect(() => {
+    console.log('[guard] check – hydrated:', hasHydrated, 'authLoading:', authLoading, 'accessToken:', !!accessToken, 'platform:', Platform.OS);
     if (Platform.OS === 'web' && hasHydrated && !authLoading && !accessToken) {
+      console.log('[guard] redirecting to /login');
       router.replace('/login');
     }
   }, [accessToken, authLoading, hasHydrated]);
@@ -160,16 +162,10 @@ export default function HomeScreen() {
   };
 
   const handleAlertsToggle = async (nextEnabled: boolean) => {
-    console.log('[push-toggle] fired', {
-      nextEnabled,
-      current: alertsEnabled,
-      platform: Platform.OS,
-      isMobileWeb,
-    });
+    console.log('[push-toggle] onValueChange fired – next:', nextEnabled, 'prev:', alertsEnabled);
 
     if (IS_WEB && !isMobileWeb) {
       Alert.alert('Mobile Only', 'Push notifications are available on the mobile app.');
-      setAlertsEnabled(false);
       return;
     }
 
@@ -178,50 +174,63 @@ export default function HomeScreen() {
       return;
     }
 
-    const previous = alertsEnabled;
+    // ── 1. Optimistic UI flip (immediate, no revert on token failure) ──────
     setAlertsEnabled(nextEnabled);
+    console.log('[push-toggle] state set to', nextEnabled);
     setPushLoading(true);
 
     try {
-      let pushToken = null;
+      let pushToken: string | null = null;
 
       if (nextEnabled) {
-        // Request permission
+        // Check/request permission – permission denial still reverts toggle
         const { status: existingStatus } = await Notifications.getPermissionsAsync();
         let finalStatus = existingStatus;
+        console.log('[push-toggle] existing permission status:', existingStatus);
 
         if (existingStatus !== 'granted') {
           const { status } = await Notifications.requestPermissionsAsync();
           finalStatus = status;
+          console.log('[push-toggle] after request, status:', finalStatus);
         }
 
         if (finalStatus !== 'granted') {
-          Alert.alert('Permission Denied', 'Please enable notifications in your device settings.');
-          setAlertsEnabled(previous);
-          setPushLoading(false);
+          // Permission denied: revert + inform user
+          console.log('[push-toggle] permission denied – reverting');
+          setAlertsEnabled(false);
+          Alert.alert(
+            'Notifications Disabled',
+            'Please enable notifications in your device Settings to receive weather alerts.',
+          );
           return;
         }
 
-        // Get push token
-        const tokenData = await Notifications.getExpoPushTokenAsync();
-        pushToken = tokenData.data;
+        // ── 2. Get device push token (best-effort; don't revert on failure) ─
+        try {
+          const tokenData = await Notifications.getExpoPushTokenAsync();
+          pushToken = tokenData.data;
+          console.log('[push-toggle] push token obtained:', pushToken?.slice(0, 20), '...');
+        } catch (tokenErr) {
+          // Common in Expo Go / simulators – save preference without a token.
+          // The token will be captured the next time the user opens the app on
+          // a real device with a valid EAS project ID.
+          console.warn('[push-toggle] push token unavailable (Expo Go / sim?):', tokenErr);
+        }
       }
 
-      // Save to backend
-      const token = await AsyncStorage.getItem('access_token');
-      await axios.post(`${API_BASE}/api/push/settings`, {
-        push_enabled: nextEnabled,
-        push_token: pushToken,
-        platform: Platform.OS
-      }, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-
-      console.log('[push-toggle] saved', { nextEnabled });
-    } catch (err) {
-      console.log('Failed to update push settings:', err);
-      setAlertsEnabled(previous);
-      Alert.alert('Error', 'Failed to update notification settings. Please try again.');
+      // ── 3. Persist preference to backend ─────────────────────────────────
+      const authToken = await AsyncStorage.getItem('access_token');
+      await axios.post(
+        `${API_BASE}/api/push/settings`,
+        { push_enabled: nextEnabled, push_token: pushToken, platform: Platform.OS },
+        { headers: { Authorization: `Bearer ${authToken}` } },
+      );
+      console.log('[push-toggle] saved to backend – push_enabled:', nextEnabled);
+    } catch (err: any) {
+      // Backend save failed: revert toggle so UI matches persisted state
+      console.log('[push-toggle] backend save error – reverting:', err?.message ?? err);
+      setAlertsEnabled(!nextEnabled);
+      Alert.alert('Error', 'Could not save notification settings. Please try again.');
     } finally {
       setPushLoading(false);
     }
@@ -364,12 +373,43 @@ export default function HomeScreen() {
       console.log('Route request →', { url: routeWeatherUrl, requestData });
 
       const response = await axios.post(routeWeatherUrl, requestData);
-      const alertsList = response.data?.alerts ?? response.data?.hazard_alerts ?? [];
-      const hazardAlertsLength = Array.isArray(response.data?.hazard_alerts)
-        ? response.data.hazard_alerts.length
+      let routeData = response.data ?? {};
+
+      // Follow-up call: fetch NWS hazard alerts (deferred from the main route call)
+      const routeId = routeData?.id;
+      if (routeId) {
+        try {
+          const alertsResp = await axios.get(
+            `${API_BASE}/api/route/weather/alerts/${routeId}`,
+            { timeout: 30000 }
+          );
+          const alertsData = alertsResp.data;
+          if (alertsData) {
+            const mergedAlerts =
+              alertsData.alerts ??
+              alertsData.hazard_alerts ??
+              routeData.alerts ??
+              [];
+            routeData = {
+              ...routeData,
+              hazard_alerts: alertsData.hazard_alerts ?? routeData.hazard_alerts ?? [],
+              alerts: mergedAlerts,
+              road_conditions: alertsData.road_conditions ?? routeData.road_conditions ?? [],
+              weather_conditions: alertsData.weather_conditions ?? routeData.weather_conditions ?? [],
+              hazard_status: alertsData.hazard_status ?? 'ready',
+            };
+          }
+        } catch (alertsErr: any) {
+          console.warn('Alerts follow-up fetch failed; continuing with base route data:', alertsErr?.message);
+        }
+      }
+
+      const alertsList = routeData?.alerts ?? routeData?.hazard_alerts ?? [];
+      const hazardAlertsLength = Array.isArray(routeData?.hazard_alerts)
+        ? routeData.hazard_alerts.length
         : 0;
-      const rawLength = JSON.stringify(response.data || {}).length;
-      console.log('Route response data (raw)', response.data);
+      const rawLength = JSON.stringify(routeData || {}).length;
+      console.log('Route response data (raw)', routeData);
       console.log('Route response ←', {
         url: response.request?.responseURL || routeWeatherUrl,
         status: response.status,
@@ -384,11 +424,11 @@ export default function HomeScreen() {
       });
       
       // Cache the route for offline
-      await AsyncStorage.setItem('lastRoute', JSON.stringify(response.data));
+      await AsyncStorage.setItem('lastRoute', JSON.stringify(routeData));
 
       router.push({
         pathname: '/route',
-        params: { routeData: JSON.stringify(response.data) },
+        params: { routeData: JSON.stringify(routeData) },
       });
     } catch (err: any) {
       console.error('Error:', err);
@@ -950,13 +990,19 @@ export default function HomeScreen() {
                     <Ionicons name="notifications-outline" size={22} color="#eab308" />
                     <Text style={styles.alertsText}>Push Weather Alerts</Text>
                   </View>
-                  <Switch
-                    value={alertsEnabled}
-                    onValueChange={handleAlertsToggle}
-                    trackColor={{ false: '#3f3f46', true: '#eab30880' }}
-                    thumbColor={alertsEnabled ? '#eab308' : '#71717a'}
-                    disabled={pushLoading}
-                  />
+                  {pushLoading ? (
+                    <ActivityIndicator size="small" color="#eab308" />
+                  ) : (
+                    <Switch
+                      value={alertsEnabled}
+                      onValueChange={(next) => {
+                        console.log('[push-toggle] render value=', alertsEnabled, '→ onValueChange next=', next);
+                        handleAlertsToggle(next);
+                      }}
+                      trackColor={{ false: '#3f3f46', true: '#eab30880' }}
+                      thumbColor={alertsEnabled ? '#eab308' : '#71717a'}
+                    />
+                  )}
                 </View>
               )}
 

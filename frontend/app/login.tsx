@@ -33,7 +33,10 @@ export default function LoginScreen() {
   }
 
   const handleLogin = async () => {
-    if (loading) return;
+    if (loading) {
+      console.log('[auth] handleLogin called while loading – blocked (double-tap guard)');
+      return;
+    }
     if (!email.trim() || !password.trim()) {
       setError('Please enter both email and password');
       return;
@@ -41,16 +44,21 @@ export default function LoginScreen() {
 
     setLoading(true);
     setError('');
+    console.log('[auth] login submit – calling login()');
 
     const result = await login(email.trim(), password);
+    console.log('[auth] login() returned – success:', result.success, 'error:', result.error ?? 'none');
 
     if (result.success) {
+      console.log('[auth] login success – resetting loading, navigating to /');
+      setLoading(false);
       router.replace('/');
       return;
     }
 
     setLoading(false);
     setError(result.error || 'Login failed');
+    console.log('[auth] login failed – showing error:', result.error);
   };
 
   return (
