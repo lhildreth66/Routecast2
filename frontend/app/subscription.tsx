@@ -37,7 +37,6 @@ export default function SubscriptionScreen() {
   const [trialLoading, setTrialLoading] = useState(false);
   const [error, setError] = useState('');
   const [mounted, setMounted] = useState(false);
-  const [mounted, setMounted] = React.useState(false);
 
   useEffect(() => {
     fetchPlans();
