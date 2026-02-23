@@ -3,6 +3,7 @@ Authentication Router for RouteCast
 Handles signup, login, email verification, password reset, and user profile
 """
 from fastapi import APIRouter, HTTPException, Depends, Header, Request, BackgroundTasks
+from fastapi.responses import JSONResponse
 from typing import Optional
 from datetime import datetime, timedelta, timezone
 import os
@@ -64,36 +65,39 @@ async def signup(
     request: Request
 ):
     """Register a new user"""
-    db = get_db(request)
+    try:
+        db = get_db(request)
 
-    # Check if user already exists
-    existing_user = await get_user_by_email(db, user_data.email)
-    if existing_user:
-        raise HTTPException(status_code=400, detail="Email already registered")
+        existing_user = await get_user_by_email(db, user_data.email)
+        if existing_user:
+            raise HTTPException(status_code=400, detail="Email already registered")
 
-    # Create user
-    user = await create_user(db, user_data.email, user_data.password, user_data.name)
+        user = await create_user(db, user_data.email, user_data.password, user_data.name)
 
-    # Generate verification token
-    verification_token = generate_verification_token()
-    await store_verification_token(db, user["user_id"], verification_token, "email_verification", 24)
+        verification_token = generate_verification_token()
+        await store_verification_token(db, user["user_id"], verification_token, "email_verification", 24)
 
-    # Send verification email in background
-    background_tasks.add_task(
-        send_verification_email,
-        user_data.email,
-        verification_token,
-        user_data.name
-    )
+        background_tasks.add_task(
+            send_verification_email,
+            user_data.email,
+            verification_token,
+            user_data.name
+        )
 
-    # Generate tokens
-    access_token, refresh_token, expires_in = create_tokens(user["user_id"], user["email"])
+        access_token, refresh_token, expires_in = create_tokens(user["user_id"], user["email"])
 
-    return TokenResponse(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        expires_in=expires_in
-    )
+        return JSONResponse(
+            status_code=201,
+            content={
+                "access_token": access_token,
+                "refresh_token": refresh_token,
+                "expires_in": expires_in,
+            },
+        )
+    except HTTPException as e:
+        return JSONResponse(status_code=e.status_code, content={"detail": e.detail})
+    except Exception as e:
+        return JSONResponse(status_code=400, content={"detail": str(e)})
 
 
 @router.post("/login", response_model=TokenResponse)
