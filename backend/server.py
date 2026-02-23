@@ -354,19 +354,10 @@ app.add_middleware(
     allow_origins=[
         "https://routecastweather.com",
         "https://www.routecastweather.com",
-        "https://app.routecastweather.com",
-        "http://localhost:8081",
-        "http://localhost:19006",
-        "http://localhost:3000",
-        "http://127.0.0.1:8081",
-        "http://127.0.0.1:19006",
-        "http://127.0.0.1:3000",
     ],
-    allow_origin_regex=r"^https://.*\.app\.github\.dev$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["*"],
 )
 
 # Create routers
