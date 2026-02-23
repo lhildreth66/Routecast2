@@ -349,6 +349,7 @@ app.add_middleware(
     allow_origins=[
         "https://routecastweather.com",
         "https://www.routecastweather.com",
+        "https://api.routecastweather.com",
         "https://app.routecastweather.com",
         "http://localhost:8081",
         "http://localhost:19006",
