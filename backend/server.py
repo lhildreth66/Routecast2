@@ -356,6 +356,7 @@ NOAA_HEADERS = {
     'Accept': 'application/geo+json'
 }
 ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN")
+DEBUG_ROUTE_ALERTS_KEY = os.environ.get("DEBUG_ROUTE_ALERTS_KEY")
 
 # Create the main app
 app = FastAPI()
@@ -3934,10 +3935,15 @@ async def get_route_weather(request: RouteRequest):
 
 
 @api_router.get("/route/weather/alerts/{route_id}", response_model=HazardAlertsResponse)
-async def get_route_weather_alerts(route_id: str):
+async def get_route_weather_alerts(
+    route_id: str,
+    debug_route_alerts_key: Optional[str] = Header(None, alias="X-Route-Alerts-Debug-Key"),
+):
     """Compute hazard/NWS alerts in a single follow-up call using cached context."""
     logger.info("route_alerts_request", extra={"route_id": route_id})
-    debug_enabled = os.environ.get("ROUTE_ALERTS_DEBUG") in {"1", "true", "True", "on", "yes"}
+    debug_enabled_env = os.environ.get("ROUTE_ALERTS_DEBUG") in {"1", "true", "True", "on", "yes"}
+    debug_header_allowed = DEBUG_ROUTE_ALERTS_KEY and debug_route_alerts_key == DEBUG_ROUTE_ALERTS_KEY
+    debug_enabled = debug_enabled_env or debug_header_allowed
     debug_payload: Optional[Dict[str, Any]] = {} if debug_enabled else None
     ctx = await get_route_context_async(route_id)
     if not ctx:
