@@ -393,6 +393,26 @@ export default function RouteScreen() {
     const list = (routeData as any)?.alerts ?? routeData?.hazard_alerts ?? [];
     return Array.isArray(list) ? list : [];
   }, [routeData]);
+  const hazardSegments = useMemo(() => {
+    return Array.isArray(routeData?.turn_by_turn)
+      ? routeData.turn_by_turn.filter(step => step?.has_alert)
+      : [];
+  }, [routeData]);
+  const showAllClear = alerts.length === 0 && hazardSegments.length === 0;
+
+  useEffect(() => {
+    console.log('Alerts screen data', {
+      alertsLength: alerts?.length ?? 0,
+      firstEvent: alerts?.[0]?.event || alerts?.[0]?.properties?.event || null,
+      firstHeadline: alerts?.[0]?.headline || alerts?.[0]?.properties?.headline || null,
+      hazardSegmentsLength: hazardSegments.length,
+      filtersApplied: {
+        severity: false,
+        type: false,
+        note: 'No client-side filtering applied to alerts payload.',
+      },
+    });
+  }, [alerts, hazardSegments]);
   
   // Radar map state
   const [showRadarMap, setShowRadarMap] = useState(false);
@@ -411,6 +431,8 @@ export default function RouteScreen() {
     setExpandedCards(newExpanded);
   };
 
+  const [alertsLoading, setAlertsLoading] = useState(false);
+
   useEffect(() => {
     if (params.routeData) {
       try {
@@ -422,6 +444,28 @@ export default function RouteScreen() {
     }
     setLoading(false);
   }, [params.routeData]);
+
+  // Follow-up: fetch NWS hazard alerts from the deferred endpoint
+  useEffect(() => {
+    const routeId = routeData?.id;
+    if (!routeId) return;
+    setAlertsLoading(true);
+    axios
+      .get(`${API_BASE}/api/route/weather/alerts/${routeId}`)
+      .then((res) => {
+        const payload = res.data || {};
+        const fetched: HazardAlert[] = payload.alerts ?? payload.hazard_alerts ?? [];
+        if (fetched.length > 0) {
+          setRouteData((prev) =>
+            prev
+              ? { ...prev, hazard_alerts: fetched, alerts: fetched, hazard_status: 'ready' } as any
+              : prev
+          );
+        }
+      })
+      .catch((e) => console.warn('Alerts follow-up failed:', e.message))
+      .finally(() => setAlertsLoading(false));
+  }, [routeData?.id]);
 
   const speakSummary = async () => {
     if (!routeData) return;
@@ -938,140 +982,195 @@ export default function RouteScreen() {
           </View>
         )}
 
-        {/* Alerts Tab */}
+        {/* Alerts Tab – WeatherBug style */}
         {activeTab === 'alerts' && (
           <View style={styles.alertsTab}>
-            <Text style={styles.sectionTitle}>⚠️ Weather Alerts Along Route</Text>
-            <Text style={styles.sectionSubtitle}>Tap any alert to see full details</Text>
-            
-            {alerts && alerts.length > 0 ? (
-              alerts.map((alert, index) => {
-                const isExpanded = expandedCards.has(index + 1000); // Use offset to differentiate from road cards
-                const props = alert.properties || {};
-                const eventTitle = alert.event || props.event || alert.headline || props.headline || alert.message || 'Weather Alert';
-                const what = alert.full_description || alert.description || props.description || alert.message;
-                const where = alert.areaDesc || props.areaDesc || alert.location_name;
-                const onset = alert.onset || props.onset;
-                const expires = alert.expires || props.expires;
-                const whenText = [onset, expires].filter(Boolean).join(' → ');
-                const impacts = alert.recommendation || alert.driver_action;
-                const precautions = alert.instruction || props.instruction;
-                const alertKey = alert.id || alert.alert_id || index;
-                
-                return (
-                  <TouchableOpacity 
-                    key={alertKey} 
-                    style={[
-                      styles.alertCard,
-                      alert.severity === 'extreme' ? styles.alertExtreme :
-                      alert.severity === 'high' ? styles.alertHigh : styles.alertMedium,
-                      isExpanded && styles.alertCardExpanded
-                    ]}
-                    onPress={() => toggleCardExpand(index + 1000)}
-                    activeOpacity={0.8}
-                  >
-                    <View style={styles.alertHeader}>
-                      <Ionicons 
-                        name={
-                          alert.type === 'ice' ? 'snow' :
-                          alert.type === 'rain' ? 'rainy' :
-                          alert.type === 'wind' ? 'cloudy' :
-                          'warning'
-                        } 
-                        size={28} 
-                        color="#fff" 
-                      />
-                      <View style={styles.alertInfo}>
-                        {/* Source and Severity badges */}
-                        <View style={styles.alertBadges}>
-                          <View style={[styles.alertSourceBadge, alert.source === 'nws' ? styles.alertSourceNWS : styles.alertSourceSystem]}>
-                            <Text style={styles.alertSourceText}>
-                              {alert.source === 'nws' ? 'Official NWS' : 'System Detected'}
+            {/* Header row with optional loading spinner */}
+            <View style={styles.wbTabHeader}>
+              <Text style={styles.sectionTitle}>⚠️ Weather Alerts</Text>
+              {alertsLoading && (
+                <View style={styles.wbLoadingRow}>
+                  <ActivityIndicator size="small" color="#f59e0b" />
+                  <Text style={styles.wbLoadingText}>Fetching NWS alerts…</Text>
+                </View>
+              )}
+            </View>
+
+            {!showAllClear ? (
+              alerts && alerts.length > 0 ? (
+                alerts.map((alert, index) => {
+                  const isExpanded = expandedCards.has(index + 1000);
+                  const ap = alert.properties || ({} as any);
+                  const eventTitle =
+                    alert.event || ap.event || alert.headline || ap.headline || alert.message || 'Weather Alert';
+                  const what = alert.full_description || alert.description || ap.description || '';
+                  const where = alert.areaDesc || ap.areaDesc || alert.location_name || '';
+                  const onset = alert.onset || ap.onset || ap.effective || alert.effective;
+                  const expires = alert.expires || ap.expires;
+                  const ends = ap.ends;
+                  const expiresDisplay = ends || expires;
+                  const instruction = alert.instruction || ap.instruction || '';
+                  const headline = alert.headline || ap.headline || '';
+                  const issuedBy = ap.senderName || ap.source || '';
+                  const alertKey = alert.id || alert.alert_id || index;
+
+                  // ── WeatherBug colour + level ──────────────────────────────
+                  const lev = (alert.alert_level || '').toLowerCase();
+                  const sev = (alert.severity || '').toLowerCase();
+                  const evL = eventTitle.toLowerCase();
+                  let bannerColor = '#374151';
+                  let levelLabel = 'ADVISORY';
+                  if (
+                    lev === 'warning' || sev === 'extreme' || sev === 'severe' ||
+                    evL.includes('warning')
+                  ) { bannerColor = '#B91C1C'; levelLabel = 'WARNING'; }
+                  else if (lev === 'watch' || evL.includes('watch')) {
+                    bannerColor = '#C2410C'; levelLabel = 'WATCH';
+                  } else if (lev === 'advisory' || evL.includes('advisory')) {
+                    bannerColor = '#B45309'; levelLabel = 'ADVISORY';
+                  } else if (lev === 'statement' || evL.includes('statement')) {
+                    bannerColor = '#1D4ED8'; levelLabel = 'STATEMENT';
+                  } else if (sev === 'high') {
+                    bannerColor = '#B91C1C'; levelLabel = 'WARNING';
+                  } else if (sev === 'medium') {
+                    bannerColor = '#C2410C'; levelLabel = 'WATCH';
+                  }
+
+                  // ── Weather icon ──────────────────────────────────────────
+                  const evIcon = (alert.event || alert.type || '').toLowerCase();
+                  let wxIcon: any = 'alert-circle';
+                  if (evIcon.includes('snow') || evIcon.includes('blizzard') || evIcon.includes('winter') ||
+                      evIcon.includes('ice')  || evIcon.includes('freez') || alert.type === 'ice' ||
+                      alert.type === 'snow' || alert.type === 'whiteout') wxIcon = 'snow';
+                  else if (evIcon.includes('tornado')) wxIcon = 'warning';
+                  else if (evIcon.includes('thunder') || evIcon.includes('lightning') ||
+                           evIcon.includes('storm')) wxIcon = 'thunderstorm';
+                  else if (evIcon.includes('flood') || evIcon.includes('rain') ||
+                           alert.type === 'rain') wxIcon = 'rainy';
+                  else if (evIcon.includes('wind') || evIcon.includes('gale') ||
+                           alert.type === 'wind') wxIcon = 'flag';
+                  else if (evIcon.includes('fog') || evIcon.includes('visib')) wxIcon = 'cloudy';
+                  else if (evIcon.includes('heat') || evIcon.includes('fire')) wxIcon = 'flame';
+
+                  const fmtTime = (iso?: string) => {
+                    if (!iso) return null;
+                    try {
+                      return new Date(iso).toLocaleDateString('en-US', {
+                        weekday: 'short', month: 'short', day: 'numeric',
+                        hour: 'numeric', minute: '2-digit',
+                      });
+                    } catch { return iso; }
+                  };
+
+                  return (
+                    <TouchableOpacity
+                      key={alertKey}
+                      style={styles.wbCard}
+                      onPress={() => toggleCardExpand(index + 1000)}
+                      activeOpacity={0.85}
+                    >
+                      {/* ── Colored banner ──────────────────────────────── */}
+                      <View style={[styles.wbBanner, { backgroundColor: bannerColor }]}>
+                        <Ionicons name={wxIcon} size={28} color="#fff" />
+                        <View style={styles.wbBannerTextCol}>
+                          <Text style={styles.wbEventTitle}>{eventTitle.toUpperCase()}</Text>
+                          {issuedBy ? (
+                            <Text style={styles.wbIssuedBy}>{issuedBy}</Text>
+                          ) : null}
+                        </View>
+                        <Ionicons
+                          name={isExpanded ? 'chevron-up' : 'chevron-down'}
+                          size={20}
+                          color="rgba(255,255,255,0.85)"
+                        />
+                      </View>
+
+                      {/* ── Card body ───────────────────────────────────── */}
+                      <View style={styles.wbBody}>
+                        {/* Time row */}
+                        {(onset || expiresDisplay) ? (
+                          <View style={styles.wbTimeRow}>
+                            <Ionicons name="time-outline" size={13} color="#9ca3af" />
+                            <Text style={styles.wbTimeText}>
+                              {onset ? `Effective ${fmtTime(onset)}` : ''}
+                              {onset && expiresDisplay ? '  →  ' : ''}
+                              {expiresDisplay ? `Expires ${fmtTime(expiresDisplay)}` : ''}
                             </Text>
                           </View>
-                          <View style={[
-                            styles.alertSeverityBadge,
-                            alert.severity === 'extreme' ? styles.severityExtreme :
-                            alert.severity === 'high' ? styles.severityHigh :
-                            alert.severity === 'medium' ? styles.severityMedium : styles.severityLow
-                          ]}>
-                            <Text style={styles.alertSeverityText}>
-                              {alert.severity === 'extreme' ? 'Warning' :
-                               alert.severity === 'high' ? 'Warning' :
-                               alert.severity === 'medium' ? 'Watch' : 'Advisory'}
+                        ) : null}
+
+                        {/* Area */}
+                        {where ? (
+                          <View style={styles.wbAreaRow}>
+                            <Ionicons name="location-outline" size={13} color="#9ca3af" />
+                            <Text style={styles.wbAreaText} numberOfLines={isExpanded ? undefined : 2}>
+                              {where}
                             </Text>
                           </View>
-                        </View>
-                        <Text style={styles.alertCountdown}>{alert.countdown_text}</Text>
-                        <Text style={styles.alertMessage}>{eventTitle}</Text>
-                      </View>
-                      <Ionicons 
-                        name={isExpanded ? "chevron-up" : "chevron-down"} 
-                        size={20} 
-                        color="#fff" 
-                      />
-                    </View>
-                    
-                    {/* Expanded Alert Details */}
-                    {isExpanded && (
-                      <View style={styles.alertExpandedContent}>
-                        <View style={styles.alertFullDescription}>
-                          <Text style={styles.alertFullTitle}>{eventTitle}</Text>
-                          <Text style={styles.alertFullText}>
-                            {what || 'Full alert details unavailable. Monitor local NWS updates.'}
-                          </Text>
-                        </View>
+                        ) : null}
 
-                        <View style={styles.nwsDetailRow}>
-                          <Text style={styles.nwsDetailLabel}>WHAT</Text>
-                          <Text style={styles.nwsDetailText}>{what || 'See above for description.'}</Text>
-                        </View>
-                        <View style={styles.nwsDetailRow}>
-                          <Text style={styles.nwsDetailLabel}>WHERE</Text>
-                          <Text style={styles.nwsDetailText}>{where || 'Route vicinity'}</Text>
-                        </View>
-                        <View style={styles.nwsDetailRow}>
-                          <Text style={styles.nwsDetailLabel}>WHEN</Text>
-                          <Text style={styles.nwsDetailText}>{whenText || 'Active now'}</Text>
-                        </View>
-                        <View style={styles.nwsDetailRow}>
-                          <Text style={styles.nwsDetailLabel}>IMPACTS</Text>
-                          <Text style={styles.nwsDetailText}>{impacts || 'Expect travel impacts along this route segment.'}</Text>
-                        </View>
-                        <View style={styles.nwsDetailRow}>
-                          <Text style={styles.nwsDetailLabel}>PRECAUTIONARY ACTIONS</Text>
-                          <Text style={styles.nwsDetailText}>{precautions || 'Follow local guidance and adjust driving to conditions.'}</Text>
-                        </View>
+                        {/* Headline (collapsed) */}
+                        {!isExpanded && headline && headline.toLowerCase() !== eventTitle.toLowerCase() ? (
+                          <Text style={styles.wbHeadline} numberOfLines={3}>{headline}</Text>
+                        ) : null}
 
-                        <View style={styles.alertAction}>
-                          <Ionicons name="checkmark-circle" size={16} color="#22c55e" />
-                          <Text style={styles.alertRec}>{alert.recommendation}</Text>
+                        {/* Expanded NWS detail */}
+                        {isExpanded && (
+                          <View style={styles.wbExpandedSection}>
+                            {what ? (
+                              <>
+                                <Text style={styles.wbSectionLabel}>DETAILS</Text>
+                                <Text style={styles.wbSectionText}>{what}</Text>
+                              </>
+                            ) : null}
+                            {instruction ? (
+                              <>
+                                <Text style={[styles.wbSectionLabel, { marginTop: 14, color: '#86efac' }]}>
+                                  PRECAUTIONARY ACTIONS
+                                </Text>
+                                <Text style={styles.wbSectionText}>{instruction}</Text>
+                              </>
+                            ) : null}
+                            {alert.recommendation && alert.recommendation !== instruction ? (
+                              <View style={styles.wbActionRow}>
+                                <Ionicons name="checkmark-circle" size={15} color="#4ade80" />
+                                <Text style={styles.wbActionText}>{alert.recommendation}</Text>
+                              </View>
+                            ) : null}
+                          </View>
+                        )}
+
+                        {/* Footer: distance + ETA + level pill */}
+                        <View style={styles.wbFooter}>
+                          {alert.distance_miles != null ? (
+                            <View style={styles.wbFooterItem}>
+                              <Ionicons name="location" size={12} color="#6b7280" />
+                              <Text style={styles.wbFooterText}>{Math.round(alert.distance_miles)} mi</Text>
+                            </View>
+                          ) : null}
+                          {alert.eta_minutes != null ? (
+                            <View style={styles.wbFooterItem}>
+                              <Ionicons name="time" size={12} color="#6b7280" />
+                              <Text style={styles.wbFooterText}>ETA {alert.eta_minutes} min</Text>
+                            </View>
+                          ) : null}
+                          <View style={[styles.wbLevelPill, { backgroundColor: bannerColor, marginLeft: 'auto' }]}>
+                            <Text style={styles.wbLevelPillText}>{levelLabel}</Text>
+                          </View>
                         </View>
                       </View>
-                    )}
-                    
-                    {!isExpanded && (
-                      <>
-                        <View style={styles.alertAction}>
-                          <Ionicons name="checkmark-circle" size={16} color="#22c55e" />
-                          <Text style={styles.alertRec}>{alert.recommendation}</Text>
-                        </View>
-                        <View style={styles.alertMeta}>
-                          <Text style={styles.alertDistance}>📍 {Math.round(alert.distance_miles)} mi</Text>
-                          <Text style={styles.alertEta}>⏱ {alert.eta_minutes} min</Text>
-                        </View>
-                      </>
-                    )}
-                    
-                    {isExpanded && (
-                      <View style={styles.alertMeta}>
-                        <Text style={styles.alertDistance}>📍 {Math.round(alert.distance_miles)} mi away</Text>
-                        <Text style={styles.alertEta}>⏱ ETA: {alert.eta_minutes} min</Text>
-                      </View>
-                    )}
-                  </TouchableOpacity>
-                );
-              })
+                    </TouchableOpacity>
+                  );
+                })
+              ) : (
+                <View style={styles.hazardSegmentsOnly}>
+                  <Ionicons name="warning" size={48} color="#f59e0b" />
+                  <Text style={styles.hazardSegmentsTitle}>Hazard segments detected</Text>
+                  <Text style={styles.hazardSegmentsText}>
+                    {hazardSegments.length} segment(s) in turn-by-turn have alerts.
+                  </Text>
+                </View>
+              )
             ) : (
               <View style={styles.noAlerts}>
                 <Ionicons name="checkmark-circle" size={64} color="#22c55e" />
@@ -1587,172 +1686,170 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   alertsTab: {},
-  alertCard: {
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 10,
+  // ── WeatherBug-style alert cards ────────────────────────────────────────
+  wbTabHeader: {
+    marginBottom: 12,
   },
-  alertCardExpanded: {
-    borderWidth: 2,
-    borderColor: '#fbbf24',
-  },
-  alertExtreme: {
-    backgroundColor: '#7f1d1d',
-  },
-  alertHigh: {
-    backgroundColor: '#991b1b',
-  },
-  alertMedium: {
-    backgroundColor: '#78350f',
-  },
-  alertHeader: {
+  wbLoadingRow: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 6,
+  },
+  wbLoadingText: {
+    color: '#f59e0b',
+    fontSize: 12,
+  },
+  wbCard: {
+    borderRadius: 12,
+    marginBottom: 12,
+    overflow: 'hidden',
+    backgroundColor: '#1e2433',
+    borderWidth: 1,
+    borderColor: '#374151',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.35,
+    shadowRadius: 5,
+    elevation: 4,
+  },
+  wbBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 13,
     gap: 12,
   },
-  alertInfo: {
+  wbBannerTextCol: {
     flex: 1,
   },
-  alertBadges: {
-    flexDirection: 'row',
-    gap: 6,
-    marginBottom: 4,
-  },
-  alertSourceBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  alertSourceNWS: {
-    backgroundColor: '#1d4ed8',
-  },
-  alertSourceSystem: {
-    backgroundColor: '#6b7280',
-  },
-  alertSourceText: {
+  wbEventTitle: {
     color: '#fff',
-    fontSize: 9,
-    fontWeight: '700',
-    textTransform: 'uppercase',
+    fontSize: 15,
+    fontWeight: '800',
+    letterSpacing: 0.4,
   },
-  alertSeverityBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
+  wbIssuedBy: {
+    color: 'rgba(255,255,255,0.75)',
+    fontSize: 11,
+    marginTop: 3,
   },
-  severityExtreme: {
-    backgroundColor: '#dc2626',
+  wbBody: {
+    paddingHorizontal: 14,
+    paddingTop: 10,
+    paddingBottom: 10,
+    gap: 7,
   },
-  severityHigh: {
-    backgroundColor: '#ea580c',
-  },
-  severityMedium: {
-    backgroundColor: '#ca8a04',
-  },
-  severityLow: {
-    backgroundColor: '#16a34a',
-  },
-  alertSeverityText: {
-    color: '#fff',
-    fontSize: 9,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-  },
-  alertCountdown: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  alertMessage: {
-    color: '#fecaca',
-    fontSize: 12,
-    marginTop: 2,
-  },
-  alertExpandedContent: {
-    marginTop: 12,
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.2)',
-  },
-  alertFullDescription: {
-    marginBottom: 12,
-  },
-  alertFullTitle: {
-    color: '#fbbf24',
-    fontSize: 13,
-    fontWeight: '700',
-    marginBottom: 6,
-  },
-  alertFullText: {
-    color: '#fff',
-    fontSize: 13,
-    lineHeight: 20,
-  },
-  alertInstructionBox: {
-    backgroundColor: 'rgba(0,0,0,0.3)',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 12,
-  },
-  alertInstructionTitle: {
-    color: '#22c55e',
-    fontSize: 12,
-    fontWeight: '700',
-    marginBottom: 6,
-  },
-  alertInstructionText: {
-    color: '#bbf7d0',
-    fontSize: 12,
-    lineHeight: 18,
-  },
-  alertAction: {
+  wbTimeRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 8,
-    backgroundColor: 'rgba(0,0,0,0.2)',
-    borderRadius: 8,
-    padding: 10,
-    marginTop: 10,
+    gap: 5,
   },
-  alertRec: {
-    color: '#bbf7d0',
-    fontSize: 12,
+  wbTimeText: {
+    color: '#d1d5db',
+    fontSize: 11.5,
     flex: 1,
+    lineHeight: 17,
   },
-  nwsDetailRow: {
-    marginTop: 8,
-    padding: 10,
-    borderRadius: 8,
-    backgroundColor: 'rgba(0,0,0,0.2)',
+  wbAreaRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 5,
   },
-  nwsDetailLabel: {
+  wbAreaText: {
+    color: '#d1d5db',
+    fontSize: 11.5,
+    flex: 1,
+    lineHeight: 17,
+  },
+  wbHeadline: {
+    color: '#f9fafb',
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 4,
+  },
+  wbExpandedSection: {
+    marginTop: 6,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#374151',
+  },
+  wbSectionLabel: {
     color: '#fbbf24',
     fontSize: 11,
     fontWeight: '700',
-    marginBottom: 4,
-    letterSpacing: 0.5,
+    letterSpacing: 0.8,
+    marginBottom: 5,
+    textTransform: 'uppercase',
   },
-  nwsDetailText: {
-    color: '#fff',
+  wbSectionText: {
+    color: '#e5e7eb',
+    fontSize: 12.5,
+    lineHeight: 19,
+  },
+  wbActionRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 7,
+    marginTop: 10,
+    backgroundColor: 'rgba(34,197,94,0.1)',
+    borderRadius: 8,
+    padding: 10,
+  },
+  wbActionText: {
+    color: '#bbf7d0',
     fontSize: 12,
+    flex: 1,
     lineHeight: 18,
   },
-  alertMeta: {
+  wbFooter: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 10,
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#374151',
   },
-  alertDistance: {
-    color: 'rgba(255,255,255,0.7)',
+  wbFooterItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  wbFooterText: {
+    color: '#6b7280',
     fontSize: 11,
   },
-  alertEta: {
-    color: 'rgba(255,255,255,0.7)',
-    fontSize: 11,
+  wbLevelPill: {
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  wbLevelPillText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.6,
   },
   noAlerts: {
     alignItems: 'center',
     paddingVertical: 40,
+  },
+  hazardSegmentsOnly: {
+    alignItems: 'center',
+    paddingVertical: 40,
+    gap: 8,
+  },
+  hazardSegmentsTitle: {
+    color: '#f59e0b',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  hazardSegmentsText: {
+    color: '#fbbf24',
+    fontSize: 14,
+    textAlign: 'center',
+    paddingHorizontal: 24,
   },
   noAlertsTitle: {
     color: '#22c55e',
