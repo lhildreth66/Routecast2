@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   ScrollView,
   Alert,
+  ActionSheetIOS,
   Linking,
   Platform,
 } from 'react-native';
@@ -22,6 +23,7 @@ export default function AccountScreen() {
   const { user, accessToken, logout, refreshUser } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [logoutLoading, setLogoutLoading] = useState(false);
 
   const handleManageSubscription = async () => {
     if (!user?.subscription_provider || user.subscription_provider !== 'stripe') {
@@ -60,20 +62,46 @@ export default function AccountScreen() {
     }
   };
 
+  const performLogout = async () => {
+    setError('');
+    setLogoutLoading(true);
+    try {
+      await logout();
+      router.replace('/');
+    } catch (err) {
+      setError('Failed to sign out. Please try again.');
+    } finally {
+      setLogoutLoading(false);
+    }
+  };
+
   const handleLogout = () => {
+    if (logoutLoading) return;
+
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          title: 'Sign Out',
+          message: 'Are you sure you want to sign out?',
+          options: ['Cancel', 'Sign Out'],
+          destructiveButtonIndex: 1,
+          cancelButtonIndex: 0,
+        },
+        (buttonIndex) => {
+          if (buttonIndex === 1) {
+            performLogout();
+          }
+        }
+      );
+      return;
+    }
+
     Alert.alert(
       'Sign Out',
       'Are you sure you want to sign out?',
       [
         { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Sign Out', 
-          style: 'destructive',
-          onPress: async () => {
-            await logout();
-            router.replace('/');
-          }
-        }
+        { text: 'Sign Out', style: 'destructive', onPress: performLogout }
       ]
     );
   };
@@ -326,12 +354,19 @@ export default function AccountScreen() {
 
           {/* Sign Out Button */}
           <TouchableOpacity
-            style={styles.logoutButton}
+            style={[styles.logoutButton, logoutLoading && styles.buttonDisabled]}
             onPress={handleLogout}
+            disabled={logoutLoading}
             data-testid="logout-btn"
           >
-            <Ionicons name="log-out-outline" size={22} color="#ef4444" />
-            <Text style={styles.logoutButtonText}>Sign Out</Text>
+            {logoutLoading ? (
+              <ActivityIndicator size="small" color="#ef4444" />
+            ) : (
+              <>
+                <Ionicons name="log-out-outline" size={22} color="#ef4444" />
+                <Text style={styles.logoutButtonText}>Sign Out</Text>
+              </>
+            )}
           </TouchableOpacity>
         </ScrollView>
       </SafeAreaView>

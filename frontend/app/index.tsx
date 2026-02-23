@@ -953,27 +953,33 @@ export default function HomeScreen() {
                 <TouchableOpacity
                   style={styles.quickAccessBtn}
                   onPress={() => router.push('/boondockers')}
-                  activeOpacity={0.8}
+                  activeOpacity={0.85}
                 >
-                  <Ionicons name="bonfire" size={24} color="#10b981" />
-                  <Text style={styles.quickAccessText}>Boondockers</Text>
+                  <View style={styles.quickAccessIconCircle}>
+                    <Ionicons name="bonfire" size={26} color="#10b981" />
+                  </View>
+                  <Text style={styles.quickAccessText} numberOfLines={1}>Boondockers</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.quickAccessBtn}
                   onPress={() => router.push('/tractor-trailer')}
-                  activeOpacity={0.8}
+                  activeOpacity={0.85}
                 >
-                  <Ionicons name="bus" size={24} color="#f59e0b" />
-                  <Text style={styles.quickAccessText}>Truck Drivers</Text>
+                  <View style={styles.quickAccessIconCircle}>
+                    <Ionicons name="bus" size={26} color="#f59e0b" />
+                  </View>
+                  <Text style={styles.quickAccessText} numberOfLines={1}>Truck Drivers</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={styles.quickAccessBtn}
                   onPress={() => router.push('/how-to-use')}
-                  activeOpacity={0.8}
+                  activeOpacity={0.85}
                   data-testid="how-to-use-btn"
                 >
-                  <Ionicons name="help-circle" size={24} color="#8b5cf6" />
-                  <Text style={styles.quickAccessText}>How To Use</Text>
+                  <View style={styles.quickAccessIconCircle}>
+                    <Ionicons name="help-circle" size={26} color="#8b5cf6" />
+                  </View>
+                  <Text style={styles.quickAccessText} numberOfLines={1}>How To Use</Text>
                 </TouchableOpacity>
               </View>
             </View>
@@ -2019,23 +2025,35 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     marginTop: 12,
+    justifyContent: 'space-between',
   },
   quickAccessBtn: {
     flex: 1,
-    flexDirection: 'row',
+    aspectRatio: 1,
+    minHeight: 110,
+    flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 8,
+    gap: 10,
     backgroundColor: '#27272a',
-    paddingVertical: 14,
-    borderRadius: 10,
+    padding: 14,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: '#3f3f46',
+  },
+  quickAccessIconCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#18181b',
   },
   quickAccessText: {
     color: '#e4e4e7',
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: '700',
+    textAlign: 'center',
   },
   vehicleHeightContainer: {
     backgroundColor: '#1c1917',

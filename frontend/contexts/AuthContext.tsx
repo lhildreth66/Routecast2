@@ -149,11 +149,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const logout = async () => {
-    await AsyncStorage.removeItem('accessToken');
-    await AsyncStorage.removeItem('refreshToken');
-    setAccessToken(null);
-    setRefreshToken(null);
-    setUser(null);
+    try {
+      await AsyncStorage.multiRemove([
+        'accessToken',
+        'refreshToken',
+        'access_token',
+        'refresh_token',
+      ]);
+    } catch (error) {
+      console.log('Error clearing auth tokens:', error);
+    } finally {
+      setAccessToken(null);
+      setRefreshToken(null);
+      setUser(null);
+    }
   };
 
   const refreshUser = async () => {
