@@ -36,10 +36,15 @@ export default function SubscriptionScreen() {
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [trialLoading, setTrialLoading] = useState(false);
   const [error, setError] = useState('');
+  const [mounted, setMounted] = useState(false);
   const [mounted, setMounted] = React.useState(false);
 
   useEffect(() => {
     fetchPlans();
+  }, []);
+
+  useEffect(() => {
+    setMounted(true);
   }, []);
 
   useEffect(() => {
@@ -119,6 +124,8 @@ export default function SubscriptionScreen() {
       setCheckoutLoading(false);
     }
   };
+
+  if (!mounted) return null;
 
   if (!mounted) return null;
 
