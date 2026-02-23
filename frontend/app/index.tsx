@@ -94,9 +94,9 @@ export default function HomeScreen() {
   // AuthProvider already blocks children until hasHydrated=true, so this
   // effect only runs in environments where the guard below actually renders.
   useEffect(() => {
-    console.log('[guard] check – hydrated:', hasHydrated, 'authLoading:', authLoading, 'accessToken:', !!accessToken, 'platform:', Platform.OS);
+    __DEV__ && console.log('[guard] check – hydrated:', hasHydrated, 'authLoading:', authLoading, 'accessToken:', !!accessToken, 'platform:', Platform.OS);
     if (Platform.OS === 'web' && hasHydrated && !authLoading && !accessToken) {
-      console.log('[guard] redirecting to /login');
+      __DEV__ && console.log('[guard] redirecting to /login');
       router.replace('/login');
     }
   }, [accessToken, authLoading, hasHydrated]);
@@ -162,7 +162,7 @@ export default function HomeScreen() {
   };
 
   const handleAlertsToggle = async (nextEnabled: boolean) => {
-    console.log('[push-toggle] onValueChange fired – next:', nextEnabled, 'prev:', alertsEnabled);
+    __DEV__ && console.log('[push-toggle] onValueChange fired – next:', nextEnabled, 'prev:', alertsEnabled);
 
     if (IS_WEB && !isMobileWeb) {
       Alert.alert('Mobile Only', 'Push notifications are available on the mobile app.');
@@ -176,7 +176,7 @@ export default function HomeScreen() {
 
     // ── 1. Optimistic UI flip (immediate, no revert on token failure) ──────
     setAlertsEnabled(nextEnabled);
-    console.log('[push-toggle] state set to', nextEnabled);
+    __DEV__ && console.log('[push-toggle] state set to', nextEnabled);
     setPushLoading(true);
 
     try {
@@ -186,19 +186,19 @@ export default function HomeScreen() {
         // Check/request permission – permission denial still reverts toggle
         const { status: existingStatus } = await Notifications.getPermissionsAsync();
         let finalStatus = existingStatus;
-        console.log('[push-toggle] existing permission status:', existingStatus);
+        __DEV__ && console.log('[push-toggle] existing permission status:', existingStatus);
 
         if (existingStatus !== 'granted') {
           const { status } = await Notifications.requestPermissionsAsync();
           finalStatus = status;
-          console.log('[push-toggle] after request, status:', finalStatus);
+          __DEV__ && console.log('[push-toggle] after request, status:', finalStatus);
         }
 
         if (finalStatus !== 'granted') {
           // Permission denied: keep toggle ON (preference saved), show Settings nudge.
           // Do NOT revert – the user's intent is recorded so when they later grant
           // permission the token will be captured on next app open.
-          console.log('[push-toggle] permission denied – saving preference anyway, showing settings nudge');
+          __DEV__ && console.log('[push-toggle] permission denied – saving preference anyway, showing settings nudge');
           Alert.alert(
             'Enable Notifications in Settings',
             'Notifications are currently disabled for this app. Go to Settings → Notifications → Routecast and turn them on.',
@@ -210,7 +210,7 @@ export default function HomeScreen() {
           try {
             const tokenData = await Notifications.getExpoPushTokenAsync();
             pushToken = tokenData.data;
-            console.log('[push-toggle] push token obtained:', pushToken?.slice(0, 20), '...');
+            __DEV__ && console.log('[push-toggle] push token obtained:', pushToken?.slice(0, 20), '...');
           } catch (tokenErr) {
             // Common in Expo Go / simulators – save preference without a token.
             // The token will be captured the next time the user opens the app on
@@ -227,10 +227,10 @@ export default function HomeScreen() {
         { push_enabled: nextEnabled, push_token: pushToken, platform: Platform.OS },
         { headers: { Authorization: `Bearer ${authToken}` } },
       );
-      console.log('[push-toggle] saved to backend – push_enabled:', nextEnabled);
+      __DEV__ && console.log('[push-toggle] saved to backend – push_enabled:', nextEnabled);
     } catch (err: any) {
       // Backend save failed: revert toggle so UI matches persisted state
-      console.log('[push-toggle] backend save error – reverting:', err?.message ?? err);
+      console.warn('[push-toggle] backend save error – reverting:', err?.message ?? err);
       setAlertsEnabled(!nextEnabled);
       Alert.alert('Error', 'Could not save notification settings. Please try again.');
     } finally {
@@ -998,7 +998,7 @@ export default function HomeScreen() {
                     <Switch
                       value={alertsEnabled}
                       onValueChange={(next) => {
-                        console.log('[push-toggle] render value=', alertsEnabled, '→ onValueChange next=', next);
+                        __DEV__ && console.log('[push-toggle] render value=', alertsEnabled, '→ onValueChange next=', next);
                         handleAlertsToggle(next);
                       }}
                       trackColor={{ false: '#3f3f46', true: '#eab30880' }}

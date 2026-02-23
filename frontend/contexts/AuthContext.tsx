@@ -102,19 +102,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (cancelled) return;
 
         if (at && rt) {
-          console.log('[auth] hydration: tokens found, restoring state (no API call)');
+          __DEV__ && console.log('[auth] hydration: tokens found, restoring state (no API call)');
           setAccessToken(at);
           setRefreshToken(rt);
           // NOTE: intentionally NOT calling /auth/me here.
           // Screens that require a user object call refreshUser() explicitly.
         } else {
-          console.log('[auth] hydration: no tokens');
+          __DEV__ && console.log('[auth] hydration: no tokens');
         }
       } catch (err) {
-        console.log('[auth] hydration error', err);
+        console.error('[auth] hydration error', err);
       } finally {
         if (!cancelled) {
-          console.log('[auth] hydration complete – hasHydrated = true');
+          __DEV__ && console.log('[auth] hydration complete – hasHydrated = true');
           setHasHydrated(true);
           setIsLoading(false);
         }
@@ -133,10 +133,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         headers: { Authorization: `Bearer ${token}` },
       });
       setUser(response.data);
-      console.log('[auth] /auth/me success');
+      __DEV__ && console.log('[auth] /auth/me success');
       return true;
     } catch (err: any) {
-      console.log('[auth] /auth/me failed', err?.response?.status ?? err?.message);
+      console.warn('[auth] /auth/me failed', err?.response?.status ?? err?.message);
       return false;
     }
   };
@@ -147,12 +147,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     password: string,
   ): Promise<{ success: boolean; error?: string }> => {
     if (LOGIN_IN_FLIGHT) {
-      console.log('[auth] login blocked – already in flight');
+      __DEV__ && console.log('[auth] login blocked – already in flight');
       return { success: false, error: 'Login already in progress' };
     }
 
     LOGIN_IN_FLIGHT = true;
-    console.log('[auth] POST /auth/login START');
+    __DEV__ && console.log('[auth] POST /auth/login START');
 
     try {
       const response = await axios.post(buildUrl('auth/login'), { email, password });
@@ -160,15 +160,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       await persistTokens(access_token, refresh_token);
       setAuthState({ accessToken: access_token, refreshToken: refresh_token });
-      console.log('[auth] tokens stored');
+      __DEV__ && console.log('[auth] tokens stored');
 
       await fetchUserProfile(access_token);
-      console.log('[auth] POST /auth/login DONE – one /auth/me called');
+      __DEV__ && console.log('[auth] POST /auth/login DONE – one /auth/me called');
 
       return { success: true };
     } catch (err: any) {
       const message = err.response?.data?.detail || 'Login failed. Please try again.';
-      console.log('[auth] POST /auth/login FAILED:', message);
+      console.warn('[auth] POST /auth/login FAILED:', message);
       return { success: false, error: message };
     } finally {
       LOGIN_IN_FLIGHT = false;
@@ -219,11 +219,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // ── logout ────────────────────────────────────────────────────────────────
   const logout = async (): Promise<void> => {
-    console.log('[auth] logout');
+    __DEV__ && console.log('[auth] logout');
     try {
       await clearTokens();
     } catch (err) {
-      console.log('[auth] error clearing tokens during logout:', err);
+      console.warn('[auth] error clearing tokens during logout:', err);
     }
     setAuthState({ user: null, accessToken: null, refreshToken: null });
   };
@@ -250,7 +250,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Note: does NOT call fetchUserProfile – callers can call refreshUser() if needed.
       return true;
     } catch (err) {
-      console.log('[auth] refreshAccessToken failed', err);
+      console.warn('[auth] refreshAccessToken failed', err);
       return false;
     }
   };
