@@ -142,7 +142,7 @@ export default function HomeScreen() {
   }, [isAuthenticated]);
 
   const loadPushSettings = async () => {
-    if (!isAuthenticated || IS_WEB) return;
+    if (!isAuthenticated || (IS_WEB && !isMobileWeb)) return;
     try {
       const token = await AsyncStorage.getItem('access_token');
       if (!token) return;
@@ -156,7 +156,14 @@ export default function HomeScreen() {
     }
   };
 
-  const handleAlertsToggle = async (enabled: boolean) => {
+  const handleAlertsToggle = async (nextEnabled: boolean) => {
+    console.log('[push-toggle] fired', {
+      nextEnabled,
+      current: alertsEnabled,
+      platform: Platform.OS,
+      isMobileWeb,
+    });
+
     if (IS_WEB && !isMobileWeb) {
       Alert.alert('Mobile Only', 'Push notifications are available on the mobile app.');
       setAlertsEnabled(false);
@@ -167,45 +174,50 @@ export default function HomeScreen() {
       Alert.alert('Sign In Required', 'Please sign in to enable push notifications.');
       return;
     }
-    
+
+    const previous = alertsEnabled;
+    setAlertsEnabled(nextEnabled);
     setPushLoading(true);
+
     try {
       let pushToken = null;
-      
-      if (enabled) {
+
+      if (nextEnabled) {
         // Request permission
         const { status: existingStatus } = await Notifications.getPermissionsAsync();
         let finalStatus = existingStatus;
-        
+
         if (existingStatus !== 'granted') {
           const { status } = await Notifications.requestPermissionsAsync();
           finalStatus = status;
         }
-        
+
         if (finalStatus !== 'granted') {
           Alert.alert('Permission Denied', 'Please enable notifications in your device settings.');
+          setAlertsEnabled(previous);
           setPushLoading(false);
           return;
         }
-        
+
         // Get push token
         const tokenData = await Notifications.getExpoPushTokenAsync();
         pushToken = tokenData.data;
       }
-      
+
       // Save to backend
       const token = await AsyncStorage.getItem('access_token');
       await axios.post(`${API_BASE}/api/push/settings`, {
-        push_enabled: enabled,
+        push_enabled: nextEnabled,
         push_token: pushToken,
         platform: Platform.OS
       }, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      
-      setAlertsEnabled(enabled);
+
+      console.log('[push-toggle] saved', { nextEnabled });
     } catch (err) {
       console.log('Failed to update push settings:', err);
+      setAlertsEnabled(previous);
       Alert.alert('Error', 'Failed to update notification settings. Please try again.');
     } finally {
       setPushLoading(false);

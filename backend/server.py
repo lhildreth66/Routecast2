@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Header, Request, status
+from fastapi import FastAPI, APIRouter, HTTPException, Header, Request, status, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from dotenv import load_dotenv
@@ -3368,6 +3368,89 @@ async def send_test_email_endpoint(payload: TestEmailRequest, x_admin_token: Opt
 async def root():
     return {"message": "Routecast API", "version": "2.0", "features": ["departure_time", "multi_stop", "favorites", "packing_suggestions", "weather_timeline"]}
 
+
+@api_router.get("/nws/alerts")
+async def nws_point_alerts(lat: float = Query(...), lon: float = Query(...)):
+    """Debug endpoint to fetch raw NWS alerts for a single point."""
+    started = time.perf_counter()
+    url = f"https://api.weather.gov/alerts/active?point={lat:.4f},{lon:.4f}"
+    headers = {
+        "User-Agent": "RoutecastWeather (support@routecastweather.com)",
+        "Accept": "application/geo+json",
+    }
+    status_code: Optional[int] = None
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(url, headers=headers)
+        status_code = resp.status_code
+        data: Dict[str, Any] = {}
+        features: List[Dict[str, Any]] = []
+
+        if status_code == 200:
+            data = resp.json()
+            features = data.get("features", []) or []
+        else:
+            try:
+                data = resp.json()
+            except Exception:
+                data = {}
+
+        sample_events = [
+            (feature.get("properties", {}) or {}).get("event")
+            for feature in features[:3]
+        ]
+
+        logger.info(
+            "nws_point_debug",
+            extra={
+                "lat": round(lat, 4),
+                "lon": round(lon, 4),
+                "status": status_code,
+                "features": len(features),
+                "first_events": sample_events,
+                "elapsed_ms": round((time.perf_counter() - started) * 1000.0, 2),
+            },
+        )
+
+        alerts = []
+        for feature in features:
+            props = feature.get("properties", {}) or {}
+            alerts.append(
+                {
+                    "id": props.get("id") or feature.get("id"),
+                    "event": props.get("event"),
+                    "headline": props.get("headline") or props.get("event"),
+                    "severity": props.get("severity"),
+                    "certainty": props.get("certainty"),
+                    "urgency": props.get("urgency"),
+                    "area": props.get("areaDesc"),
+                    "onset": props.get("onset"),
+                    "effective": props.get("effective"),
+                    "expires": props.get("expires"),
+                    "ends": props.get("ends"),
+                    "instruction": props.get("instruction"),
+                    "source": props.get("senderName"),
+                }
+            )
+
+        return {
+            "count": len(features),
+            "sample_events": sample_events,
+            "alerts": alerts,
+            "status": status_code,
+        }
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "nws_point_debug_error",
+            extra={
+                "lat": round(lat, 4),
+                "lon": round(lon, 4),
+                "status": status_code,
+                "error": str(exc),
+            },
+        )
+        raise HTTPException(status_code=500, detail="Failed to fetch NWS alerts")
+
 @api_router.get("/health")
 async def health_check():
     sha = BUILD_SHA
@@ -3904,23 +3987,24 @@ async def get_route_weather_alerts(route_id: str):
 
     stats_before = _snapshot_noaa_cache_stats()
 
-    base_points = 12
-    extra_points = min(18, max(0, int(total_distance // 50)))
-    target_points = max(base_points + extra_points, 12)
-    target_points = min(target_points, 30)
+    sample_miles = float(os.environ.get("ROUTE_ALERTS_SAMPLING_MILES", 10.0))
+    max_points = int(os.environ.get("ROUTE_ALERTS_MAX_POINTS", 50))
+    raw_waypoints = hazard_waypoints_data
+    if raw_waypoints:
+        try:
+            hazard_waypoints_data = sample_route_points(raw_waypoints, sample_miles=sample_miles, max_points=max_points)
+            # Ensure start/end anchors remain in the sample set
+            if raw_waypoints[0] not in hazard_waypoints_data:
+                hazard_waypoints_data.insert(0, raw_waypoints[0])
+            if raw_waypoints[-1] not in hazard_waypoints_data:
+                hazard_waypoints_data.append(raw_waypoints[-1])
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "route_alerts_sampling_error",
+                extra={"route_id": route_id, "error": str(exc)},
+            )
+            hazard_waypoints_data = raw_waypoints
 
-    def downsample_waypoints(data: List[Dict[str, Any]], limit: int) -> List[Dict[str, Any]]:
-        if len(data) <= limit:
-            return data
-        if limit <= 2:
-            return [data[0], data[-1]]
-        step = (len(data) - 1) / float(limit - 1)
-        indices = sorted({round(step * i) for i in range(limit)})
-        indices[0] = 0
-        indices[-1] = len(data) - 1
-        return [data[i] for i in indices if 0 <= i < len(data)]
-
-    hazard_waypoints_data = downsample_waypoints(hazard_waypoints_data, target_points)
     hazard_total_waypoints = len(hazard_waypoints_data)
 
     sampled_points = [
@@ -3938,11 +4022,15 @@ async def get_route_weather_alerts(route_id: str):
             "count": hazard_total_waypoints,
             "first3": sampled_points[:3],
             "last3": sampled_points[-3:],
+            "sample_miles": sample_miles,
+            "max_points": max_points,
         },
     )
     if debug_enabled:
         debug_payload["sampled_points_count"] = hazard_total_waypoints
         debug_payload["sampled_points"] = sampled_points
+        debug_payload["sample_miles"] = sample_miles
+        debug_payload["max_points"] = max_points
 
     is_alaska_route = any(
         (wp.get("lat") is not None and wp.get("lon") is not None and wp.get("lat") >= 50 and wp.get("lon") <= -130)
@@ -4009,6 +4097,10 @@ async def get_route_weather_alerts(route_id: str):
         )
         if debug_enabled:
             debug_payload["per_point_features"] = per_point_features
+            debug_payload["per_point_alert_counts"] = [
+                {"idx": item.get("idx"), "count": item.get("features_count", 0)}
+                for item in per_point_features
+            ]
 
         hazard_alerts = generate_hazard_alerts(
             list(hazard_waypoints_weather),
@@ -4131,6 +4223,7 @@ async def get_route_weather_alerts(route_id: str):
                 "returned_ids": [card.alert_id for card in returned_cards if card.alert_id],
                 "returned_events": [card.event or card.message for card in returned_cards],
             }
+            debug_payload["returned_unique_alert_ids"] = [card.alert_id for card in returned_cards if card.alert_id]
 
         await hydrate_alert_roads_from_geometry(hazard_alerts, geometry_index)
         road_conditions = build_condition_segments(hazard_alerts, category="road")

@@ -53,6 +53,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const storedRefresh = await AsyncStorage.getItem('refreshToken');
 
       if (storedAccess && storedRefresh) {
+        console.log('[auth] hydration tokens found');
         setAccessToken(storedAccess);
         setRefreshToken(storedRefresh);
 
@@ -62,6 +63,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch (error) {
       console.log('Error loading stored auth:', error);
     } finally {
+      console.log('[auth] hydration complete');
       setHasHydrated(true);
       setIsLoading(false);
     }
@@ -73,6 +75,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         headers: { Authorization: `Bearer ${token}` }
       });
       setUser(response.data);
+      console.log('[auth] user profile loaded');
     } catch (error: any) {
       // Token might be expired, try refresh
       if (error.response?.status === 401) {
@@ -97,11 +100,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await AsyncStorage.setItem('refreshToken', refresh_token);
       await AsyncStorage.setItem('access_token', access_token);
       await AsyncStorage.setItem('refresh_token', refresh_token);
+      console.log('[auth] token written');
 
       setAccessToken(access_token);
       setRefreshToken(refresh_token);
+      console.log('[auth] auth state set after login');
 
       await fetchUserProfile(access_token);
+      console.log('[auth] login success');
 
       return { success: true };
     } catch (error: any) {
