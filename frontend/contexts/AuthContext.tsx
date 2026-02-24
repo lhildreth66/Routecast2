@@ -20,10 +20,15 @@ import React, {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { buildUrl } from '../app/apiConfig';
-import { Platform } from 'react-native';
+import { Platform, View, ActivityIndicator } from 'react-native';
 
 // ─── module-level mutex ───────────────────────────────────────────────────────
 let LOGIN_IN_FLIGHT = false;
+
+// Guard: timestamp (ms) of last /auth/me 401.  Prevents re-fetch loops when
+// a stale token survives storage but the backend rejects it.
+let LAST_AUTH_ME_401_AT = 0;
+const AUTH_ME_RETRY_COOLDOWN_MS = 30_000; // 30 s cool-down after a 401
 
 // ─── web localStorage helpers (reliable backup for AsyncStorage on web) ───────
 const WEB_AT_KEY = 'rc_access_token';
@@ -186,16 +191,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // ── fetch user profile (called only after login / signup / explicit refresh) ─
+  // Returns true on success, false on any failure.
+  // On 401: clears all tokens + state so the app returns to signed-out UI.
   const fetchUserProfile = async (token: string): Promise<boolean> => {
     try {
       const response = await axios.get(buildUrl('auth/me'), {
         headers: { Authorization: `Bearer ${token}` },
       });
       setUser(response.data);
+      LAST_AUTH_ME_401_AT = 0; // clear guard on success
       __DEV__ && console.log('[auth] /auth/me success');
       return true;
     } catch (err: any) {
-      console.warn('[auth] /auth/me failed', err?.response?.status ?? err?.message);
+      const status = err?.response?.status;
+      console.warn('[auth] /auth/me failed', status ?? err?.message);
+
+      if (status === 401) {
+        // Token is invalid/expired – wipe everything so the app shows signed-out
+        // UI immediately and never loops on this token again.
+        LAST_AUTH_ME_401_AT = Date.now();
+        try { await clearTokens(); } catch { /* best-effort */ }
+        setAuthState({ user: null, accessToken: null, refreshToken: null });
+        __DEV__ && console.log('[auth] /auth/me 401 – tokens cleared, signed out');
+      }
+
       return false;
     }
   };
@@ -291,6 +310,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshUser = async (): Promise<void> => {
     const token = accessToken;
     if (!token) return;
+
+    // Respect cool-down: if the last /auth/me returned 401 within the window,
+    // don't hammer the server and don't loop on mount effects.
+    const msSince401 = Date.now() - LAST_AUTH_ME_401_AT;
+    if (LAST_AUTH_ME_401_AT > 0 && msSince401 < AUTH_ME_RETRY_COOLDOWN_MS) {
+      __DEV__ && console.log(`[auth] refreshUser skipped – 401 cool-down (${Math.round(msSince401 / 1000)}s ago)`);
+      return;
+    }
+
     await fetchUserProfile(token);
   };
 
@@ -333,10 +361,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     refreshAccessToken,
   };
 
-  // Block rendering until hydration is done to prevent hook-order and
-  // state-update-during-render React crashes (#418 / #422).
+  // During initial storage hydration, render a minimal loading indicator
+  // instead of null. Returning null causes a blank white screen on slow
+  // mobile connections while the async storage read is in flight.
   if (!hasHydrated) {
-    return null;
+    return (
+      <View style={{ flex: 1, backgroundColor: '#0a0a0a', justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" color="#22c55e" />
+      </View>
+    );
   }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
