@@ -108,6 +108,20 @@ export default function HomeScreen() {
     }
   }, [rootNavState?.key, accessToken, authLoading, hasHydrated]);
 
+  // After email verification, route verified-but-not-subscribed users to
+  // /subscription so they complete checkout. This catches the case where a
+  // user verified their email, closed the app, and returned later.
+  // Condition: user object loaded (not just token), verified, and not premium.
+  useEffect(() => {
+    if (!rootNavState?.key) return;
+    if (!hasHydrated || authLoading) return;
+    if (!user) return; // token present but user not yet fetched – skip
+    if (user.email_verified && !user.is_premium) {
+      __DEV__ && console.log('[guard] verified + not premium → /subscription');
+      router.replace('/subscription');
+    }
+  }, [rootNavState?.key, hasHydrated, authLoading, user?.email_verified, user?.is_premium]);
+
   const [origin, setOrigin] = useState('');
   const [destination, setDestination] = useState('');
   const [loading, setLoading] = useState(false);

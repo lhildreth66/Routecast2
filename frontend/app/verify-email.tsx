@@ -8,7 +8,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams, useRootNavigationState } from 'expo-router';
 import { useAuth } from '../contexts/AuthContext';
 import axios from 'axios';
 
@@ -16,28 +16,71 @@ const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 export default function VerifyEmailScreen() {
   const { user, accessToken, refreshUser } = useAuth();
+  const { token } = useLocalSearchParams<{ token?: string }>();
+  const rootNavState = useRootNavigationState();
+
+  // Token-based verification states
+  const [verifying, setVerifying] = useState(!!token);
+  const [verifyDone, setVerifyDone] = useState(false);
+
   const [resending, setResending] = useState(false);
   const [resendSuccess, setResendSuccess] = useState(false);
   const [error, setError] = useState('');
   const [countdown, setCountdown] = useState(0);
 
+  // ── AUTO-VERIFY from URL token ────────────────────────────────────────────
+  // The verification email sends users to /verify-email?token=<token>.
+  // On mount, if a token is present, call POST /api/auth/verify-email to
+  // consume the token and mark the account as verified, then route to
+  // /subscription. This is the primary verification path.
   useEffect(() => {
-    // Poll for email verification status
-    const interval = setInterval(() => {
-      if (accessToken) {
-        refreshUser();
+    if (!token) return;
+
+    let cancelled = false;
+    (async () => {
+      setVerifying(true);
+      setError('');
+      try {
+        await axios.post(`${API_BASE}/api/auth/verify-email`, { token });
+        if (cancelled) return;
+        // Refresh user so AuthContext gets email_verified=true
+        if (accessToken) {
+          await refreshUser();
+        }
+        if (!cancelled) setVerifyDone(true);
+      } catch (err: any) {
+        if (cancelled) return;
+        const detail = err?.response?.data?.detail || 'Verification failed. The link may have expired.';
+        setError(detail);
+        setVerifying(false);
       }
-    }, 5000); // Check every 5 seconds
+    })();
 
-    return () => clearInterval(interval);
-  }, [accessToken]);
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]); // run once on mount – token is static
 
+  // ── REDIRECT once verified ───────────────────────────────────────────────
+  // Fires after either (a) token auto-verify succeeded, or (b) the polling
+  // below detects email_verified=true from the server.
+  // Gates on rootNavState.key so router.replace is never called before the
+  // navigator is mounted.
   useEffect(() => {
-    // Redirect when email is verified
-    if (user?.email_verified) {
+    if (!rootNavState?.key) return;
+    if (verifyDone || user?.email_verified) {
       router.replace('/subscription');
     }
-  }, [user?.email_verified]);
+  }, [rootNavState?.key, verifyDone, user?.email_verified]);
+
+  // ── POLLING fallback (same-session tab without the token URL) ────────────
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (accessToken && !user?.email_verified) {
+        refreshUser();
+      }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [accessToken, user?.email_verified]);
 
   useEffect(() => {
     // Countdown timer for resend button
@@ -72,6 +115,23 @@ export default function VerifyEmailScreen() {
   const handleSkip = () => {
     router.replace('/subscription');
   };
+
+  // Full-screen loading state while consuming the token from the URL.
+  // Shows immediately when token is present so the user sees activity.
+  if (verifying) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color="#22c55e" />
+        <Text style={{ color: '#a1a1aa', marginTop: 16, fontSize: 15 }}>Verifying your email…</Text>
+        {error ? (
+          <View style={[styles.errorContainer, { marginTop: 24, marginHorizontal: 32 }]}>
+            <Ionicons name="alert-circle" size={18} color="#ef4444" />
+            <Text style={styles.errorText}>{error}</Text>
+          </View>
+        ) : null}
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
