@@ -27,6 +27,7 @@ import stripe
 from notifications.route_alerts import sample_route_points
 import asyncio
 from bridge_database import get_bridge_warnings, get_bridge_warnings_near_route
+from services.bridge_height_service import get_bridge_clearances_for_route as _get_bridge_clearances
 from providers import get_providers
 from billing import billing_verifier, VerificationRequest, VerificationResponse
 from common.premium_gate import require_premium
@@ -656,6 +657,8 @@ class RouteWeatherResponse(BaseModel):
     optimal_departure: Optional[DepartureWindow] = None
     trucker_warnings: List[str] = []
     vehicle_type: str = "car"
+    # Bridge / low-clearance structured alerts (OSM Overpass)
+    bridge_clearance_alerts: List[Dict[str, Any]] = []
     # Road conditions and navigation
     turn_by_turn: List[TurnByTurnStep] = []
     road_condition_summary: Optional[str] = None
@@ -2736,9 +2739,8 @@ def generate_trucker_warnings(waypoints_weather: List[WaypointWeather], vehicle_
         if wp.waypoint and wp.waypoint.lat is not None and wp.waypoint.lon is not None
     ]
 
-    bridge_warnings = get_bridge_warnings_near_route(route_points, vehicle_height_ft, radius_miles=5.0)
-    if bridge_warnings:
-        warnings.extend(bridge_warnings)
+    # Bridge warnings from static DB are superseded by structured OSM alerts.
+    # Keep only weather-context strings (wind, snow, fog, ice).
 
     for wp in waypoints_weather:
         if not wp.weather:
@@ -3876,9 +3878,28 @@ async def get_route_weather(request: RouteRequest):
     trucker_warnings = []
     if request.trucker_mode or request.vehicle_height_ft:
         trucker_warnings = generate_trucker_warnings(list(waypoints_weather), request.vehicle_height_ft)
-    
+
+    # NEW: Structured bridge / low-clearance alerts via OSM Overpass.
+    # Always computed when polyline is available; not conditional on trucker_mode
+    # because a bridge conflict is safety-critical for any tall vehicle.
+    # Wrapped in try/except so Overpass failures never crash the route endpoint.
+    bridge_clearance_alerts: List[Dict[str, Any]] = []
+    if route_geometry:
+        vehicle_ht = (request.vehicle_height_ft or 13.5)
+        try:
+            bridge_clearance_alerts = await _get_bridge_clearances(route_geometry, vehicle_ht)
+        except Exception as _bridge_err:
+            logger.exception("[bridge_height] lookup failed: %s", _bridge_err)
+
     # NEW: Analyze road conditions
     road_condition_summary, worst_road_condition, reroute_recommended, reroute_reason, coverage_gaps_segments, coverage_gap_miles = analyze_route_conditions(list(waypoints_weather))
+
+    # If a bridge physically blocks the vehicle, upgrade reroute flags regardless
+    # of what analyze_route_conditions returned.
+    bridge_conflicts = [a for a in bridge_clearance_alerts if a.get("margin_ft", 1.0) < 0]
+    if bridge_conflicts:
+        reroute_recommended = True
+        reroute_reason = f"Bridge clearance conflict at {bridge_conflicts[0]['bridge_name']}"
     
     response = RouteWeatherResponse(
         id=route_id,
@@ -3904,6 +3925,7 @@ async def get_route_weather(request: RouteRequest):
         trucker_warnings=trucker_warnings,
         vehicle_type=vehicle_type,
         # Road conditions and navigation
+        bridge_clearance_alerts=bridge_clearance_alerts,
         turn_by_turn=turn_by_turn,
         road_condition_summary=road_condition_summary,
         worst_road_condition=worst_road_condition,

@@ -147,9 +147,12 @@ async def handle_checkout_completed(db, data: dict, now: datetime):
     
     logger.info(f"Checkout completed: customer={customer_id}, email={customer_email}, status={payment_status}, mode={mode}")
     
-    # Only process successful payments
-    if payment_status != "paid":
-        logger.info(f"Checkout not paid yet: {payment_status}")
+    # Accept both real payments ("paid") and $0 trial starts ("no_payment_required").
+    # Stripe sends "no_payment_required" when trial_period_days is set and the
+    # customer is not charged today.  Rejecting it would leave trial users without
+    # premium access until subscription.updated fires (which may be delayed).
+    if payment_status not in ("paid", "no_payment_required"):
+        logger.info(f"Checkout not in accepted state: {payment_status}")
         return
     
     # Find or link user

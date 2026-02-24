@@ -6,10 +6,40 @@ Architected for easy integration of commercial data sources (e.g., LCM API).
 
 import httpx
 import asyncio
+import hashlib
+import time as _time
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
 from math import radians, sin, cos, sqrt, atan2
 import os
+
+# ── simple TTL result cache ────────────────────────────────────────────────────
+# Keyed by MD5(polyline + height-bucket).  Avoids repeat Overpass calls for the
+# same route within a 15-minute window.
+_BRIDGE_CACHE: Dict[str, tuple] = {}   # key → (timestamp, result)
+_BRIDGE_CACHE_TTL = 900                # 15 minutes
+_BRIDGE_CACHE_MAX = 100                # evict oldest when over limit
+
+
+def _cache_key(route_polyline: str, vehicle_height_ft: float) -> str:
+    rounded = round(vehicle_height_ft * 2) / 2   # bucket to nearest 0.5 ft
+    raw = f"{route_polyline}|{rounded}".encode()
+    return hashlib.md5(raw).hexdigest()
+
+
+def _cache_get(key: str) -> Optional[List[Dict]]:
+    entry = _BRIDGE_CACHE.get(key)
+    if entry and (_time.time() - entry[0]) < _BRIDGE_CACHE_TTL:
+        return entry[1]
+    return None
+
+
+def _cache_set(key: str, value: List[Dict]) -> None:
+    if len(_BRIDGE_CACHE) >= _BRIDGE_CACHE_MAX:
+        # Evict oldest entry
+        oldest = next(iter(_BRIDGE_CACHE))
+        del _BRIDGE_CACHE[oldest]
+    _BRIDGE_CACHE[key] = (_time.time(), value)
 
 # Overpass API endpoints (public, no key required)
 OVERPASS_API_URL = "https://overpass-api.de/api/interpreter"
@@ -131,7 +161,7 @@ async def query_overpass_for_clearances(
 
     # Overpass QL query for structures with maxheight
     query = f"""
-    [out:json][timeout:30];
+    [out:json][timeout:5];
     (
       way["maxheight"]({bbox});
       way["maxheight:physical"]({bbox});
@@ -147,7 +177,11 @@ async def query_overpass_for_clearances(
 
     results = []
 
-    async with httpx.AsyncClient(timeout=30.0) as client:
+    # Hard per-request timeout of 5 s per endpoint; total ceiling enforced by
+    # the asyncio.wait_for in get_bridge_clearances_for_route.
+    async with httpx.AsyncClient(
+        timeout=httpx.Timeout(5.0, connect=3.0)
+    ) as client:
         for api_url in [OVERPASS_API_URL, OVERPASS_BACKUP_URL]:
             try:
                 response = await client.post(
@@ -296,20 +330,11 @@ def extract_bridge_data(elements: List[Dict], route_points: List[Tuple[float, fl
     return bridges
 
 
-async def get_bridge_clearances_for_route(
+async def _do_bridge_lookup(
     route_polyline: str,
-    vehicle_height_ft: float = 13.5
+    vehicle_height_ft: float,
 ) -> List[Dict]:
-    """
-    Get bridge clearance alerts for a route.
-
-    Returns list of alerts for bridges where clearance may be an issue.
-
-    Architecture:
-    1. Try LCM API first (commercial, more accurate) - if API key available
-    2. Fall back to OSM/Overpass data
-    3. Return merged results sorted by distance along route
-    """
+    """Inner lookup — called only on cache miss, wrapped in wait_for."""
 
     # Decode route polyline
     try:
@@ -389,7 +414,7 @@ async def get_bridge_clearances_for_route(
                 break
 
         alerts.append({
-            "location": bridge.location_name,
+            "bridge_name": bridge.location_name,   # frontend expects bridge_name
             "latitude": bridge.latitude,
             "longitude": bridge.longitude,
             "clearance_ft": round(bridge.clearance_ft, 1),
@@ -398,8 +423,7 @@ async def get_bridge_clearances_for_route(
             "warning_level": warning_level,
             "distance_miles": round(distance_from_start, 1),
             "highway": bridge.highway_type,
-            "direction": None,  # Could be enhanced with bearing calculation
-            "message": message,
+            "warning": message,        # frontend expects 'warning', not 'message'
             "source": bridge.source,
             "confidence": bridge.confidence
         })
@@ -412,8 +436,8 @@ async def get_bridge_clearances_for_route(
     for alert in alerts:
         is_dup = False
         for existing in deduplicated:
-            # Same name and within 0.1 miles
-            if (existing["location"] == alert["location"] and
+            # Same bridge name and within 0.1 miles
+            if (existing["bridge_name"] == alert["bridge_name"] and
                 abs(existing["distance_miles"] - alert["distance_miles"]) < 0.1):
                 is_dup = True
                 break
@@ -432,6 +456,38 @@ async def get_bridge_clearances_for_route(
         alerts = [a for a in alerts if a["margin_ft"] < 3.0 or a["warning_level"] != "safe"]
 
     return alerts
+
+
+async def get_bridge_clearances_for_route(
+    route_polyline: str,
+    vehicle_height_ft: float = 13.5,
+) -> List[Dict]:
+    """
+    Public entry point.  Returns bridge clearance alerts along a route.
+
+    Production guarantees:
+      - Results are cached per (route_polyline, height-bucket) for 15 minutes.
+      - Hard timeout of 8 s total; returns [] on any failure.
+      - Never raises — safe to call inside a route response handler.
+    """
+    key = _cache_key(route_polyline, vehicle_height_ft)
+    cached = _cache_get(key)
+    if cached is not None:
+        return cached
+
+    try:
+        result = await asyncio.wait_for(
+            _do_bridge_lookup(route_polyline, vehicle_height_ft),
+            timeout=8.0,
+        )
+        _cache_set(key, result)
+        return result
+    except asyncio.TimeoutError:
+        print("[bridge_height] Overpass lookup timed out (8 s) — returning []")
+        return []
+    except Exception as e:
+        print(f"[bridge_height] lookup failed: {e}")
+        return []
 
 
 async def query_lcm_api(
@@ -475,7 +531,7 @@ async def test_bridge_service():
     results = await get_bridge_clearances_for_route(test_polyline, vehicle_height_ft=13.5)
     print(f"Found {len(results)} bridge clearances")
     for r in results:
-        print(f"  {r['location']}: {r['clearance_ft']}' - {r['warning_level']}")
+        print(f"  {r['bridge_name']}: {r['clearance_ft']}' - {r['warning_level']}")
 
     return results
 
