@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
@@ -417,25 +417,6 @@ export default function RouteScreen() {
   
   // Radar map state
   const [showRadarMap, setShowRadarMap] = useState(false);
-  
-  // Expanded alert state - track which cards are expanded
-  const [expandedCards, setExpandedCards] = useState<Set<number>>(new Set());
-  
-  // Toggle card expansion
-  const toggleCardExpand = (index: number) => {
-    const newExpanded = new Set(expandedCards);
-    if (newExpanded.has(index)) {
-      newExpanded.delete(index);
-    } else {
-      newExpanded.add(index);
-    }
-    setExpandedCards(newExpanded);
-  };
-
-  // Collapse all expanded alert cards when leaving the alerts tab
-  useEffect(() => {
-    setExpandedCards(new Set());
-  }, [activeTab]);
 
   const [alertsLoading, setAlertsLoading] = useState(false);
 
@@ -765,8 +746,8 @@ export default function RouteScreen() {
           )}
         </TouchableOpacity>
         <TouchableOpacity 
-          style={[styles.tab, activeTab === 'alerts' && styles.tabActive]}
-          onPress={() => setActiveTab('alerts')}
+          style={styles.tab}
+          onPress={() => router.push({ pathname: '/route-alerts', params: { routeData: params.routeData as string } })}
         >
           <Ionicons name="warning" size={16} color={activeTab === 'alerts' ? '#ef4444' : '#6b7280'} />
           <Text style={[styles.tabText, activeTab === 'alerts' && styles.tabTextActive]}>Alerts</Text>
@@ -1007,206 +988,9 @@ export default function RouteScreen() {
           </View>
         )}
 
-        {/* Alerts Tab – WeatherBug style */}
-        {activeTab === 'alerts' && (
-          <View style={styles.alertsTab}>
-            {/* Header row with optional loading spinner */}
-            <View style={styles.wbTabHeader}>
-              <Text style={styles.sectionTitle}>⚠️ Weather Alerts</Text>
-              {alertsLoading && (
-                <View style={styles.wbLoadingRow}>
-                  <ActivityIndicator size="small" color="#f59e0b" />
-                  <Text style={styles.wbLoadingText}>Fetching NWS alerts…</Text>
-                </View>
-              )}
-            </View>
+        {/* Alerts Tab – navigates to full-screen route-alerts.tsx */}
 
-            {!showAllClear ? (
-              alerts && alerts.length > 0 ? (
-                alerts.map((alert, index) => {
-                  const isExpanded = expandedCards.has(index + 1000);
-                  const ap = alert.properties || ({} as any);
-                  const eventTitle =
-                    alert.event || ap.event || alert.headline || ap.headline || alert.message || 'Weather Alert';
-                  const what = alert.full_description || alert.description || ap.description || '';
-                  const where = alert.areaDesc || ap.areaDesc || alert.location_name || '';
-                  const onset = alert.onset || ap.onset || ap.effective || alert.effective;
-                  const expires = alert.expires || ap.expires;
-                  const ends = ap.ends;
-                  const expiresDisplay = ends || expires;
-                  const instruction = alert.instruction || ap.instruction || '';
-                  const headline = alert.headline || ap.headline || '';
-                  const issuedBy = ap.senderName || ap.source || '';
-                  const alertKey = alert.id || alert.alert_id || index;
-
-                  // ── WeatherBug colour + level ──────────────────────────────
-                  const lev = (alert.alert_level || '').toLowerCase();
-                  const sev = (alert.severity || '').toLowerCase();
-                  const evL = eventTitle.toLowerCase();
-                  let bannerColor = '#374151';
-                  let levelLabel = 'ADVISORY';
-                  if (
-                    lev === 'warning' || sev === 'extreme' || sev === 'severe' ||
-                    evL.includes('warning')
-                  ) { bannerColor = '#B91C1C'; levelLabel = 'WARNING'; }
-                  else if (lev === 'watch' || evL.includes('watch')) {
-                    bannerColor = '#C2410C'; levelLabel = 'WATCH';
-                  } else if (lev === 'advisory' || evL.includes('advisory')) {
-                    bannerColor = '#B45309'; levelLabel = 'ADVISORY';
-                  } else if (lev === 'statement' || evL.includes('statement')) {
-                    bannerColor = '#1D4ED8'; levelLabel = 'STATEMENT';
-                  } else if (sev === 'high') {
-                    bannerColor = '#B91C1C'; levelLabel = 'WARNING';
-                  } else if (sev === 'medium') {
-                    bannerColor = '#C2410C'; levelLabel = 'WATCH';
-                  }
-
-                  // ── Weather icon ──────────────────────────────────────────
-                  const evIcon = (alert.event || alert.type || '').toLowerCase();
-                  let wxIcon: any = 'alert-circle';
-                  if (evIcon.includes('snow') || evIcon.includes('blizzard') || evIcon.includes('winter') ||
-                      evIcon.includes('ice')  || evIcon.includes('freez') || alert.type === 'ice' ||
-                      alert.type === 'snow' || alert.type === 'whiteout') wxIcon = 'snow';
-                  else if (evIcon.includes('tornado')) wxIcon = 'warning';
-                  else if (evIcon.includes('thunder') || evIcon.includes('lightning') ||
-                           evIcon.includes('storm')) wxIcon = 'thunderstorm';
-                  else if (evIcon.includes('flood') || evIcon.includes('rain') ||
-                           alert.type === 'rain') wxIcon = 'rainy';
-                  else if (evIcon.includes('wind') || evIcon.includes('gale') ||
-                           alert.type === 'wind') wxIcon = 'flag';
-                  else if (evIcon.includes('fog') || evIcon.includes('visib')) wxIcon = 'cloudy';
-                  else if (evIcon.includes('heat') || evIcon.includes('fire')) wxIcon = 'flame';
-
-                  const fmtTime = (iso?: string) => {
-                    if (!iso) return null;
-                    try {
-                      return new Date(iso).toLocaleDateString('en-US', {
-                        weekday: 'short', month: 'short', day: 'numeric',
-                        hour: 'numeric', minute: '2-digit',
-                      });
-                    } catch { return iso; }
-                  };
-
-                  return (
-                    <TouchableOpacity
-                      key={alertKey}
-                      style={styles.wbCard}
-                      onPress={() => toggleCardExpand(index + 1000)}
-                      activeOpacity={0.85}
-                    >
-                      {/* ── Colored banner ──────────────────────────────── */}
-                      <View style={[styles.wbBanner, { backgroundColor: bannerColor }]}>
-                        <Ionicons name={wxIcon} size={28} color="#fff" />
-                        <View style={styles.wbBannerTextCol}>
-                          <Text style={styles.wbEventTitle}>{eventTitle.toUpperCase()}</Text>
-                          {issuedBy ? (
-                            <Text style={styles.wbIssuedBy}>{issuedBy}</Text>
-                          ) : null}
-                        </View>
-                        <Ionicons
-                          name={isExpanded ? 'chevron-up' : 'chevron-down'}
-                          size={20}
-                          color="rgba(255,255,255,0.85)"
-                        />
-                      </View>
-
-                      {/* ── Card body ───────────────────────────────────── */}
-                      <View style={styles.wbBody}>
-                        {/* Time row */}
-                        {(onset || expiresDisplay) ? (
-                          <View style={styles.wbTimeRow}>
-                            <Ionicons name="time-outline" size={13} color="#9ca3af" />
-                            <Text style={styles.wbTimeText}>
-                              {onset ? `Effective ${fmtTime(onset)}` : ''}
-                              {onset && expiresDisplay ? '  →  ' : ''}
-                              {expiresDisplay ? `Expires ${fmtTime(expiresDisplay)}` : ''}
-                            </Text>
-                          </View>
-                        ) : null}
-
-                        {/* Area */}
-                        {where ? (
-                          <View style={styles.wbAreaRow}>
-                            <Ionicons name="location-outline" size={13} color="#9ca3af" />
-                            <Text style={styles.wbAreaText} numberOfLines={isExpanded ? undefined : 2}>
-                              {where}
-                            </Text>
-                          </View>
-                        ) : null}
-
-                        {/* Headline (collapsed) */}
-                        {!isExpanded && headline && headline.toLowerCase() !== eventTitle.toLowerCase() ? (
-                          <Text style={styles.wbHeadline} numberOfLines={3}>{headline}</Text>
-                        ) : null}
-
-                        {/* Expanded NWS detail */}
-                        {isExpanded && (
-                          <View style={styles.wbExpandedSection}>
-                            {what ? (
-                              <>
-                                <Text style={styles.wbSectionLabel}>DETAILS</Text>
-                                <Text style={styles.wbSectionText}>{what}</Text>
-                              </>
-                            ) : null}
-                            {instruction ? (
-                              <>
-                                <Text style={[styles.wbSectionLabel, { marginTop: 14, color: '#86efac' }]}>
-                                  PRECAUTIONARY ACTIONS
-                                </Text>
-                                <Text style={styles.wbSectionText}>{instruction}</Text>
-                              </>
-                            ) : null}
-                            {alert.recommendation && alert.recommendation !== instruction ? (
-                              <View style={styles.wbActionRow}>
-                                <Ionicons name="checkmark-circle" size={15} color="#4ade80" />
-                                <Text style={styles.wbActionText}>{alert.recommendation}</Text>
-                              </View>
-                            ) : null}
-                          </View>
-                        )}
-
-                        {/* Footer: distance + ETA + level pill */}
-                        <View style={styles.wbFooter}>
-                          {alert.distance_miles != null ? (
-                            <View style={styles.wbFooterItem}>
-                              <Ionicons name="location" size={12} color="#6b7280" />
-                              <Text style={styles.wbFooterText}>{Math.round(alert.distance_miles)} mi</Text>
-                            </View>
-                          ) : null}
-                          {alert.eta_minutes != null ? (
-                            <View style={styles.wbFooterItem}>
-                              <Ionicons name="time" size={12} color="#6b7280" />
-                              <Text style={styles.wbFooterText}>ETA {alert.eta_minutes} min</Text>
-                            </View>
-                          ) : null}
-                          <View style={[styles.wbLevelPill, { backgroundColor: bannerColor, marginLeft: 'auto' }]}>
-                            <Text style={styles.wbLevelPillText}>{levelLabel}</Text>
-                          </View>
-                        </View>
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })
-              ) : (
-                <View style={styles.hazardSegmentsOnly}>
-                  <Ionicons name="warning" size={48} color="#f59e0b" />
-                  <Text style={styles.hazardSegmentsTitle}>Hazard segments detected</Text>
-                  <Text style={styles.hazardSegmentsText}>
-                    {hazardSegments.length} segment(s) in turn-by-turn have alerts.
-                  </Text>
-                </View>
-              )
-            ) : (
-              <View style={styles.noAlerts}>
-                <Ionicons name="checkmark-circle" size={64} color="#22c55e" />
-                <Text style={styles.noAlertsTitle}>All Clear!</Text>
-                <Text style={styles.noAlertsText}>No significant hazards on your route</Text>
-              </View>
-            )}
-          </View>
-        )}
-        
-        <View style={styles.bottomPadding} />
+                <View style={styles.bottomPadding} />
       </ScrollView>
 
       {/* Bottom Action Bar */}
