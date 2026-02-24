@@ -39,14 +39,6 @@ export default function TractorTrailerScreen() {
       route: '/truck-parking',
     },
     {
-      id: 'low-clearance',
-      title: 'Low Clearance Alerts',
-      icon: 'warning' as const,
-      description: 'Bridges and overpasses with height restrictions',
-      color: '#ef4444',
-      route: '/low-clearance',
-    },
-    {
       id: 'truck-services',
       title: 'Truck Services',
       icon: 'construct' as const,
