@@ -40,7 +40,7 @@ const NoAutofillInput = forwardRef<any, TextInputProps>((props, ref) => {
 });
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useRootNavigationState } from 'expo-router';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -93,17 +93,20 @@ export default function HomeScreen() {
   const { user, isAuthenticated, accessToken, isPremium, isLoading: authLoading, hasHydrated } = useAuth();
   const isMobileWeb = IS_WEB && SCREEN_WIDTH < 768;
 
-  // Redirect non-authenticated web users to login once hydration is done.
-  // NOTE: this hook must stay ABOVE all other hooks to preserve hook ordering.
-  // AuthProvider already blocks children until hasHydrated=true, so this
-  // effect only runs in environments where the guard below actually renders.
+  // Gate navigation on the root navigator being mounted.
+  // Now that AuthProvider always renders children unconditionally, Stack mounts
+  // immediately. We guard with useRootNavigationState so router.replace is
+  // never called before the navigator is ready.
+  const rootNavState = useRootNavigationState();
+
   useEffect(() => {
-    __DEV__ && console.log('[guard] check – hydrated:', hasHydrated, 'authLoading:', authLoading, 'accessToken:', !!accessToken, 'platform:', Platform.OS);
+    __DEV__ && console.log('[guard] check – navReady:', !!rootNavState?.key, 'hydrated:', hasHydrated, 'authLoading:', authLoading, 'accessToken:', !!accessToken, 'platform:', Platform.OS);
+    if (!rootNavState?.key) return; // navigator not yet mounted – skip
     if (Platform.OS === 'web' && hasHydrated && !authLoading && !accessToken) {
       __DEV__ && console.log('[guard] redirecting to /login');
       router.replace('/login');
     }
-  }, [accessToken, authLoading, hasHydrated]);
+  }, [rootNavState?.key, accessToken, authLoading, hasHydrated]);
 
   const [origin, setOrigin] = useState('');
   const [destination, setDestination] = useState('');

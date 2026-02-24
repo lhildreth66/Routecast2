@@ -20,7 +20,7 @@ import React, {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { buildUrl } from '../app/apiConfig';
-import { Platform, View, ActivityIndicator } from 'react-native';
+import { Platform } from 'react-native';
 
 // ─── module-level mutex ───────────────────────────────────────────────────────
 let LOGIN_IN_FLIGHT = false;
@@ -361,17 +361,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     refreshAccessToken,
   };
 
-  // During initial storage hydration, render a minimal loading indicator
-  // instead of null. Returning null causes a blank white screen on slow
-  // mobile connections while the async storage read is in flight.
-  if (!hasHydrated) {
-    return (
-      <View style={{ flex: 1, backgroundColor: '#0a0a0a', justifyContent: 'center', alignItems: 'center' }}>
-        <ActivityIndicator size="large" color="#22c55e" />
-      </View>
-    );
-  }
-
+  // IMPORTANT: Always render {children} (which includes <Stack/>) unconditionally.
+  // Blocking children during hydration prevents Expo Router's navigator from
+  // mounting and causes:
+  //   "Attempted to navigate before mounting the Root Layout component"
+  // Any spinner or loading state must be rendered INSIDE the navigator
+  // (e.g. an overlay on a screen), never by replacing the layout return.
+  // Screens guard their own actions using `hasHydrated` from context.
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
