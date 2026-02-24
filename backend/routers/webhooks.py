@@ -159,6 +159,11 @@ async def handle_checkout_completed(db, data: dict, now: datetime):
         f"status={payment_status}, mode={mode}, subscription={subscription_id}"
     )
 
+    # Only process subscription checkouts — ignore one-time payment sessions.
+    if mode != "subscription":
+        logger.info(f"[STRIPE] Checkout skipped — mode={mode} is not 'subscription'")
+        return
+
     # Determine subscription status from Stripe directly.
     # This is more reliable than payment_status which differs for $0 trials.
     stripe_sub_status = None
