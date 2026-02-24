@@ -1,4 +1,4 @@
-import React, { useState, useEffect, forwardRef, useCallback } from 'react';
+import React, { useState, useEffect, forwardRef, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -90,7 +90,7 @@ interface AutocompleteSuggestion {
 }
 
 export default function HomeScreen() {
-  const { user, isAuthenticated, accessToken, isPremium, isLoading: authLoading, hasHydrated } = useAuth();
+  const { user, isAuthenticated, accessToken, isPremium, isLoading: authLoading, hasHydrated, refreshUser } = useAuth();
   const isMobileWeb = IS_WEB && SCREEN_WIDTH < 768;
 
   // Gate navigation on the root navigator being mounted.
@@ -98,6 +98,16 @@ export default function HomeScreen() {
   // immediately. We guard with useRootNavigationState so router.replace is
   // never called before the navigator is ready.
   const rootNavState = useRootNavigationState();
+
+  // Cold-start: tokens restored from storage but user object not yet fetched.
+  // index.tsx is the first screen most authenticated users land on, so fetch
+  // the user profile here. The 30s cooldown inside refreshUser() prevents loops.
+  useEffect(() => {
+    if (accessToken && !user && !authLoading) {
+      refreshUser();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accessToken, authLoading]); // intentionally omit user to avoid re-run after user loads
 
   useEffect(() => {
     __DEV__ && console.log('[guard] check – navReady:', !!rootNavState?.key, 'hydrated:', hasHydrated, 'authLoading:', authLoading, 'accessToken:', !!accessToken, 'platform:', Platform.OS);
@@ -108,17 +118,27 @@ export default function HomeScreen() {
     }
   }, [rootNavState?.key, accessToken, authLoading, hasHydrated]);
 
-  // After email verification, route verified-but-not-subscribed users to
-  // /subscription so they complete checkout. This catches the case where a
-  // user verified their email, closed the app, and returned later.
-  // Condition: user object loaded (not just token), verified, and not premium.
+  // Verified-but-not-subscribed gate: on first render after user loads, route
+  // unsubscribed verified users to /subscription.
+  //
+  // ONE-SHOT per session via ref: without this, pressing Back from /subscription
+  // returns to /, Guard fires again, and the user is stuck in a loop.
+  // The ref is set to true after the first redirect (or skip) so subsequent
+  // navigations back to / are never intercepted.
+  const subscriptionGateFired = useRef(false);
   useEffect(() => {
     if (!rootNavState?.key) return;
     if (!hasHydrated || authLoading) return;
-    if (!user) return; // token present but user not yet fetched – skip
+    if (!user) return; // user not loaded yet – wait
+    if (subscriptionGateFired.current) return; // already fired this session
     if (user.email_verified && !user.is_premium) {
-      __DEV__ && console.log('[guard] verified + not premium → /subscription');
+      subscriptionGateFired.current = true;
+      __DEV__ && console.log('[guard] verified + not premium → /subscription (one-shot)');
       router.replace('/subscription');
+    } else {
+      // User is either not verified or is already premium: mark as fired so we
+      // never accidentally re-check when is_premium flips true (e.g. after trial).
+      subscriptionGateFired.current = true;
     }
   }, [rootNavState?.key, hasHydrated, authLoading, user?.email_verified, user?.is_premium]);
 
