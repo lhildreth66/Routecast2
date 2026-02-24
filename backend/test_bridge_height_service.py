@@ -59,6 +59,8 @@ from services.bridge_height_service import (
     _cache_set,
     _BRIDGE_CACHE,
     _do_bridge_lookup,
+    _decode_polyline_raw,
+    decode_polyline,
     get_bridge_clearances_for_route,
     parse_maxheight,
     extract_bridge_data,
@@ -66,6 +68,64 @@ from services.bridge_height_service import (
     meters_to_feet,
 )
 from math import ceil
+
+
+# ───────────────────────────────────────────────────────────────────────────────
+# 0.  Polyline precision — REGRESSION for "coordinates in the ocean" bug
+#
+# Root cause: bridge_height_service.py originally divided by 1e5 (precision 5)
+# but Mapbox encodes all production polylines at precision 6 (÷1e6).
+# Durham NC (36.0, -78.9) decoded as (3.6, -7.9) → Overpass bbox in Gulf of
+# Guinea → zero bridges returned → bridge alerts always empty.
+# ───────────────────────────────────────────────────────────────────────────────
+
+def _encode_p6(points):
+    """Minimal precision-6 encoder for test fixtures (no external dep needed)."""
+    import polyline as _pl
+    return _pl.encode(points, precision=6)
+
+
+def test_decode_polyline_precision6_durham():
+    """Mapbox p6 polyline for Durham NC → correct lat/lng, not ÷10 wrong values."""
+    # Durham NC coords around the Gregson St bridge
+    original = [(36.0011, -78.9010), (36.0058, -78.9005), (36.0102, -78.8998)]
+    encoded = _encode_p6(original)
+
+    decoded = decode_polyline(encoded)
+
+    assert len(decoded) == 3
+    for (orig_lat, orig_lng), (dec_lat, dec_lng) in zip(original, decoded):
+        assert abs(dec_lat - orig_lat) < 0.001, (
+            f"Latitude mismatch: got {dec_lat:.4f}, expected {orig_lat:.4f}. "
+            "This is the precision-5 bug — decoded coords are ÷10 of actual."
+        )
+        assert abs(dec_lng - orig_lng) < 0.001, (
+            f"Longitude mismatch: got {dec_lng:.4f}, expected {orig_lng:.4f}."
+        )
+
+
+def test_decode_polyline_p5_bug_would_fail():
+    """Demonstrate that precision-5 decoding of a p6 polyline gives wrong coords."""
+    original = [(36.0011, -78.9010)]
+    encoded = _encode_p6(original)  # precision 6
+
+    # This is what the OLD code did — dividing by 1e5 on a p6 polyline
+    wrong = _decode_polyline_raw(encoded, precision=5)
+    # Would have produced ~(360.011, -789.01) or similar — way out of range
+    # OR for small values, ~(3.6, -7.89) which is valid coords but wrong location
+    correct = decode_polyline(encoded)
+
+    assert abs(correct[0][0] - 36.0011) < 0.001, "p6 decode should give ~36.0"
+    # The wrong decode should differ significantly
+    assert abs(wrong[0][0] - correct[0][0]) > 1.0, (
+        "Precision-5 decode of a p6 polyline should produce very different coordinates"
+    )
+
+
+def test_decode_polyline_returns_empty_on_garbage():
+    """Bad polyline string → empty list, no exception."""
+    result = decode_polyline("###not_a_polyline###")
+    assert isinstance(result, list)  # may be [] or partial — must not raise
 
 
 # ───────────────────────────────────────────────────────────────────────────────

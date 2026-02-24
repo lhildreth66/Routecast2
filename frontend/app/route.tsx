@@ -386,6 +386,7 @@ const generateRadarMapHtml = (centerLat: number, centerLon: number): string => {
 
 export default function RouteScreen() {
   const params = useLocalSearchParams();
+  const [isMounted, setIsMounted] = useState(false);
   const [routeData, setRouteData] = useState<RouteData | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'conditions' | 'directions' | 'alerts' | 'bridges'>('conditions');
@@ -418,7 +419,13 @@ export default function RouteScreen() {
   // Radar map state
   const [showRadarMap, setShowRadarMap] = useState(false);
 
+  // Mark as mounted on client — prevents React hydration mismatch (#418/#422)
+  // caused by useLocalSearchParams returning {} during SSR but the full JSON
+  // on the client. Until mounted, we render nothing (same as SSR initial render).
+  useEffect(() => { setIsMounted(true); }, []);
+
   useEffect(() => {
+    if (!isMounted) return;
     if (params.routeData) {
       try {
         const data = JSON.parse(params.routeData as string);
@@ -428,7 +435,7 @@ export default function RouteScreen() {
       }
     }
     setLoading(false);
-  }, [params.routeData]);
+  }, [isMounted, params.routeData]);
 
   // Heartbeat: keep last_seen_at fresh while the route page is open
   useEffect(() => {
@@ -560,7 +567,7 @@ export default function RouteScreen() {
     }
   };
 
-  if (loading) {
+  if (!isMounted || loading) {
     return (
       <SafeAreaView style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#eab308" />

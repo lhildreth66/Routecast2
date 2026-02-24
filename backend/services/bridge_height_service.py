@@ -91,8 +91,9 @@ def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
     return R * c
 
 
-def decode_polyline(encoded: str) -> List[Tuple[float, float]]:
-    """Decode Google polyline format to list of (lat, lng) tuples."""
+def _decode_polyline_raw(encoded: str, precision: int) -> List[Tuple[float, float]]:
+    """Inner decoder for a single precision value."""
+    divisor = float(10 ** precision)
     points = []
     index = 0
     lat = 0
@@ -125,9 +126,21 @@ def decode_polyline(encoded: str) -> List[Tuple[float, float]]:
         dlng = ~(result >> 1) if result & 1 else result >> 1
         lng += dlng
 
-        points.append((lat / 1e5, lng / 1e5))
+        points.append((lat / divisor, lng / divisor))
 
     return points
+
+
+def decode_polyline(encoded: str) -> List[Tuple[float, float]]:
+    """Decode a Mapbox polyline to (lat, lng) tuples.
+
+    Mapbox Directions API always encodes at precision 6 (÷1e6).
+    The older Google Maps convention (precision 5, ÷1e5) is NOT used here
+    because all production route_geometry values come from Mapbox.
+    Using the wrong precision silently places coordinates ~10× too close
+    to the origin, sending Overpass queries to the wrong continent.
+    """
+    return _decode_polyline_raw(encoded, precision=6)
 
 
 def sample_route_points(points: List[Tuple[float, float]], max_points: int = 50) -> List[Tuple[float, float]]:
