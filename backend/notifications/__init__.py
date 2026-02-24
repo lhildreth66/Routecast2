@@ -263,6 +263,26 @@ async def start_route_monitor(request: StartRouteMonitorRequest):
         raise HTTPException(status_code=500, detail="Failed to start monitor")
 
 
+class RouteMonitorHeartbeatRequest(BaseModel):
+    push_token: str
+    monitor_id: Optional[str] = None
+
+
+@router.post("/route-monitor/heartbeat")
+async def route_monitor_heartbeat(request: RouteMonitorHeartbeatRequest):
+    """Update last_seen_at for the active monitor, gating push delivery."""
+    service = get_route_alert_service()
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc)
+    query: dict = {"active": True, "push_token": request.push_token}
+    if request.monitor_id:
+        query["monitor_id"] = request.monitor_id
+    result = service.db.route_monitors.update_many(query, {"$set": {"last_seen_at": now}})
+    updated = getattr(result, "modified_count", 0)
+    return {"ok": True, "updated": updated}
+
+
 @router.post("/route-monitor/stop")
 async def stop_route_monitor(request: StopRouteMonitorRequest):
     """Stop active monitors scoped by monitorId, userId, or pushToken."""

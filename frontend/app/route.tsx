@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import {
   TextInput,
   Dimensions,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as Speech from 'expo-speech';
@@ -431,6 +432,11 @@ export default function RouteScreen() {
     setExpandedCards(newExpanded);
   };
 
+  // Collapse all expanded alert cards when leaving the alerts tab
+  useEffect(() => {
+    setExpandedCards(new Set());
+  }, [activeTab]);
+
   const [alertsLoading, setAlertsLoading] = useState(false);
 
   useEffect(() => {
@@ -444,6 +450,25 @@ export default function RouteScreen() {
     }
     setLoading(false);
   }, [params.routeData]);
+
+  // Heartbeat: keep last_seen_at fresh while the route page is open
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval>;
+    const sendHeartbeat = async () => {
+      try {
+        const pushToken = await AsyncStorage.getItem('expoPushToken');
+        if (!pushToken) return;
+        await axios.post(`${API_BASE}/api/notifications/route-monitor/heartbeat`, {
+          push_token: pushToken,
+        });
+      } catch {
+        // silently ignore — offline or no monitor registered yet
+      }
+    };
+    sendHeartbeat();
+    interval = setInterval(sendHeartbeat, 2 * 60 * 1000); // every 2 min
+    return () => clearInterval(interval);
+  }, []);
 
   // Follow-up: fetch NWS hazard alerts from the deferred endpoint
   useEffect(() => {
@@ -682,13 +707,6 @@ export default function RouteScreen() {
         </TouchableOpacity>
       )}
 
-      {/* Road Condition Summary */}
-      <View style={styles.conditionSummary}>
-        <Text style={styles.conditionSummaryText}>
-          {routeData.road_condition_summary || '✅ Good road conditions expected'}
-        </Text>
-      </View>
-
       {/* Features Row */}
       <View style={styles.proFeaturesRow}>
         {/* Boondockers */}
@@ -773,6 +791,13 @@ export default function RouteScreen() {
         {/* Road Conditions Tab */}
         {activeTab === 'conditions' && (
           <View style={styles.conditionsTab}>
+            {/* Road Condition Summary */}
+            <View style={styles.conditionSummary}>
+              <Text style={styles.conditionSummaryText}>
+                {routeData.road_condition_summary || '✅ Good road conditions expected'}
+              </Text>
+            </View>
+
             {/* Trucker Warnings */}
             {routeData.trucker_warnings && routeData.trucker_warnings.length > 0 && (
               <View style={styles.truckerBox}>

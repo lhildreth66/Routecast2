@@ -541,6 +541,7 @@ class RouteAlertService:
             "active": True,
             "created_at": now,
             "expires_at": expires_at,
+            "last_seen_at": now,
         }
         self.db.route_monitors.insert_one(doc)
         self._persist_current_route(user_id=user_id, push_token=push_token, route_id=route_id, now=now)
@@ -563,12 +564,26 @@ class RouteAlertService:
         result = self.db.route_monitors.update_many(query, {"$set": {"active": False, "stopped_at": self.now()}})
         return getattr(result, "modified_count", 0)
 
+    HEARTBEAT_STALE_MINUTES: int = 3
+
     def get_active_monitors(self, limit: int = 200) -> List[Dict[str, Any]]:
         query: Dict[str, Any] = {"active": True}
         now = self.now()
         query["$or"] = [
             {"expires_at": {"$gt": now}},
             {"expires_at": {"$exists": False}},
+        ]
+        # Only return monitors whose app was open within the heartbeat window.
+        # Monitors that pre-date this field (no last_seen_at) are included for
+        # backwards-compatibility during the first deploy.
+        stale_cutoff = now - timedelta(minutes=self.HEARTBEAT_STALE_MINUTES)
+        query["$and"] = [
+            {
+                "$or": [
+                    {"last_seen_at": {"$gt": stale_cutoff}},
+                    {"last_seen_at": {"$exists": False}},
+                ]
+            }
         ]
         return list(self.db.route_monitors.find(query).limit(limit))
 
@@ -805,10 +820,24 @@ class CriticalRouteAlertWorker:
                 "[route-alerts] failed counting sent_alerts",
                 extra={"run_id": run_id, "error": str(exc)},
             )
-        monitors = self.service.get_active_monitors()
+        # Fetch all active monitors (already filtered by last_seen_at heartbeat)
+        all_active_monitors = self.service.get_active_monitors(limit=200)
+        # Count how many were skipped due to stale last_seen_at by comparing raw active count
+        try:
+            raw_active_count = self.service.db.route_monitors.count_documents(
+                {"active": True}
+            )
+        except Exception:  # noqa: BLE001
+            raw_active_count = len(all_active_monitors)
+        skipped_stale = max(0, raw_active_count - len(all_active_monitors))
+        monitors = all_active_monitors
         logger.info(
-            "[route-alerts] fetched active monitors count=%d filter=active=True",
-            len(monitors),
+            "[route-alerts] cycle_start",
+            extra={
+                "run_id": run_id,
+                "active_monitors_count": len(monitors),
+                "skipped_due_to_stale_last_seen": skipped_stale,
+            },
         )
         monitors_considered_ids = [m.get("monitor_id") for m in monitors if m.get("monitor_id")]
         monitors_after_route_filter: List[str] = []
@@ -864,6 +893,17 @@ class CriticalRouteAlertWorker:
             for key in summary:
                 if key in result:
                     summary[key] += result[key]
+            logger.info(
+                "[route-alerts] monitor_result",
+                extra={
+                    "run_id": run_id,
+                    "route_id": item.get("route_id"),
+                    "monitor_id": item.get("monitor_id"),
+                    "alerts_found": result.get("alerts_found", 0),
+                    "new_alerts": result.get("sent", 0),
+                    "pushes_sent": result.get("sent", 0),
+                },
+            )
 
         summary["monitors_without_geometry"] = summary["monitors"] - summary["monitors_with_geometry"]
 
