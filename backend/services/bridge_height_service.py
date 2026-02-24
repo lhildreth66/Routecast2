@@ -10,7 +10,7 @@ import hashlib
 import time as _time
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
-from math import radians, sin, cos, sqrt, atan2
+from math import radians, sin, cos, sqrt, atan2, ceil
 import os
 
 # ── simple TTL result cache ────────────────────────────────────────────────────
@@ -22,7 +22,9 @@ _BRIDGE_CACHE_MAX = 100                # evict oldest when over limit
 
 
 def _cache_key(route_polyline: str, vehicle_height_ft: float) -> str:
-    rounded = round(vehicle_height_ft * 2) / 2   # bucket to nearest 0.5 ft
+    # Ceiling to next 0.5 ft bucket — conservative for safety.
+    # 13.1 ft → 13.5 ft bucket; never rounds DOWN to produce fewer warnings.
+    rounded = ceil(vehicle_height_ft * 2) / 2
     raw = f"{route_polyline}|{rounded}".encode()
     return hashlib.md5(raw).hexdigest()
 
