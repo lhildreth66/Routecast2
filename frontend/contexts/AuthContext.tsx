@@ -20,9 +20,40 @@ import React, {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import { buildUrl } from '../app/apiConfig';
+import { Platform } from 'react-native';
 
 // ─── module-level mutex ───────────────────────────────────────────────────────
 let LOGIN_IN_FLIGHT = false;
+
+// ─── web localStorage helpers (reliable backup for AsyncStorage on web) ───────
+const WEB_AT_KEY = 'rc_access_token';
+const WEB_RT_KEY = 'rc_refresh_token';
+
+function webSetTokens(at: string, rt: string) {
+  if (Platform.OS !== 'web') return;
+  try {
+    window.localStorage.setItem(WEB_AT_KEY, at);
+    window.localStorage.setItem(WEB_RT_KEY, rt);
+  } catch { /* quota / private-mode – non-fatal */ }
+}
+
+function webClearTokens() {
+  if (Platform.OS !== 'web') return;
+  try {
+    window.localStorage.removeItem(WEB_AT_KEY);
+    window.localStorage.removeItem(WEB_RT_KEY);
+  } catch { /* non-fatal */ }
+}
+
+function webGetTokens(): [string | null, string | null] {
+  if (Platform.OS !== 'web') return [null, null];
+  try {
+    return [
+      window.localStorage.getItem(WEB_AT_KEY),
+      window.localStorage.getItem(WEB_RT_KEY),
+    ];
+  } catch { return [null, null]; }
+}
 
 // ─── types ────────────────────────────────────────────────────────────────────
 interface User {
@@ -65,6 +96,8 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 const TOKEN_KEYS = ['accessToken', 'refreshToken', 'access_token', 'refresh_token'] as const;
 
 async function persistTokens(access_token: string, refresh_token: string): Promise<void> {
+  // Write to localStorage first (reliable on web) then AsyncStorage.
+  webSetTokens(access_token, refresh_token);
   await AsyncStorage.multiSet([
     ['accessToken', access_token],
     ['refreshToken', refresh_token],
@@ -74,6 +107,7 @@ async function persistTokens(access_token: string, refresh_token: string): Promi
 }
 
 async function clearTokens(): Promise<void> {
+  webClearTokens();
   await AsyncStorage.multiRemove([...TOKEN_KEYS]);
 }
 
@@ -98,7 +132,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     (async () => {
       try {
-        const [[, at], [, rt]] = await AsyncStorage.multiGet(['accessToken', 'refreshToken']);
+        // On web, prefer direct localStorage (more reliable than AsyncStorage
+        // shim on web build). Fall back to AsyncStorage keys as secondary.
+        let at: string | null = null;
+        let rt: string | null = null;
+
+        if (Platform.OS === 'web') {
+          [at, rt] = webGetTokens();
+          if (!at || !rt) {
+            // Migrate from old AsyncStorage keys if present
+            const [[, asyncAt], [, asyncRt]] = await AsyncStorage.multiGet(['accessToken', 'refreshToken']);
+            at = asyncAt;
+            rt = asyncRt;
+            if (at && rt) {
+              webSetTokens(at, rt); // promote to reliable web storage
+            }
+          }
+        } else {
+          const [[, asyncAt], [, asyncRt]] = await AsyncStorage.multiGet(['accessToken', 'refreshToken']);
+          at = asyncAt;
+          rt = asyncRt;
+        }
+
         if (cancelled) return;
 
         if (at && rt) {

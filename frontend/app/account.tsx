@@ -28,6 +28,15 @@ export default function AccountScreen() {
   // AuthContext hydration is passive: it restores tokens without calling
   // /auth/me. Screens that need the user object must call refreshUser().
   useEffect(() => {
+    if (__DEV__) {
+      console.log('[account] mount diagnostic', {
+        origin: typeof window !== 'undefined' ? window.location.origin : 'native',
+        hasAccessToken: !!accessToken,
+        storageKey: 'rc_access_token (web) / accessToken (AsyncStorage)',
+        isAuthenticated,
+        userIsNull: user === null,
+      });
+    }
     if (accessToken && !user) {
       refreshUser();
     }

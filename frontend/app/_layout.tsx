@@ -37,7 +37,10 @@ export default function RootLayout() {
         screenOptions={{
           headerShown: false,
           contentStyle: { backgroundColor: '#0a0a0a' },
-          animation: 'slide_from_right',
+          // 'slide_from_right' is not supported on web and causes Expo Router
+          // to generate undefined navigation keys (?__EXPO_ROUTER_key=undefined),
+          // which triggers a full page reload instead of SPA navigation.
+          animation: Platform.OS === 'web' ? 'none' : 'slide_from_right',
         }}
       >
         <Stack.Screen name="landing" />
