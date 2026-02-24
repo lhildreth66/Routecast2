@@ -106,6 +106,8 @@ _geocode_cache: Dict[str, Dict[str, Any]] = {}
 _route_cache: Dict[str, Dict[str, Any]] = {}
 _route_context_cache: Dict[str, Dict[str, Any]] = {}
 _overpass_response_cache: Dict[str, Dict[str, Any]] = {}
+_casino_places_cache: Dict[str, Dict[str, Any]] = {}  # 30-min TTL for casino Places results
+CASINO_PLACES_CACHE_TTL = 1800  # 30 minutes
 _noaa_weather_cache: Dict[str, Dict[str, Any]] = {}
 _noaa_alerts_cache: Dict[str, Dict[str, Any]] = {}
 _contact_rate_limits: Dict[str, List[float]] = {}
@@ -998,6 +1000,10 @@ class OvernightStop(BaseModel):
     website: Optional[str] = None
     hours: Optional[str] = None
     notes: Optional[str] = None
+    rating: Optional[float] = None
+    user_ratings_total: Optional[int] = None
+    open_now: Optional[bool] = None
+    place_id: Optional[str] = None
 
 class OvernightSearchRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
@@ -6850,8 +6856,156 @@ async def _search_boondockers_google_places(
     return spots, debug
 
 
+async def _search_casino_google_places(request: OvernightSearchRequest) -> List[OvernightStop]:
+    """Search casinos via Google Places Nearby Search (Places API v1).
+
+    Returns real casino names, addresses, ratings and open_now status.
+    Falls back to empty list on quota / billing errors so Overpass can take over.
+    """
+    radius_meters = min(80000.0, float(request.radius_miles * 1609.34))
+    url = "https://places.googleapis.com/v1/places:searchNearby"
+    body = {
+        "locationRestriction": {
+            "circle": {
+                "center": {"latitude": request.latitude, "longitude": request.longitude},
+                "radius": float(radius_meters),
+            }
+        },
+        "includedTypes": ["casino"],
+        "maxResultCount": 20,
+        "rankPreference": "DISTANCE",
+        "languageCode": "en",
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": GOOGLE_PLACES_API_KEY,
+        "X-Goog-FieldMask": (
+            "places.id,places.displayName,places.formattedAddress,places.location,"
+            "places.nationalPhoneNumber,places.websiteUri,places.regularOpeningHours,"
+            "places.currentOpeningHours,places.rating,places.userRatingCount"
+        ),
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=12.0) as client:
+            resp = await client.post(url, headers=headers, json=body)
+    except Exception as exc:
+        logger.warning("Casino Google Places request failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Casino search temporarily unavailable")
+
+    # Quota / billing errors – log with detail so ops can react; return 503
+    if resp.status_code in (403, 429):
+        body_text = resp.text[:300]
+        logger.error(
+            "Casino Google Places quota/billing error status=%s body=%s",
+            resp.status_code,
+            body_text,
+        )
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Casino search quota exceeded – please try again later."
+                if resp.status_code == 429
+                else "Casino search is not available (API billing error). Contact support."
+            ),
+        )
+    if resp.status_code >= 400:
+        logger.warning("Casino Google Places HTTP error %s: %s", resp.status_code, resp.text[:200])
+        raise HTTPException(status_code=503, detail="Casino search service error")
+
+    try:
+        payload = resp.json()
+    except Exception:
+        logger.warning("Casino Google Places bad JSON: %s", resp.text[:200])
+        raise HTTPException(status_code=503, detail="Casino search service error")
+
+    places = payload.get("places") or []
+    stops: List[OvernightStop] = []
+
+    for place in places:
+        loc = place.get("location") or {}
+        lat = loc.get("latitude")
+        lon = loc.get("longitude")
+        if lat is None or lon is None:
+            continue
+
+        distance_miles = _haversine_meters(request.latitude, request.longitude, lat, lon) * 0.000621371
+        display_name = (place.get("displayName") or {}).get("text") or "Casino"
+        address = place.get("formattedAddress")
+        phone = place.get("nationalPhoneNumber")
+        website = place.get("websiteUri")
+        place_id = place.get("id")
+
+        # Prefer currentOpeningHours (live) over regularOpeningHours
+        cur_hours = place.get("currentOpeningHours") or {}
+        reg_hours = place.get("regularOpeningHours") or {}
+        open_now: Optional[bool] = cur_hours.get("openNow") if "openNow" in cur_hours else reg_hours.get("openNow")
+        hours_desc = cur_hours.get("weekdayDescriptions") or reg_hours.get("weekdayDescriptions")
+        hours = "; ".join(hours_desc) if hours_desc else None
+
+        rating: Optional[float] = place.get("rating")
+        user_ratings_total: Optional[int] = place.get("userRatingCount")
+
+        stops.append(
+            OvernightStop(
+                name=display_name,
+                category="Casino",
+                label=display_name,
+                distance_miles=round(distance_miles, 1),
+                latitude=lat,
+                longitude=lon,
+                address=address,
+                phone=phone,
+                website=website,
+                hours=hours,
+                osm_id=f"google:{place_id}" if place_id else None,
+                place_id=place_id,
+                rating=rating,
+                user_ratings_total=user_ratings_total,
+                open_now=open_now,
+                notes="Free overnight RV parking welcome at many casino locations. Call ahead to confirm.",
+            )
+        )
+
+    stops.sort(key=lambda x: x.distance_miles)
+    logger.info(
+        "Casino Google Places ok lat=%.3f lon=%.3f radius_mi=%s results=%d",
+        request.latitude,
+        request.longitude,
+        request.radius_miles,
+        len(stops),
+    )
+    return stops
+
+
 @api_router.post("/casinos/search", response_model=OvernightSearchResponse)
 async def search_casinos(request: OvernightSearchRequest):
+    # ── 1. Try Google Places (real names, rating, open_now) ──────────────────
+    if GOOGLE_PLACES_API_KEY:
+        cache_key = f"casino:{round(request.latitude, 2)}:{round(request.longitude, 2)}:{round(request.radius_miles / 5) * 5}"
+        cached = _cache_get(_casino_places_cache, cache_key)
+        if cached is not None:
+            logger.info("Casino Places cache hit key=%s", cache_key)
+            return OvernightSearchResponse(**cached)
+
+        try:
+            google_stops = await _search_casino_google_places(request)
+            if google_stops:
+                google_stops = _dedupe_and_limit(google_stops)
+                result = OvernightSearchResponse(
+                    spots=google_stops,
+                    is_premium_locked=False,
+                    ok=True,
+                    source="google_places",
+                )
+                _cache_set(_casino_places_cache, cache_key, result.model_dump(), ttl=CASINO_PLACES_CACHE_TTL)
+                return result
+        except HTTPException as he:
+            logger.warning("Casino Google Places failed with HTTP %s: %s", he.status_code, he.detail)
+        except Exception as exc:
+            logger.warning("Casino Google Places exception: %s", exc)
+
+    # ── 2. Fall back to Overpass ──────────────────────────────────────────────
     try:
         radius_meters = int(request.radius_miles * 1609.34)
         overpass_query = f"""
@@ -6873,7 +7027,7 @@ async def search_casinos(request: OvernightSearchRequest):
         for element in osm_data.get("elements", []):
             stop = _build_stop(element, request, "Casino", "Free overnight RV parking welcome.")
             if stop:
-                stop.osm_id = None  # Deduplicate node/way duplicates by coordinates instead of OSM id.
+                stop.osm_id = None
                 stops.append(stop)
 
         def _casino_score(stop: OvernightStop) -> int:

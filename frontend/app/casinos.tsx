@@ -20,6 +20,10 @@ interface OvernightSpot {
   website?: string;
   hours?: string;
   notes?: string;
+  rating?: number;
+  user_ratings_total?: number;
+  open_now?: boolean;
+  place_id?: string;
 }
 
 function groupSpots(items: OvernightSpot[]) {
@@ -43,6 +47,7 @@ export default function CasinosScreen() {
   const [locationLoading, setLocationLoading] = useState(true);
   const [spots, setSpots] = useState<OvernightSpot[]>([]);
   const [error, setError] = useState('');
+  const [dataSource, setDataSource] = useState<string>('');
   const [overpassUnavailable, setOverpassUnavailable] = useState(false);
 
   useEffect(() => {
@@ -91,6 +96,7 @@ export default function CasinosScreen() {
     setLoading(true);
     setSpots([]);
     setError('');
+    setDataSource('');
     setOverpassUnavailable(false);
     try {
       const resp = await axios.post(buildUrl('casinos/search'), {
@@ -101,6 +107,7 @@ export default function CasinosScreen() {
       const data = resp.data || {};
       const results = (data.spots || data.results || []) as OvernightSpot[];
       setSpots(results);
+      setDataSource(data.source || '');
       setOverpassUnavailable(data.source === 'overpass_unavailable');
 
       if (results.length === 0 && data.source === 'overpass_unavailable') {
@@ -198,7 +205,14 @@ export default function CasinosScreen() {
 
         {spots.length > 0 && (
           <View style={styles.resultsContainer}>
-            <Text style={styles.resultsTitle}>Found {spots.length} Casino{spots.length !== 1 ? 's' : ''}</Text>
+            <View style={styles.resultsHeaderRow}>
+              <Text style={styles.resultsTitle}>Found {spots.length} Casino{spots.length !== 1 ? 's' : ''}</Text>
+              {dataSource === 'google_places' && (
+                <View style={styles.sourceTag}>
+                  <Text style={styles.sourceTagText}>Powered by Google</Text>
+                </View>
+              )}
+            </View>
             {groupSpots(spots).map((group) => (
               <View key={group.label} style={styles.groupSection}>
                 <Text style={styles.groupLabel}>{group.label}</Text>
@@ -206,15 +220,36 @@ export default function CasinosScreen() {
                   <View key={`${spot.name}-${spot.latitude}-${spot.longitude}-${index}`} style={styles.spotCard}>
                     <View style={styles.spotHeader}>
                       <View style={styles.spotHeaderLeft}>
-                        <Text style={styles.spotName}>{spot.label || spot.name}</Text>
+                        <Text style={styles.spotName}>{spot.name}</Text>
                         <View style={styles.spotTypeRow}>
                           <View style={styles.spotTypeBadge}>
                             <Text style={styles.spotTypeBadgeText}>{spot.category}</Text>
                           </View>
                           <Text style={styles.distancePill}>{spot.distance_miles.toFixed(1)} mi</Text>
+                          {spot.open_now === true && (
+                            <View style={styles.openPill}>
+                              <Text style={styles.openPillText}>OPEN</Text>
+                            </View>
+                          )}
+                          {spot.open_now === false && (
+                            <View style={styles.closedPill}>
+                              <Text style={styles.closedPillText}>CLOSED</Text>
+                            </View>
+                          )}
                         </View>
+                        {spot.rating != null && (
+                          <View style={styles.ratingRow}>
+                            <Ionicons name="star" size={13} color="#eab308" />
+                            <Text style={styles.ratingText}>
+                              {spot.rating.toFixed(1)}
+                              {spot.user_ratings_total != null ? ` (${spot.user_ratings_total.toLocaleString()})` : ''}
+                            </Text>
+                          </View>
+                        )}
                       </View>
-                      <Ionicons name="navigate" size={22} color="#0ea5e9" />
+                      <TouchableOpacity onPress={() => openInMaps(spot)}>
+                        <Ionicons name="navigate" size={22} color="#0ea5e9" />
+                      </TouchableOpacity>
                     </View>
 
                     <View style={styles.spotQuickInfo}>
@@ -386,12 +421,30 @@ const styles = StyleSheet.create({
     backgroundColor: '#18181b',
     paddingBottom: 32,
   },
+  resultsHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+    paddingHorizontal: 4,
+  },
   resultsTitle: {
     color: '#e5e7eb',
     fontSize: 18,
     fontWeight: '700',
-    marginBottom: 12,
-    paddingHorizontal: 4,
+  },
+  sourceTag: {
+    backgroundColor: '#1e3a5f',
+    borderRadius: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderWidth: 1,
+    borderColor: '#2563eb',
+  },
+  sourceTagText: {
+    color: '#93c5fd',
+    fontSize: 11,
+    fontWeight: '600',
   },
   groupSection: {
     marginBottom: 12,
@@ -449,6 +502,39 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 8,
     fontSize: 12,
+  },
+  openPill: {
+    backgroundColor: '#14532d',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  openPillText: {
+    color: '#4ade80',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  closedPill: {
+    backgroundColor: '#450a0a',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  closedPillText: {
+    color: '#f87171',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  ratingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 4,
+  },
+  ratingText: {
+    color: '#fbbf24',
+    fontSize: 12,
+    fontWeight: '600',
   },
   spotQuickInfo: {
     flexDirection: 'row',
