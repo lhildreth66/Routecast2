@@ -152,8 +152,8 @@ export default function RouteAlertsScreen() {
     return Array.isArray(routeData?.trucker_warnings) ? routeData!.trucker_warnings as string[] : [];
   }, [routeData]);
 
-  const totalAlertCount = alerts.length + bridgeAlerts.length;
-  const showAllClear = alerts.length === 0 && hazardSegments.length === 0 && bridgeAlerts.length === 0 && truckerWarnings.length === 0;
+  const totalAlertCount = alerts.length;
+  const showAllClear = alerts.length === 0 && hazardSegments.length === 0;
 
   const toggleCardExpand = (index: number) => {
     const next = new Set(expandedCards);
@@ -169,7 +169,7 @@ export default function RouteAlertsScreen() {
           <Ionicons name="arrow-back" size={24} color="#fff" />
           <Text style={styles.backText}>Back</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>🗺️ Route Alerts</Text>
+        <Text style={styles.headerTitle}>⛅ Weather Alerts</Text>
         {alertsLoading ? (
           <ActivityIndicator size="small" color="#f59e0b" style={styles.spinner} />
         ) : (
@@ -189,70 +189,19 @@ export default function RouteAlertsScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* ── Low Clearance / Bridge Height Section ──────────────────── */}
-        {(bridgeAlerts.length > 0 || truckerWarnings.length > 0) && (
-          <View style={styles.sectionBlock}>
-            <View style={styles.sectionHeader}>
-              <Ionicons name="git-commit-outline" size={18} color="#f59e0b" />
-              <Text style={styles.sectionTitle}>Low Clearance / Bridge Height</Text>
-              {bridgeAlerts.length > 0 && (
-                <View style={[styles.headerBadge, { marginLeft: 8, backgroundColor: '#f59e0b' }]}>
-                  <Text style={styles.headerBadgeText}>{bridgeAlerts.length}</Text>
-                </View>
-              )}
-            </View>
-
-            {bridgeAlerts.map((ba, idx) => (
-              <View key={idx} style={styles.bridgeCard}>
-                <View style={styles.bridgeHeader}>
-                  <View style={styles.bridgeIconBox}>
-                    <Ionicons name="warning" size={22} color="#f59e0b" />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.bridgeName}>{ba.bridge_name}</Text>
-                    <Text style={styles.bridgeDistance}>{Math.round(ba.distance_miles)} miles ahead</Text>
-                  </View>
-                </View>
-                <View style={styles.bridgeClearanceRow}>
-                  <View style={styles.clearanceBox}>
-                    <Text style={styles.clearanceLabel}>CLEARANCE</Text>
-                    <Text style={styles.clearanceValue}>{ba.clearance_ft.toFixed(1)} ft</Text>
-                  </View>
-                  <View style={styles.clearanceDivider} />
-                  <View style={styles.clearanceBox}>
-                    <Text style={styles.clearanceLabel}>YOUR HEIGHT</Text>
-                    <Text style={styles.clearanceValueDanger}>{ba.vehicle_height_ft.toFixed(1)} ft</Text>
-                  </View>
-                </View>
-                <View style={styles.bridgeWarningRow}>
-                  <Ionicons name="alert-circle" size={16} color="#fecaca" />
-                  <Text style={styles.bridgeWarningText}>{ba.warning}</Text>
-                </View>
-              </View>
-            ))}
-
-            {truckerWarnings.map((w, idx) => (
-              <View key={`tw-${idx}`} style={styles.truckerWarningRow}>
-                <Ionicons name="alert-circle-outline" size={15} color="#f59e0b" />
-                <Text style={styles.truckerWarningText}>{w}</Text>
-              </View>
-            ))}
-          </View>
-        )}
+        {/* Bridge height alerts live on the dedicated Bridge Alerts tab (route.tsx). */}
 
         {/* ── Weather / Hazard Alerts Section ─────────────────────────── */}
         {!showAllClear ? (
           alerts && alerts.length > 0 ? (
             <>
-              {(bridgeAlerts.length > 0 || truckerWarnings.length > 0) && (
-                <View style={[styles.sectionHeader, { marginBottom: 10 }]}>
+              <View style={[styles.sectionHeader, { marginBottom: 10 }]}>
                   <Ionicons name="warning" size={18} color="#ef4444" />
                   <Text style={styles.sectionTitle}>Weather / Hazard Alerts</Text>
                   <View style={[styles.headerBadge, { marginLeft: 8 }]}>
                     <Text style={styles.headerBadgeText}>{alerts.length}</Text>
                   </View>
                 </View>
-              )}
               {alerts.map((alert, index) => {
               const isExpanded = expandedCards.has(index);
               const ap = alert.properties || ({} as NonNullable<HazardAlert['properties']>);

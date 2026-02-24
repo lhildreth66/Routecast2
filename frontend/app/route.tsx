@@ -741,7 +741,7 @@ export default function RouteScreen() {
           onPress={() => setActiveTab('bridges')}
         >
           <Ionicons name="git-commit-outline" size={16} color={activeTab === 'bridges' ? '#f59e0b' : '#6b7280'} />
-          <Text style={[styles.tabText, activeTab === 'bridges' && styles.tabTextActive]}>Bridges</Text>
+          <Text style={[styles.tabText, activeTab === 'bridges' && styles.tabTextActive]}>Bridge Alerts</Text>
           {routeData.bridge_clearance_alerts && routeData.bridge_clearance_alerts.length > 0 && (
             <View style={[styles.tabBadge, { backgroundColor: '#f59e0b' }]}>
               <Text style={styles.tabBadgeText}>{routeData.bridge_clearance_alerts.length}</Text>
@@ -753,7 +753,7 @@ export default function RouteScreen() {
           onPress={() => router.push({ pathname: '/route-alerts', params: { routeData: params.routeData as string } })}
         >
           <Ionicons name="warning" size={16} color={activeTab === 'alerts' ? '#ef4444' : '#6b7280'} />
-          <Text style={[styles.tabText, activeTab === 'alerts' && styles.tabTextActive]}>Alerts</Text>
+          <Text style={[styles.tabText, activeTab === 'alerts' && styles.tabTextActive]}>Weather</Text>
           {alerts?.length > 0 && (
             <View style={styles.tabBadge}>
               <Text style={styles.tabBadgeText}>{alerts.length}</Text>
