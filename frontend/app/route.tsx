@@ -782,33 +782,6 @@ export default function RouteScreen() {
               </Text>
             </View>
 
-            {/* Trucker / Bridge Warnings – compact callout; full detail in Alerts screen */}
-            {(routeData.trucker_warnings?.length > 0 || routeData.bridge_clearance_alerts?.length > 0) && (
-              <TouchableOpacity
-                style={styles.truckerBox}
-                onPress={() => router.push({ pathname: '/route-alerts', params: { routeData: params.routeData as string } })}
-                activeOpacity={0.8}
-              >
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <Text style={styles.truckerTitle}>🚛 TRUCKER ALERTS</Text>
-                  <Text style={{ color: '#f59e0b', fontSize: 12, fontWeight: '600' }}>View All →</Text>
-                </View>
-                {routeData.bridge_clearance_alerts && routeData.bridge_clearance_alerts.length > 0 && (
-                  <Text style={styles.truckerWarning}>
-                    ⚠️ {routeData.bridge_clearance_alerts.length} low-clearance bridge{routeData.bridge_clearance_alerts.length > 1 ? 's' : ''} on route
-                  </Text>
-                )}
-                {routeData.trucker_warnings?.slice(0, 2).map((warning: string, idx: number) => (
-                  <Text key={idx} style={styles.truckerWarning}>{warning}</Text>
-                ))}
-                {(routeData.trucker_warnings?.length ?? 0) > 2 && (
-                  <Text style={{ color: '#9ca3af', fontSize: 12, marginTop: 3 }}>
-                    +{(routeData.trucker_warnings?.length ?? 0) - 2} more in Alerts
-                  </Text>
-                )}
-              </TouchableOpacity>
-            )}
-
             {/* Waypoint Road Conditions */}
             <Text style={styles.sectionTitle}>🛣️ Road Conditions Along Route</Text>
             <Text style={styles.sectionSubtitle}>Weather-based road surface conditions</Text>
@@ -861,12 +834,6 @@ export default function RouteScreen() {
                 condColor = '#7c3aed';
                 condDesc = 'Storm conditions';
                 roadSurface = 'Heavy rain possible';
-              } else if (windSpeed > 30) {
-                condIcon = '💨';
-                condLabel = 'WINDY';
-                condColor = '#f59e0b';
-                condDesc = `Windy - ${windSpeed} mph`;
-                roadSurface = 'Watch for crosswinds';
               }
               
               const mileMarker = Math.round(wp.waypoint.distance_from_start || 0);
@@ -951,6 +918,34 @@ export default function RouteScreen() {
               </View>
             )}
             
+            {/* ── Truck Operational Alerts ────────────────────────────── */}
+            {routeData.trucker_warnings && routeData.trucker_warnings.length > 0 && (
+              <View style={styles.truckOpsSection}>
+                <View style={styles.truckOpsSectionHeader}>
+                  <Ionicons name="truck" size={18} color="#f59e0b" />
+                  <Text style={styles.truckOpsSectionTitle}>Truck Operational Alerts</Text>
+                  <View style={styles.truckOpsBadge}>
+                    <Text style={styles.truckOpsBadgeText}>{routeData.trucker_warnings.length}</Text>
+                  </View>
+                </View>
+                {(routeData.trucker_warnings as string[]).map((warning: string, idx: number) => {
+                  const wLow = warning.toLowerCase();
+                  let icon: any = 'alert-circle-outline';
+                  let iconColor = '#f59e0b';
+                  if (wLow.includes('chain') || wLow.includes('traction law')) { icon = 'link'; iconColor = '#ef4444'; }
+                  else if (wLow.includes('ice') || wLow.includes('icy') || wLow.includes('freez')) { icon = 'snow'; iconColor = '#60a5fa'; }
+                  else if (wLow.includes('wind') || wLow.includes('crosswind')) { icon = 'flag'; iconColor = '#f59e0b'; }
+                  else if (wLow.includes('bridge') || wLow.includes('clearance') || wLow.includes('reroute')) { icon = 'git-commit-outline'; iconColor = '#ef4444'; }
+                  return (
+                    <View key={idx} style={styles.truckOpsRow}>
+                      <Ionicons name={icon} size={16} color={iconColor} style={{ marginTop: 1 }} />
+                      <Text style={styles.truckOpsText}>{warning}</Text>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+
             <View style={styles.bridgeDisclaimer}>
               <Ionicons name="information-circle" size={18} color="#6b7280" />
               <Text style={styles.bridgeDisclaimerText}>
@@ -2089,5 +2084,55 @@ const styles = StyleSheet.create({
     fontSize: 12,
     flex: 1,
     lineHeight: 16,
+  },
+  // ── Truck Operational Alerts (Bridge Alerts tab) ─────────────────────────
+  truckOpsSection: {
+    backgroundColor: '#1c1917',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#44403c',
+    padding: 14,
+    marginBottom: 12,
+  },
+  truckOpsSectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 10,
+  },
+  truckOpsSectionTitle: {
+    color: '#fbbf24',
+    fontSize: 14,
+    fontWeight: '700',
+    flex: 1,
+    letterSpacing: 0.3,
+  },
+  truckOpsBadge: {
+    backgroundColor: '#f59e0b',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 5,
+  },
+  truckOpsBadgeText: {
+    color: '#000',
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  truckOpsRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    paddingVertical: 5,
+    borderTopWidth: 1,
+    borderTopColor: '#292524',
+  },
+  truckOpsText: {
+    color: '#e5e7eb',
+    fontSize: 13,
+    flex: 1,
+    lineHeight: 18,
   },
 });
