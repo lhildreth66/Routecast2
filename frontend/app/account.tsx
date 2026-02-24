@@ -95,6 +95,14 @@ export default function AccountScreen() {
 
   const handleLogout = () => {
     if (logoutLoading) return;
+    __DEV__ && console.log('[account] Sign Out pressed, platform:', Platform.OS);
+
+    // On web, Alert.alert() calls window.confirm() which React Native Web does
+    // not reliably wire up callbacks for. Skip the dialog and sign out directly.
+    if (Platform.OS === 'web') {
+      performLogout();
+      return;
+    }
 
     if (Platform.OS === 'ios') {
       ActionSheetIOS.showActionSheetWithOptions(

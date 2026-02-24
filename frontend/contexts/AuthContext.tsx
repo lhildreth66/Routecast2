@@ -37,11 +37,15 @@ function webSetTokens(at: string, rt: string) {
   } catch { /* quota / private-mode – non-fatal */ }
 }
 
+// Legacy keys written by versions prior to eaa4d296 that must also be cleared.
+const WEB_LEGACY_KEYS = ['accessToken', 'access_token', 'refreshToken', 'refresh_token'];
+
 function webClearTokens() {
   if (Platform.OS !== 'web') return;
   try {
     window.localStorage.removeItem(WEB_AT_KEY);
     window.localStorage.removeItem(WEB_RT_KEY);
+    WEB_LEGACY_KEYS.forEach(k => window.localStorage.removeItem(k));
   } catch { /* non-fatal */ }
 }
 
