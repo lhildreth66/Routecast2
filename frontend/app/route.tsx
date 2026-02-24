@@ -418,8 +418,6 @@ export default function RouteScreen() {
   // Radar map state
   const [showRadarMap, setShowRadarMap] = useState(false);
 
-  const [alertsLoading, setAlertsLoading] = useState(false);
-
   useEffect(() => {
     if (params.routeData) {
       try {
@@ -451,11 +449,10 @@ export default function RouteScreen() {
     return () => clearInterval(interval);
   }, []);
 
-  // Follow-up: fetch NWS hazard alerts from the deferred endpoint
+  // Follow-up: fetch NWS hazard alerts — keeps badge count live
   useEffect(() => {
     const routeId = routeData?.id;
     if (!routeId) return;
-    setAlertsLoading(true);
     axios
       .get(`${API_BASE}/api/route/weather/alerts/${routeId}`)
       .then((res) => {
@@ -469,8 +466,7 @@ export default function RouteScreen() {
           );
         }
       })
-      .catch((e) => console.warn('Alerts follow-up failed:', e.message))
-      .finally(() => setAlertsLoading(false));
+      .catch((e) => console.warn('Alerts follow-up failed:', e.message));
   }, [routeData?.id]);
 
   const speakSummary = async () => {

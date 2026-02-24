@@ -123,10 +123,11 @@ export default function RouteAlertsScreen() {
     return (routeData as any).alerts ?? routeData.hazard_alerts ?? [];
   }, [routeData]);
 
-  const hazardSegments = useMemo<HazardAlert[]>(() => {
-    if (!routeData) return [];
-    return alerts.filter((a) => a.alert_level || a.severity);
-  }, [alerts, routeData]);
+  const hazardSegments = useMemo<any[]>(() => {
+    return Array.isArray(routeData?.turn_by_turn)
+      ? (routeData!.turn_by_turn as any[]).filter((step: any) => step?.has_alert)
+      : [];
+  }, [routeData]);
 
   const showAllClear = alerts.length === 0 && hazardSegments.length === 0;
 
