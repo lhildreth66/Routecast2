@@ -109,14 +109,17 @@ export default function VerifyEmailScreen() {
   }, [rootNavState?.key, verifyDone, user?.email_verified, accessToken]);
 
   // ── POLLING fallback (same-session tab without the token URL) ────────────
+  // Stop as soon as email_verified becomes true or verifyDone fires so we
+  // don't keep hitting /auth/me while redirecting to Stripe.
   useEffect(() => {
+    if (verifyDone || user?.email_verified) return; // already done — no interval needed
     const interval = setInterval(() => {
       if (accessToken && !user?.email_verified) {
         refreshUser();
       }
     }, 5000);
     return () => clearInterval(interval);
-  }, [accessToken, user?.email_verified]);
+  }, [accessToken, user?.email_verified, verifyDone]);
 
   useEffect(() => {
     // Countdown timer for resend button

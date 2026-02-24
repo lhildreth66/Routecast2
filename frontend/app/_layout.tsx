@@ -11,6 +11,7 @@ const PAYWALL_OPEN_ROUTES = new Set([
   '/login', '/signup', '/verify-email', '/subscription',
   '/landing', '/terms', '/privacy', '/contact',
   '/forgot-password', '/reset-password',
+  '/account',   // users need account access to manage billing / cancel
 ]);
 
 // Global paywall guard: renders null (never blocks Stack from mounting).

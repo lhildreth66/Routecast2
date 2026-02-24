@@ -139,22 +139,46 @@ def determine_plan(data: dict) -> str:
 
 
 async def handle_checkout_completed(db, data: dict, now: datetime):
-    """Handle checkout.session.completed - immediate premium unlock"""
+    """Handle checkout.session.completed — immediate premium unlock.
+
+    We no longer gate on payment_status because Stripe sends
+    'no_payment_required' for $0 trial checkouts (not 'paid').  Instead we
+    fetch the subscription object from Stripe directly and gate on its status:
+    'active' or 'trialing' both mean the user has a valid subscription.
+    Falls back to optimistic unlock when the Stripe fetch fails so the user
+    is never left without access due to a transient API error.
+    """
     customer_id = data.get("customer")
     customer_email = data.get("customer_email") or data.get("customer_details", {}).get("email")
     payment_status = data.get("payment_status")
     mode = data.get("mode")
-    
-    logger.info(f"Checkout completed: customer={customer_id}, email={customer_email}, status={payment_status}, mode={mode}")
-    
-    # Accept both real payments ("paid") and $0 trial starts ("no_payment_required").
-    # Stripe sends "no_payment_required" when trial_period_days is set and the
-    # customer is not charged today.  Rejecting it would leave trial users without
-    # premium access until subscription.updated fires (which may be delayed).
-    if payment_status not in ("paid", "no_payment_required"):
-        logger.info(f"Checkout not in accepted state: {payment_status}")
+    subscription_id = data.get("subscription")
+
+    logger.info(
+        f"Checkout completed: customer={customer_id}, email={customer_email}, "
+        f"status={payment_status}, mode={mode}, subscription={subscription_id}"
+    )
+
+    # Determine subscription status from Stripe directly.
+    # This is more reliable than payment_status which differs for $0 trials.
+    stripe_sub_status = None
+    current_period_end = None
+    if subscription_id and STRIPE_API_KEY:
+        try:
+            sub = stripe.Subscription.retrieve(subscription_id)
+            stripe_sub_status = sub.get("status")          # 'active', 'trialing', ...
+            current_period_end = sub.get("current_period_end")  # Unix timestamp
+            logger.info(f"[STRIPE] Subscription {subscription_id} status={stripe_sub_status}")
+        except Exception as e:
+            logger.warning(f"[STRIPE] Could not fetch subscription {subscription_id}: {e}")
+
+    # Gate: only activate if subscription is genuinely active or in trial.
+    # If we couldn't fetch the subscription (network error etc.), be optimistic
+    # and proceed — customer.subscription.updated will correct it if wrong.
+    if stripe_sub_status is not None and stripe_sub_status not in ("active", "trialing"):
+        logger.info(f"[STRIPE] Checkout skipped — subscription status={stripe_sub_status}")
         return
-    
+
     # Find or link user
     user = await find_or_link_user(db, customer_id, customer_email)
     if not user:
@@ -169,41 +193,43 @@ async def handle_checkout_completed(db, data: dict, now: datetime):
         })
         logger.warning("No user found for checkout, saved for manual resolution")
         return
-    
+
     user_id = user["user_id"]
     plan = determine_plan(data)
-    
-    # Calculate expiration
-    if plan == "yearly":
+
+    # Prefer the real period end from Stripe; fall back to local calculation.
+    if current_period_end:
+        expiration = datetime.fromtimestamp(current_period_end, tz=timezone.utc)
+    elif plan == "yearly":
         expiration = now + timedelta(days=365)
     else:
         expiration = now + timedelta(days=30)
-    
-    # Get subscription ID if this was a subscription checkout
-    subscription_id = data.get("subscription")
-    
-    # Update user - IMMEDIATE premium access
+
+    # Map Stripe status to our internal status label.
+    internal_status = stripe_sub_status if stripe_sub_status else "active"
+
+    # Update user — IMMEDIATE premium access
     update_data = {
         "is_premium": True,
         "plan": plan,
-        "subscription_status": "active",
+        "subscription_status": internal_status,
         "subscription_plan": plan,
         "subscription_provider": "stripe",
         "subscription_expiration": expiration,
         "stripe_customer_id": customer_id,
         "updated_at": now
     }
-    
+
     if subscription_id:
         update_data["stripe_subscription_id"] = subscription_id
-    
+
     await db.users.update_one(
         {"user_id": user_id},
         {"$set": update_data}
     )
-    
-    logger.info(f"Premium activated for user {user_id}: plan={plan}, expires={expiration}")
-    
+
+    logger.info(f"Premium activated for user {user_id}: plan={plan}, status={internal_status}, expires={expiration}")
+
     # Log the activation
     await db.subscription_logs.insert_one({
         "user_id": user_id,

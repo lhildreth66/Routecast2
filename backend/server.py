@@ -28,6 +28,11 @@ from notifications.route_alerts import sample_route_points
 import asyncio
 from bridge_database import get_bridge_warnings, get_bridge_warnings_near_route
 from services.bridge_height_service import get_bridge_clearances_for_route as _get_bridge_clearances
+try:
+    from services.auth_service import verify_token as _verify_token, get_user_by_id as _get_user_by_id
+except ImportError:
+    _verify_token = None
+    _get_user_by_id = None
 from providers import get_providers
 from billing import billing_verifier, VerificationRequest, VerificationResponse
 from common.premium_gate import require_premium
@@ -4567,7 +4572,41 @@ async def _create_checkout_session(plan: str, origin_url: Optional[str]):
 
 
 @api_router.post("/subscription/checkout", response_model=SubscriptionCheckoutResponse)
-async def subscription_checkout(request: SubscriptionCheckoutRequest):
+async def subscription_checkout(
+    request: SubscriptionCheckoutRequest,
+    http_request: Request,
+    authorization: Optional[str] = Header(None),
+):
+    """Create a Stripe Checkout session.
+
+    Guards:
+    - Must be authenticated (valid Bearer JWT).
+    - Must have a verified email address.  Unverified users are rejected with
+      403 so we don't create junk Stripe customers.
+    """
+    # ── auth guard ──────────────────────────────────────────────────────────────
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    if _verify_token and _get_user_by_id:
+        token = authorization.split(" ")[1]
+        payload = _verify_token(token, "access")
+        if not payload:
+            raise HTTPException(status_code=401, detail="Invalid or expired token")
+
+        db = http_request.app.state.db
+        user_id = payload.get("sub")
+        user_doc = await _get_user_by_id(db, user_id) if user_id else None
+
+        if not user_doc:
+            raise HTTPException(status_code=401, detail="User not found")
+
+        if not user_doc.get("email_verified", False):
+            raise HTTPException(
+                status_code=403,
+                detail="Email address must be verified before starting a subscription."
+            )
+
     session = await _create_checkout_session(request.plan, request.origin_url)
     return SubscriptionCheckoutResponse(checkout_url=session.url, session_id=session.id)
 
