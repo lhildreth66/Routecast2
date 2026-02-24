@@ -118,29 +118,9 @@ export default function HomeScreen() {
     }
   }, [rootNavState?.key, accessToken, authLoading, hasHydrated]);
 
-  // Verified-but-not-subscribed gate: on first render after user loads, route
-  // unsubscribed verified users to /subscription.
-  //
-  // ONE-SHOT per session via ref: without this, pressing Back from /subscription
-  // returns to /, Guard fires again, and the user is stuck in a loop.
-  // The ref is set to true after the first redirect (or skip) so subsequent
-  // navigations back to / are never intercepted.
-  const subscriptionGateFired = useRef(false);
-  useEffect(() => {
-    if (!rootNavState?.key) return;
-    if (!hasHydrated || authLoading) return;
-    if (!user) return; // user not loaded yet – wait
-    if (subscriptionGateFired.current) return; // already fired this session
-    if (user.email_verified && !user.is_premium) {
-      subscriptionGateFired.current = true;
-      __DEV__ && console.log('[guard] verified + not premium → /subscription (one-shot)');
-      router.replace('/subscription');
-    } else {
-      // User is either not verified or is already premium: mark as fired so we
-      // never accidentally re-check when is_premium flips true (e.g. after trial).
-      subscriptionGateFired.current = true;
-    }
-  }, [rootNavState?.key, hasHydrated, authLoading, user?.email_verified, user?.is_premium]);
+  // Subscription gate removed: replaced by global PaywallGuard in _layout.tsx.
+  // PaywallGuard handles verified+!premium users on ALL routes, not just /.
+  // This avoids the need for a per-screen ref and removes the ping-pong.
 
   const [origin, setOrigin] = useState('');
   const [destination, setDestination] = useState('');

@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -60,26 +61,51 @@ export default function VerifyEmailScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]); // run once on mount – token is static
 
-  // ── REDIRECT once verified ───────────────────────────────────────────────
-  // Fires after either (a) token auto-verify succeeded, or (b) the polling
-  // below detects email_verified=true from the server.
-  // Gates on rootNavState.key so router.replace is never called before the
-  // navigator is mounted.
+  // ── LAUNCH STRIPE (same-device) or route to login (cross-device) ────────
+  // Called once verification has been confirmed (verifyDone=true or user
+  // already has email_verified=true from a prior session).
   //
-  // Cross-device path: user signed up on desktop, opened link on phone.
-  // Phone has no session (accessToken=null). We route to /login?verified=1
-  // so they can sign in and the index guard routes them to /subscription.
-  //
-  // Same-device path: user still has a session. Route straight to /subscription.
+  // Same-device (has session): call POST /api/subscription/checkout and
+  //   window.location.href the user directly into Stripe — no app access.
+  // Cross-device (no session): go to /login?verified=1 so user signs in;
+  //   after login the global PaywallGuard intercepts and forces /subscription
+  //   which auto-launches checkout.
+  const launchCheckoutRef = useRef(false);
+  const launchCheckout = async (token: string) => {
+    if (launchCheckoutRef.current) return; // prevent double-fire
+    launchCheckoutRef.current = true;
+    setVerifying(true);
+    setError('');
+    try {
+      const origin = typeof window !== 'undefined'
+        ? window.location.origin
+        : 'https://routecastweather.com';
+      const { data } = await axios.post(
+        `${API_BASE}/api/subscription/checkout`,
+        { plan: 'yearly', origin_url: origin },
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      if (typeof window !== 'undefined') {
+        window.location.href = data.checkout_url;
+      }
+      // Native: fall through to the PaywallGuard → /subscription which handles it
+    } catch (err: any) {
+      const detail = err?.response?.data?.detail || 'Failed to start checkout. Please try again.';
+      setError(detail);
+      setVerifying(false);
+      launchCheckoutRef.current = false;
+    }
+  };
+
   useEffect(() => {
     if (!rootNavState?.key) return;
-    if (verifyDone || user?.email_verified) {
-      if (accessToken) {
-        router.replace('/subscription');
-      } else {
-        router.replace('/login?verified=1');
-      }
+    if (!(verifyDone || user?.email_verified)) return;
+    if (!accessToken) {
+      router.replace('/login?verified=1');
+      return;
     }
+    launchCheckout(accessToken);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rootNavState?.key, verifyDone, user?.email_verified, accessToken]);
 
   // ── POLLING fallback (same-session tab without the token URL) ────────────

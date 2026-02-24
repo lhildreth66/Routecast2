@@ -1,9 +1,45 @@
-import { Stack } from 'expo-router';
+import { Stack, router, useRootNavigationState, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
-import { AuthProvider } from '../contexts/AuthContext';
+import { AuthProvider, useAuth } from '../contexts/AuthContext';
+
+// Routes that unpaid-but-verified users are allowed to visit.
+// Everything else redirects to /subscription (the paywall).
+const PAYWALL_OPEN_ROUTES = new Set([
+  '/login', '/signup', '/verify-email', '/subscription',
+  '/landing', '/terms', '/privacy', '/contact',
+  '/forgot-password', '/reset-password',
+]);
+
+// Global paywall guard: renders null (never blocks Stack from mounting).
+// Fires once per session after user loads.
+function PaywallGuard() {
+  const { user, hasHydrated, isLoading: authLoading, accessToken } = useAuth();
+  const rootNavState = useRootNavigationState();
+  const pathname = usePathname();
+  const firedRef = useRef(false);
+
+  useEffect(() => {
+    if (!rootNavState?.key) return;
+    if (!hasHydrated || authLoading) return;
+    if (!accessToken || !user) return;     // not authenticated or not loaded
+    if (user.is_premium) { firedRef.current = false; return; } // reset when user pays
+    if (!user.email_verified) return;     // pre-verification handled by verify-email itself
+    if (firedRef.current) return;
+
+    // Normalise pathname to its first segment so /subscription/success still passes.
+    const seg = '/' + (pathname.split('/').filter(Boolean)[0] ?? '');
+    if (PAYWALL_OPEN_ROUTES.has(pathname) || PAYWALL_OPEN_ROUTES.has(seg)) return;
+
+    firedRef.current = true;
+    __DEV__ && console.log('[paywall] blocking', pathname, '→ /subscription');
+    router.replace('/subscription');
+  }, [rootNavState?.key, hasHydrated, authLoading, accessToken, user?.is_premium, user?.email_verified, pathname]);
+
+  return null;
+}
 
 // Configure notifications
 Notifications.setNotificationHandler({
@@ -33,6 +69,7 @@ export default function RootLayout() {
   return (
     <AuthProvider>
       <StatusBar style="light" />
+      <PaywallGuard />
       <Stack
         screenOptions={{
           headerShown: false,

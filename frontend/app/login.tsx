@@ -20,7 +20,7 @@ export default function LoginScreen() {
   // this screen renders, hydration is always complete. The destructure
   // of hasHydrated is kept for the early-return below as a fallback.
   const { login, hasHydrated } = useAuth();
-  const { verified } = useLocalSearchParams<{ verified?: string }>();
+  const { verified, trial } = useLocalSearchParams<{ verified?: string; trial?: string }>();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -102,7 +102,19 @@ export default function LoginScreen() {
                 borderColor: '#22c55e', borderRadius: 10, padding: 14, marginBottom: 16 }}>
                 <Ionicons name="checkmark-circle" size={20} color="#22c55e" />
                 <Text style={{ color: '#22c55e', fontSize: 14, flex: 1, lineHeight: 20 }}>
-                  Email verified! Sign in to continue to your subscription.
+                  Email verified! Sign in to start your 7-day free trial.
+                </Text>
+              </View>
+            )}
+
+            {/* Trial-started banner (Stripe success redirect) */}
+            {trial === '1' && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10,
+                backgroundColor: 'rgba(34,197,94,0.12)', borderWidth: 1,
+                borderColor: '#22c55e', borderRadius: 10, padding: 14, marginBottom: 16 }}>
+                <Ionicons name="star" size={20} color="#22c55e" />
+                <Text style={{ color: '#22c55e', fontSize: 14, flex: 1, lineHeight: 20 }}>
+                  Trial started! Sign in to access Routecast.
                 </Text>
               </View>
             )}

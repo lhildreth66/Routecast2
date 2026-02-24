@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../contexts/AuthContext';
 import axios from 'axios';
 
@@ -30,6 +30,7 @@ interface Plan {
 
 export default function SubscriptionScreen() {
   const { user, accessToken, refreshUser, isAuthenticated } = useAuth();
+  const { canceled } = useLocalSearchParams<{ canceled?: string }>();
   const [plans, setPlans] = useState<Plan[]>([]);
   const [selectedPlan, setSelectedPlan] = useState<string>('yearly');
   const [loading, setLoading] = useState(true);
@@ -37,6 +38,7 @@ export default function SubscriptionScreen() {
   const [trialLoading, setTrialLoading] = useState(false);
   const [error, setError] = useState('');
   const [mounted, setMounted] = useState(false);
+  const autoLaunchFired = useRef(false);
 
   useEffect(() => {
     fetchPlans();
@@ -45,6 +47,20 @@ export default function SubscriptionScreen() {
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  // Auto-launch Stripe on mount for authenticated, non-premium users.
+  // Only fires once per component mount (ref guard prevents retrigger).
+  // Skipped on the ?canceled=1 return so the user sees the retry UI.
+  useEffect(() => {
+    if (!mounted) return;
+    if (!isAuthenticated || !accessToken) return;
+    if (user?.is_premium) return; // already subscribed – show success state
+    if (canceled === '1') return; // user hit Cancel in Stripe – show retry UI
+    if (autoLaunchFired.current) return;
+    autoLaunchFired.current = true;
+    handleCheckout(selectedPlan);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mounted, isAuthenticated, accessToken, user?.is_premium, canceled]);
 
   const fetchPlans = async () => {
     try {
@@ -115,6 +131,7 @@ export default function SubscriptionScreen() {
       }
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to start checkout');
+      autoLaunchFired.current = false; // allow retry on error
     } finally {
       setCheckoutLoading(false);
     }
@@ -122,13 +139,22 @@ export default function SubscriptionScreen() {
 
   if (!mounted) return null;
 
-  if (!mounted) return null;
-
   const isPremium = user?.is_premium;
   const isTrialing = user?.subscription_status === 'trialing';
   const canStartTrial = user?.trial_available && !isPremium && !isTrialing;
 
-  if (loading) {
+  // Auto-launching Stripe (first mount, non-canceled, non-premium authenticated user).
+  // Show a branded loading screen — user will be at Stripe in <1s.
+  if (checkoutLoading || (!canceled && !error && mounted && isAuthenticated && !isPremium)) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#22c55e" />
+        <Text style={{ color: '#a1a1aa', marginTop: 16, fontSize: 15 }}>Starting your 7-day free trial…</Text>
+      </View>
+    );
+  }
+
+  if (loading && !error) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#eab308" />
