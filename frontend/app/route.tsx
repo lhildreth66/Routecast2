@@ -775,14 +775,31 @@ export default function RouteScreen() {
               </Text>
             </View>
 
-            {/* Trucker Warnings */}
-            {routeData.trucker_warnings && routeData.trucker_warnings.length > 0 && (
-              <View style={styles.truckerBox}>
-                <Text style={styles.truckerTitle}>🚛 TRUCKER ALERTS</Text>
-                {routeData.trucker_warnings.map((warning, idx) => (
+            {/* Trucker / Bridge Warnings – compact callout; full detail in Alerts screen */}
+            {(routeData.trucker_warnings?.length > 0 || routeData.bridge_clearance_alerts?.length > 0) && (
+              <TouchableOpacity
+                style={styles.truckerBox}
+                onPress={() => router.push({ pathname: '/route-alerts', params: { routeData: params.routeData as string } })}
+                activeOpacity={0.8}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <Text style={styles.truckerTitle}>🚛 TRUCKER ALERTS</Text>
+                  <Text style={{ color: '#f59e0b', fontSize: 12, fontWeight: '600' }}>View All →</Text>
+                </View>
+                {routeData.bridge_clearance_alerts && routeData.bridge_clearance_alerts.length > 0 && (
+                  <Text style={styles.truckerWarning}>
+                    ⚠️ {routeData.bridge_clearance_alerts.length} low-clearance bridge{routeData.bridge_clearance_alerts.length > 1 ? 's' : ''} on route
+                  </Text>
+                )}
+                {routeData.trucker_warnings?.slice(0, 2).map((warning: string, idx: number) => (
                   <Text key={idx} style={styles.truckerWarning}>{warning}</Text>
                 ))}
-              </View>
+                {(routeData.trucker_warnings?.length ?? 0) > 2 && (
+                  <Text style={{ color: '#9ca3af', fontSize: 12, marginTop: 3 }}>
+                    +{(routeData.trucker_warnings?.length ?? 0) - 2} more in Alerts
+                  </Text>
+                )}
+              </TouchableOpacity>
             )}
 
             {/* Waypoint Road Conditions */}

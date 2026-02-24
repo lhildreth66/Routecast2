@@ -1,10 +1,13 @@
 /**
- * route-alerts.tsx  – full-screen Weather Alerts viewer
+ * route-alerts.tsx  – full-screen Route Alerts viewer
  *
  * Opened by tapping the "Alerts" tab on the Route screen.
- * Receives the stringified routeData as a navigation param (same param
- * that route.tsx itself receives), parses it, and fires the same
- * follow-up NWS-alerts fetch so it always shows live data.
+ * Shows two sections:
+ *   1. Low Clearance / Bridge Height  (from routeData.bridge_clearance_alerts)
+ *   2. Weather / Hazard Alerts        (from routeData.alerts / hazard_alerts)
+ *
+ * Receives the stringified routeData as a navigation param and fires the
+ * same follow-up NWS-alerts fetch so weather data is always live.
  */
 import React, { useState, useEffect, useMemo } from 'react';
 import {
@@ -23,6 +26,14 @@ import axios from 'axios';
 const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 // ─── minimal types (kept inline so no import from route.tsx needed) ─────────
+interface BridgeClearanceAlert {
+  bridge_name: string;
+  clearance_ft: number;
+  vehicle_height_ft: number;
+  distance_miles: number;
+  warning: string;
+}
+
 interface HazardAlert {
   id?: string;
   alert_id?: string;
@@ -63,6 +74,8 @@ interface RouteData {
   alerts?: HazardAlert[];
   hazard_alerts?: HazardAlert[];
   hazard_status?: string;
+  bridge_clearance_alerts?: BridgeClearanceAlert[];
+  trucker_warnings?: string[];
   [key: string]: any;
 }
 
@@ -129,7 +142,18 @@ export default function RouteAlertsScreen() {
       : [];
   }, [routeData]);
 
-  const showAllClear = alerts.length === 0 && hazardSegments.length === 0;
+  const bridgeAlerts = useMemo<BridgeClearanceAlert[]>(() => {
+    return Array.isArray(routeData?.bridge_clearance_alerts)
+      ? (routeData!.bridge_clearance_alerts as BridgeClearanceAlert[])
+      : [];
+  }, [routeData]);
+
+  const truckerWarnings = useMemo<string[]>(() => {
+    return Array.isArray(routeData?.trucker_warnings) ? routeData!.trucker_warnings as string[] : [];
+  }, [routeData]);
+
+  const totalAlertCount = alerts.length + bridgeAlerts.length;
+  const showAllClear = alerts.length === 0 && hazardSegments.length === 0 && bridgeAlerts.length === 0 && truckerWarnings.length === 0;
 
   const toggleCardExpand = (index: number) => {
     const next = new Set(expandedCards);
@@ -145,14 +169,14 @@ export default function RouteAlertsScreen() {
           <Ionicons name="arrow-back" size={24} color="#fff" />
           <Text style={styles.backText}>Back</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>⚠️ Weather Alerts</Text>
+        <Text style={styles.headerTitle}>🗺️ Route Alerts</Text>
         {alertsLoading ? (
           <ActivityIndicator size="small" color="#f59e0b" style={styles.spinner} />
         ) : (
           <View style={styles.headerBadgePlaceholder}>
-            {alerts.length > 0 && (
+            {totalAlertCount > 0 && (
               <View style={styles.headerBadge}>
-                <Text style={styles.headerBadgeText}>{alerts.length}</Text>
+                <Text style={styles.headerBadgeText}>{totalAlertCount}</Text>
               </View>
             )}
           </View>
@@ -165,9 +189,71 @@ export default function RouteAlertsScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
+        {/* ── Low Clearance / Bridge Height Section ──────────────────── */}
+        {(bridgeAlerts.length > 0 || truckerWarnings.length > 0) && (
+          <View style={styles.sectionBlock}>
+            <View style={styles.sectionHeader}>
+              <Ionicons name="git-commit-outline" size={18} color="#f59e0b" />
+              <Text style={styles.sectionTitle}>Low Clearance / Bridge Height</Text>
+              {bridgeAlerts.length > 0 && (
+                <View style={[styles.headerBadge, { marginLeft: 8, backgroundColor: '#f59e0b' }]}>
+                  <Text style={styles.headerBadgeText}>{bridgeAlerts.length}</Text>
+                </View>
+              )}
+            </View>
+
+            {bridgeAlerts.map((ba, idx) => (
+              <View key={idx} style={styles.bridgeCard}>
+                <View style={styles.bridgeHeader}>
+                  <View style={styles.bridgeIconBox}>
+                    <Ionicons name="warning" size={22} color="#f59e0b" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.bridgeName}>{ba.bridge_name}</Text>
+                    <Text style={styles.bridgeDistance}>{Math.round(ba.distance_miles)} miles ahead</Text>
+                  </View>
+                </View>
+                <View style={styles.bridgeClearanceRow}>
+                  <View style={styles.clearanceBox}>
+                    <Text style={styles.clearanceLabel}>CLEARANCE</Text>
+                    <Text style={styles.clearanceValue}>{ba.clearance_ft.toFixed(1)} ft</Text>
+                  </View>
+                  <View style={styles.clearanceDivider} />
+                  <View style={styles.clearanceBox}>
+                    <Text style={styles.clearanceLabel}>YOUR HEIGHT</Text>
+                    <Text style={styles.clearanceValueDanger}>{ba.vehicle_height_ft.toFixed(1)} ft</Text>
+                  </View>
+                </View>
+                <View style={styles.bridgeWarningRow}>
+                  <Ionicons name="alert-circle" size={16} color="#fecaca" />
+                  <Text style={styles.bridgeWarningText}>{ba.warning}</Text>
+                </View>
+              </View>
+            ))}
+
+            {truckerWarnings.map((w, idx) => (
+              <View key={`tw-${idx}`} style={styles.truckerWarningRow}>
+                <Ionicons name="alert-circle-outline" size={15} color="#f59e0b" />
+                <Text style={styles.truckerWarningText}>{w}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+
+        {/* ── Weather / Hazard Alerts Section ─────────────────────────── */}
         {!showAllClear ? (
           alerts && alerts.length > 0 ? (
-            alerts.map((alert, index) => {
+            <>
+              {(bridgeAlerts.length > 0 || truckerWarnings.length > 0) && (
+                <View style={[styles.sectionHeader, { marginBottom: 10 }]}>
+                  <Ionicons name="warning" size={18} color="#ef4444" />
+                  <Text style={styles.sectionTitle}>Weather / Hazard Alerts</Text>
+                  <View style={[styles.headerBadge, { marginLeft: 8 }]}>
+                    <Text style={styles.headerBadgeText}>{alerts.length}</Text>
+                  </View>
+                </View>
+              )}
+              {alerts.map((alert, index) => {
               const isExpanded = expandedCards.has(index);
               const ap = alert.properties || ({} as NonNullable<HazardAlert['properties']>);
               const eventTitle =
@@ -320,7 +406,8 @@ export default function RouteAlertsScreen() {
                   </View>
                 </TouchableOpacity>
               );
-            })
+            })}
+            </>
           ) : (
             <View style={styles.hazardSegmentsOnly}>
               <Ionicons name="warning" size={48} color="#f59e0b" />
@@ -562,5 +649,119 @@ const styles = StyleSheet.create({
     color: '#6b7280',
     fontSize: 14,
     marginTop: 4,
+  },
+  // ── Bridge / Clearance section ──────────────────────────────────────────
+  sectionBlock: {
+    marginBottom: 20,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+    gap: 8,
+  },
+  sectionTitle: {
+    color: '#f9fafb',
+    fontSize: 15,
+    fontWeight: '700',
+    flex: 1,
+  },
+  bridgeCard: {
+    backgroundColor: '#1e2433',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#f59e0b44',
+    marginBottom: 10,
+    overflow: 'hidden',
+  },
+  bridgeHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    gap: 10,
+  },
+  bridgeIconBox: {
+    width: 36,
+    height: 36,
+    borderRadius: 8,
+    backgroundColor: 'rgba(245,158,11,0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  bridgeName: {
+    color: '#f9fafb',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  bridgeDistance: {
+    color: '#9ca3af',
+    fontSize: 11.5,
+    marginTop: 2,
+  },
+  bridgeClearanceRow: {
+    flexDirection: 'row',
+    borderTopWidth: 1,
+    borderTopColor: '#374151',
+    marginHorizontal: 12,
+    paddingVertical: 10,
+    gap: 8,
+    alignItems: 'center',
+  },
+  clearanceBox: {
+    flex: 1,
+    alignItems: 'center',
+  },
+  clearanceLabel: {
+    color: '#6b7280',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    marginBottom: 3,
+  },
+  clearanceValue: {
+    color: '#22c55e',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  clearanceValueDanger: {
+    color: '#ef4444',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  clearanceDivider: {
+    width: 1,
+    height: 32,
+    backgroundColor: '#374151',
+  },
+  bridgeWarningRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 7,
+    backgroundColor: 'rgba(239,68,68,0.1)',
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    gap: 7,
+  },
+  bridgeWarningText: {
+    color: '#fca5a5',
+    fontSize: 12.5,
+    flex: 1,
+    lineHeight: 18,
+  },
+  truckerWarningRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    backgroundColor: 'rgba(245,158,11,0.08)',
+    borderRadius: 8,
+    padding: 10,
+    marginBottom: 6,
+  },
+  truckerWarningText: {
+    color: '#fbbf24',
+    fontSize: 12.5,
+    flex: 1,
+    lineHeight: 18,
   },
 });

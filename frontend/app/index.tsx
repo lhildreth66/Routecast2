@@ -54,6 +54,10 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 const IS_WEB = Platform.OS === 'web';
 
+// ─ client-side persistence keys ──────────────────────────────────────────
+const RECENT_ROUTES_KEY = 'rc_recent_routes_v1';
+const FAVORITES_KEY = 'rc_favorite_routes_v1';
+
 // Vehicle types for safety scoring
 const VEHICLE_TYPES = [
   { id: 'car', label: 'Car/Sedan', icon: 'car-sport-outline' },
@@ -330,21 +334,70 @@ export default function HomeScreen() {
   };
 
   const fetchRecentRoutes = async () => {
+    // 1. Try backend; if it returns data cache it locally
     try {
-      const response = await axios.get(`${API_BASE}/api/routes/history`);
-      setRecentRoutes(response.data.slice(0, 5));
+      const response = await axios.get(`${API_BASE}/api/routes/history`, { timeout: 8000 });
+      const routes: SavedRoute[] = (response.data || []).slice(0, 10);
+      if (routes.length > 0) {
+        setRecentRoutes(routes.slice(0, 5));
+        try { await AsyncStorage.setItem(RECENT_ROUTES_KEY, JSON.stringify(routes)); } catch {}
+        return;
+      }
     } catch (err) {
-      console.log('Error fetching history:', err);
+      console.log('fetchRecentRoutes backend error (falling back to local):', err);
     }
+    // 2. Fall back to AsyncStorage
+    try {
+      const raw = await AsyncStorage.getItem(RECENT_ROUTES_KEY);
+      if (raw) {
+        const local: SavedRoute[] = JSON.parse(raw);
+        setRecentRoutes(local.slice(0, 5));
+      }
+    } catch { /* corrupt storage – silently ignore */ }
+  };
+
+  const saveToLocalRecents = async (org: string, dest: string, stps: StopPoint[]) => {
+    try {
+      const raw = await AsyncStorage.getItem(RECENT_ROUTES_KEY);
+      const existing: SavedRoute[] = raw ? JSON.parse(raw) : [];
+      const entry: SavedRoute = {
+        id: String(Date.now()),
+        origin: org,
+        destination: dest,
+        stops: stps,
+        is_favorite: false,
+        created_at: new Date().toISOString(),
+      };
+      // Deduplicate by origin+destination, newest first
+      const deduped = [entry, ...existing.filter(
+        (r) => !(r.origin === org && r.destination === dest)
+      )].slice(0, 10);
+      await AsyncStorage.setItem(RECENT_ROUTES_KEY, JSON.stringify(deduped));
+      setRecentRoutes(deduped.slice(0, 5));
+    } catch { /* non-fatal */ }
   };
 
   const fetchFavoriteRoutes = async () => {
+    // 1. Try backend
     try {
-      const response = await axios.get(`${API_BASE}/api/routes/favorites`);
-      setFavoriteRoutes(response.data);
+      const response = await axios.get(`${API_BASE}/api/routes/favorites`, { timeout: 8000 });
+      const routes: SavedRoute[] = response.data || [];
+      if (routes.length > 0) {
+        setFavoriteRoutes(routes);
+        try { await AsyncStorage.setItem(FAVORITES_KEY, JSON.stringify(routes)); } catch {}
+        return;
+      }
     } catch (err) {
-      console.log('Error fetching favorites:', err);
+      console.log('fetchFavoriteRoutes backend error (falling back to local):', err);
     }
+    // 2. Fall back to AsyncStorage
+    try {
+      const raw = await AsyncStorage.getItem(FAVORITES_KEY);
+      if (raw) {
+        const local: SavedRoute[] = JSON.parse(raw);
+        setFavoriteRoutes(local);
+      }
+    } catch { /* corrupt storage – silently ignore */ }
   };
 
   const handleGetWeather = async () => {
@@ -427,6 +480,8 @@ export default function HomeScreen() {
       
       // Cache the route for offline
       await AsyncStorage.setItem('lastRoute', JSON.stringify(routeData));
+      // Save to local recents (ensures list updates even if backend history is unavailable)
+      await saveToLocalRecents(origin.trim(), destination.trim(), stops);
 
       router.push({
         pathname: '/route',
@@ -456,25 +511,50 @@ export default function HomeScreen() {
       setError('Enter a route first to save as favorite');
       return;
     }
-
+    const newFav: SavedRoute = {
+      id: String(Date.now()),
+      origin: origin.trim(),
+      destination: destination.trim(),
+      stops,
+      is_favorite: true,
+      created_at: new Date().toISOString(),
+    };
+    // Optimistic local save – always works even without backend
+    try {
+      const raw = await AsyncStorage.getItem(FAVORITES_KEY);
+      const existing: SavedRoute[] = raw ? JSON.parse(raw) : [];
+      const deduped = [newFav, ...existing.filter(
+        (f) => !(f.origin === newFav.origin && f.destination === newFav.destination)
+      )];
+      await AsyncStorage.setItem(FAVORITES_KEY, JSON.stringify(deduped));
+      setFavoriteRoutes(deduped);
+    } catch { /* non-fatal */ }
+    // Fire-and-forget backend save
     try {
       await axios.post(`${API_BASE}/api/routes/favorites`, {
         origin: origin.trim(),
         destination: destination.trim(),
-        stops: stops,
+        stops,
       });
-      fetchFavoriteRoutes();
     } catch (err) {
-      console.error('Error saving favorite:', err);
+      console.log('addToFavorites backend save failed (local save succeeded):', err);
     }
   };
 
   const removeFavorite = async (id: string) => {
+    // Optimistic local remove first
+    try {
+      const raw = await AsyncStorage.getItem(FAVORITES_KEY);
+      const existing: SavedRoute[] = raw ? JSON.parse(raw) : [];
+      const updated = existing.filter((f) => f.id !== id);
+      await AsyncStorage.setItem(FAVORITES_KEY, JSON.stringify(updated));
+      setFavoriteRoutes(updated);
+    } catch { /* non-fatal */ }
+    // Fire-and-forget backend delete
     try {
       await axios.delete(`${API_BASE}/api/routes/favorites/${id}`);
-      fetchFavoriteRoutes();
     } catch (err) {
-      console.error('Error removing favorite:', err);
+      console.log('removeFavorite backend delete failed (local remove succeeded):', err);
     }
   };
 
