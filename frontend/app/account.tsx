@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -20,10 +20,19 @@ import axios from 'axios';
 const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 export default function AccountScreen() {
-  const { user, accessToken, logout, refreshUser } = useAuth();
+  const { user, accessToken, isAuthenticated, hasHydrated, isLoading: authLoading, logout, refreshUser } = useAuth();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [logoutLoading, setLogoutLoading] = useState(false);
+
+  // AuthContext hydration is passive: it restores tokens without calling
+  // /auth/me. Screens that need the user object must call refreshUser().
+  useEffect(() => {
+    if (accessToken && !user) {
+      refreshUser();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accessToken]);
 
   const handleManageSubscription = async () => {
     if (!user?.subscription_provider || user.subscription_provider !== 'stripe') {
@@ -129,7 +138,17 @@ export default function AccountScreen() {
     });
   };
 
-  if (!user) {
+  if (!hasHydrated || authLoading || (isAuthenticated && !user)) {
+    // Still hydrating or loading the user profile – show a neutral spinner
+    // so we never flash "Not Signed In" for an already-authenticated session.
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color="#eab308" />
+      </View>
+    );
+  }
+
+  if (!isAuthenticated) {
     return (
       <View style={styles.container}>
         <SafeAreaView style={styles.safeArea}>
