@@ -34,6 +34,10 @@ from common.features import SOLAR_FORECAST, PROPANE_USAGE, WATER_BUDGET, WIND_SH
 from road_passability_service import RoadPassabilityService
 from solar_forecast_service import SolarForecastService
 from campsite_index_service import SiteFactors, Weights, score as campsite_score
+from propane_usage_service import PropaneUsageService
+from water_budget_service import WaterBudgetService
+from wind_shelter_service import WindShelterService, Ridge
+from connectivity_prediction_service import predict_cell_signal_at_location, cell_bars_probability, obstruction_risk
 from claim_log_service import HazardEvent as ClaimHazardEvent, WeatherSnapshot as ClaimWeatherSnapshot, build_claim_log
 from claim_log_pdf import export_claim_log_to_pdf
 from notifications import NotificationService, ExpoPushClient, router as notifications_router, get_route_alert_service
