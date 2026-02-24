@@ -22,8 +22,9 @@ export interface PropaneInputs {
   rvLengthFt:     number;
   people:         number;
   showersPerDay:  number;
-  showerMinutes:  number;
-  tankSizeLb:     number;
+  showerMinutes:     number;
+  waterHeaterMode:    'propane' | 'electric' | 'both';
+  tankSizeLb:         number;
   tankFillPct:    number;
   furnaceBTU:     number;
   mealsPerDay:    number;
@@ -96,10 +97,15 @@ export function calcPropane(i: PropaneInputs): PropaneResult {
   const furnaceGalPerNight  = furnaceBTUPerNight / PROPANE_BTU_PER_GAL;
 
   // 3. Hot water
-  const hotGalPerShower     = i.showerMinutes * DEFAULT_SHOWER_GPM * DEFAULT_HOT_MIX;
-  const dailyHotGal         = hotGalPerShower * i.showersPerDay * i.people;
-  const hotWaterBTUPerDay   = dailyHotGal * HOT_WATER_BTU_PER_GAL_60F * inletMultiplier(i.outsideTempF);
-  const hotWaterGalPerNight = hotWaterBTUPerDay / PROPANE_BTU_PER_GAL;
+  const hotGalPerShower        = i.showerMinutes * DEFAULT_SHOWER_GPM * DEFAULT_HOT_MIX;
+  const dailyHotGal             = hotGalPerShower * i.showersPerDay * i.people;
+  const hotWaterBTUPerDay       = dailyHotGal * HOT_WATER_BTU_PER_GAL_60F * inletMultiplier(i.outsideTempF);
+  const hotWaterGalRaw          = hotWaterBTUPerDay / PROPANE_BTU_PER_GAL;
+  // Apply water heater mode multiplier
+  const whMultiplier            = i.waterHeaterMode === 'electric' ? 0.0
+                                : i.waterHeaterMode === 'both'     ? 0.5
+                                : /* propane */                      1.0;
+  const hotWaterGalPerNight     = hotWaterGalRaw * whMultiplier;
 
   // 4. Other appliances
   const cookGalPerNight   = i.mealsPerDay * 0.10;

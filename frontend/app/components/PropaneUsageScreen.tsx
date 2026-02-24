@@ -111,7 +111,8 @@ const PropaneUsageScreen: React.FC = () => {
   const [rvLengthFt,      setRvLengthFt]      = useState(28);
   const [people,          setPeople]          = useState(2);
   const [showersPerDay,   setShowersPerDay]   = useState(1);
-  const [showerMinutes,   setShowerMinutes]   = useState<'2'|'5'|'8'|'10'>('5');
+  const [showerMinutes,    setShowerMinutes]    = useState<'2'|'5'|'8'|'10'>('5');
+  const [waterHeaterMode,  setWaterHeaterMode]  = useState<'propane'|'electric'|'both'>('propane');
   const [tankSizeLb,      setTankSizeLb]      = useState(40);
   const [tankFillPct,     setTankFillPct]     = useState(80);
   const [furnaceBTU,      setFurnaceBTU]      = useState(30_000);
@@ -123,13 +124,13 @@ const PropaneUsageScreen: React.FC = () => {
   // ── Live calculation ──
   const inputs: PropaneInputs = {
     outsideTempF, nights, nightHours, rvLengthFt,
-    people, showersPerDay, showerMinutes: parseInt(showerMinutes, 10),
+    people, showersPerDay, showerMinutes: parseInt(showerMinutes, 10), waterHeaterMode,
     tankSizeLb, tankFillPct,
     furnaceBTU, mealsPerDay, fridgeMode, genHoursPerDay,
   };
   const result: PropaneResult = useMemo(() => calcPropane(inputs), [
     outsideTempF, nights, nightHours, rvLengthFt,
-    people, showersPerDay, showerMinutes,
+    people, showersPerDay, showerMinutes, waterHeaterMode,
     tankSizeLb, tankFillPct,
     furnaceBTU, mealsPerDay, fridgeMode, genHoursPerDay,
   ]);
@@ -276,6 +277,26 @@ const PropaneUsageScreen: React.FC = () => {
           value={showerMinutes}
           onChange={v => setShowerMinutes(v)}
         />
+        <ToggleGroup
+          label="Water heater"
+          options={[
+            { label: 'Propane',  value: 'propane'  },
+            { label: 'Electric', value: 'electric' },
+            { label: 'Both',     value: 'both'     },
+          ]}
+          value={waterHeaterMode}
+          onChange={v => setWaterHeaterMode(v)}
+        />
+        {waterHeaterMode !== 'propane' && (
+          <View style={s.infoRow}>
+            <Ionicons name="information-circle-outline" size={14} color="#6b7280" />
+            <Text style={s.infoTxt}>
+              {waterHeaterMode === 'electric'
+                ? 'On hookups with electric water heater? Showers use 0 propane.'
+                : 'Half your hot water from electric, half from propane.'}
+            </Text>
+          </View>
+        )}
       </View>
 
       {/* Tank */}
@@ -346,6 +367,8 @@ const PropaneUsageScreen: React.FC = () => {
             ['Cook propane',              '0.10 gal/meal'],
             ['Fridge (propane mode)',      '0.20 gal/day'],
             ['Generator (propane)',        '0.40 gal/hr'],
+            ['Water heater (electric)',     '0% propane for showers'],
+            ['Water heater (both)',         '50% propane for showers'],
           ] as [string, string][]).map(([k, v]) => (
             <View key={k} style={s.assumRow}>
               <Text style={s.assumKey}>{k}</Text>
