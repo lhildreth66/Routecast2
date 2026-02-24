@@ -1,146 +1,141 @@
 /**
- * usePropaneUsage - React Hook for Propane Consumption Estimation
+ * propaneCalc — deterministic RV propane calculator
  *
- * Custom hook for calling the propane usage API endpoint and managing state.
- * Follows the same pattern as useSolarForecast.
+ * All math is client-side. No API calls. No hidden magic numbers.
+ * Constants, duty-cycle table, and length multipliers are verbatim from spec.
  */
 
-import { useState } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { API_BASE, buildUrl } from '../apiConfig';
+// ─── Constants (DO NOT CHANGE) ──────────────────────────────────────────────
+export const PROPANE_BTU_PER_GAL  = 91_500;
+export const PROPANE_LB_PER_GAL   = 4.2;
+const HOT_WATER_BTU_PER_GAL_60F   = 500;   // ~8.34 lb/gal × 60 °F rise
+const DEFAULT_SHOWER_GPM          = 2.0;
+const DEFAULT_HOT_MIX             = 0.60;
+export const DEFAULT_NIGHT_HOURS  = 10;
+const MAX_DUTY_CYCLE              = 0.90;
 
-// Type-safe interfaces matching API models
-
-export interface PropaneUsageRequest {
-  furnace_btu: number;
-  duty_cycle_pct: number;
-  nights_temp_f: number[];
-  people?: number;
-  subscription_id?: string;
+// ─── Input shape ─────────────────────────────────────────────────────────────
+export interface PropaneInputs {
+  outsideTempF:   number;
+  nights:         number;
+  nightHours:     number;
+  rvLengthFt:     number;
+  people:         number;
+  showersPerDay:  number;
+  showerMinutes:  number;
+  tankSizeLb:     number;
+  tankFillPct:    number;
+  furnaceBTU:     number;
+  mealsPerDay:    number;
+  fridgeMode:     'propane' | 'electric';
+  genHoursPerDay: number;
 }
 
-export interface PropaneUsageResponse {
-  daily_lbs?: number[] | null;
-  nights_temp_f?: number[] | null;
-  furnace_btu?: number | null;
-  duty_cycle_pct?: number | null;
-  people?: number | null;
-  advisory?: string | null;
-  is_premium_locked: boolean;
-  premium_message?: string | null;
+// ─── Output shape ─────────────────────────────────────────────────────────────
+export interface PropaneBreakdown {
+  furnaceGalPerNight:   number;
+  hotWaterGalPerNight:  number;
+  cookGalPerNight:      number;
+  fridgeGalPerNight:    number;
+  genGalPerNight:       number;
 }
 
-export interface UsePropaneUsageReturn {
-  estimate: (request: PropaneUsageRequest) => Promise<PropaneUsageResponse | null>;
-  loading: boolean;
-  error: string | null;
-  result: PropaneUsageResponse | null;
-  clearResult: () => void;
+export interface PropaneResult {
+  totalGalPerNight:  number;
+  totalLbPerNight:   number;
+  totalGalTrip:      number;
+  totalLbTrip:       number;
+  tankTotalGal:      number;
+  usableGal:         number;
+  nightsRemaining:   number;
+  breakdown:         PropaneBreakdown;
+  lowGalPerNight:    number;
+  highGalPerNight:   number;
+  effectiveDuty:     number;
 }
 
-/**
- * Hook for propane usage estimation
- *
- * Usage:
- * ```typescript
- * const { estimate, loading, error, result } = usePropaneUsage();
- *
- * await estimate({
- *   furnace_btu: 20000,
- *   duty_cycle_pct: 50,
- *   nights_temp_f: [35, 25, 45],
- *   people: 2,
- * });
- *
- * if (result?.is_premium_locked) {
- * // Handle premium response
- * } else if (result?.daily_lbs) {
- *   // Display results
- * }
- * ```
- */
-export const usePropaneUsage = (): UsePropaneUsageReturn => {
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<PropaneUsageResponse | null>(null);
+// ─── Internal helpers ────────────────────────────────────────────────────────
+function baseDutyCycle(tempF: number): number {
+  if (tempF >= 55) return 0.10;
+  if (tempF >= 45) return 0.20;
+  if (tempF >= 35) return 0.35;
+  if (tempF >= 25) return 0.50;
+  if (tempF >= 15) return 0.65;
+  return 0.80;
+}
 
-  const estimate = async (
-    request: PropaneUsageRequest
-  ): Promise<PropaneUsageResponse | null> => {
-    setLoading(true);
-    setError(null);
+function lengthMultiplier(ft: number): number {
+  if (ft <= 20) return 0.85;
+  if (ft <= 25) return 0.95;
+  if (ft <= 30) return 1.00;
+  if (ft <= 35) return 1.10;
+  if (ft <= 40) return 1.20;
+  return 1.30;
+}
 
-    try {
-      // Retrieve subscription ID from AsyncStorage if not provided
-      let subscriptionId: string | undefined = request.subscription_id;
-      if (!subscriptionId) {
-        try {
-          subscriptionId = (await AsyncStorage.getItem('subscription_id')) || undefined;
-        } catch (e) {
-          console.log('Could not retrieve subscription ID from storage');
-        }
-      }
+function inletMultiplier(tempF: number): number {
+  if (tempF >= 60) return 1.0;
+  if (tempF >= 40) return 1.2;
+  if (tempF >= 20) return 1.4;
+  return 1.6;
+}
 
-      // Call API endpoint
-      const response = await fetch(buildUrl('propane-usage'), {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          ...request,
-          subscription_id: subscriptionId,
-        }),
-      });
+function clamp(val: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, val));
+}
 
-      if (!response.ok) {
-        // Try to parse error detail from response
-        let errorDetail = `HTTP ${response.status}`;
-        try {
-          const errorData = await response.json();
-          if (errorData.detail) {
-            errorDetail = errorData.detail;
-          }
-        } catch {
-          // If response isn't JSON, use status message
-          errorDetail = response.statusText || `HTTP ${response.status}`;
-        }
-        throw new Error(errorDetail);
-      }
+// ─── Main calculator ─────────────────────────────────────────────────────────
+export function calcPropane(i: PropaneInputs): PropaneResult {
+  // 2. Furnace
+  const duty = clamp(
+    baseDutyCycle(i.outsideTempF) * lengthMultiplier(i.rvLengthFt),
+    0,
+    MAX_DUTY_CYCLE
+  );
+  const furnaceBTUPerNight  = i.furnaceBTU * duty * i.nightHours;
+  const furnaceGalPerNight  = furnaceBTUPerNight / PROPANE_BTU_PER_GAL;
 
-      const data: PropaneUsageResponse = await response.json();
+  // 3. Hot water
+  const hotGalPerShower     = i.showerMinutes * DEFAULT_SHOWER_GPM * DEFAULT_HOT_MIX;
+  const dailyHotGal         = hotGalPerShower * i.showersPerDay * i.people;
+  const hotWaterBTUPerDay   = dailyHotGal * HOT_WATER_BTU_PER_GAL_60F * inletMultiplier(i.outsideTempF);
+  const hotWaterGalPerNight = hotWaterBTUPerDay / PROPANE_BTU_PER_GAL;
 
-      // Detect premium-locked response
-      if (data.is_premium_locked && data.premium_message) {
-        setError(data.premium_message);
-        setResult(data);
-        setLoading(false);
-        return data;
-      }
+  // 4. Other appliances
+  const cookGalPerNight   = i.mealsPerDay * 0.10;
+  const fridgeGalPerNight = i.fridgeMode === 'propane' ? 0.20 : 0;
+  const genGalPerNight    = i.genHoursPerDay * 0.40;
 
-      // Success
-      setResult(data);
-      setLoading(false);
-      return data;
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-      console.error('Error in usePropaneUsage:', errorMessage);
-      setError(errorMessage);
-      setLoading(false);
-      return null;
-    }
-  };
+  // 5. Totals
+  const totalGalPerNight = (
+    furnaceGalPerNight +
+    hotWaterGalPerNight +
+    cookGalPerNight +
+    fridgeGalPerNight +
+    genGalPerNight
+  );
+  const totalGalTrip = totalGalPerNight * i.nights;
 
-  const clearResult = () => {
-    setResult(null);
-    setError(null);
-  };
+  // 6. Tank
+  const tankTotalGal    = i.tankSizeLb / PROPANE_LB_PER_GAL;
+  const usableGal       = tankTotalGal * (i.tankFillPct / 100);
+  const nightsRemaining = totalGalPerNight > 0 ? usableGal / totalGalPerNight : Infinity;
+
+  // 7. Ranges (±20%)
+  const lowGalPerNight  = totalGalPerNight * 0.8;
+  const highGalPerNight = totalGalPerNight * 1.2;
 
   return {
-    estimate,
-    loading,
-    error,
-    result,
-    clearResult,
+    totalGalPerNight,
+    totalLbPerNight:  totalGalPerNight * PROPANE_LB_PER_GAL,
+    totalGalTrip,
+    totalLbTrip:      totalGalTrip * PROPANE_LB_PER_GAL,
+    tankTotalGal,
+    usableGal,
+    nightsRemaining,
+    breakdown: { furnaceGalPerNight, hotWaterGalPerNight, cookGalPerNight, fridgeGalPerNight, genGalPerNight },
+    lowGalPerNight,
+    highGalPerNight,
+    effectiveDuty: duty,
   };
-};
+}

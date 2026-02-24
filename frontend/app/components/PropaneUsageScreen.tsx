@@ -1,632 +1,449 @@
 /**
- * PropaneUsageScreen - React Native Component for Propane Consumption Estimation
+ * PropaneUsageScreen — deterministic RV propane planner
  *
- * Complete UI for propane usage estimation with inputs and results visualization.
- *
- * Usage in navigation:
- * ```typescript
- * <Stack.Screen
- *   name="propane-usage"
- *   component={PropaneUsageScreen}
- *   options={{ title: '🔥 Propane Usage' }}
- * />
- * ```
+ * Answers: "How many nights will my propane last?"
+ * All math is client-side. No API calls.
  */
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  Alert,
-  ActivityIndicator,
   ScrollView,
   TouchableOpacity,
-  Dimensions,
 } from 'react-native';
-import { usePropaneUsage } from '../../lib/hooks/usePropaneUsage';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import {
+  calcPropane,
+  PropaneInputs,
+  PropaneResult,
+  PROPANE_BTU_PER_GAL,
+  PROPANE_LB_PER_GAL,
+  DEFAULT_NIGHT_HOURS,
+} from '../hooks/usePropaneUsage';
 
-const COLORS = {
-  primary: '#22c55e',      // Green
-  secondary: '#3b82f6',    // Blue
-  warning: '#f59e0b',      // Amber
-  danger: '#ef4444',       // Red
-  background: '#f9fafb',   // Light gray
-  surface: '#ffffff',      // White
-  border: '#e5e7eb',       // Border gray
-  text: '#1f2937',         // Dark text
-  textSecondary: '#6b7280', // Light text
+// ─── Format helpers ───────────────────────────────────────────────────────────
+const fmt1 = (n: number) => n.toFixed(1);
+const fmt2 = (n: number) => n.toFixed(2);
+const pct  = (n: number, total: number) =>
+  total > 0 ? Math.round((n / total) * 100) : 0;
+
+// ─── Stepper ─────────────────────────────────────────────────────────────────
+const Stepper = ({
+  label, onDec, onInc, display,
+}: {
+  label: string;
+  onDec: () => void;
+  onInc: () => void;
+  display: string;
+}) => (
+  <View style={s.stepRow}>
+    <Text style={s.stepLabel}>{label}</Text>
+    <View style={s.stepControls}>
+      <TouchableOpacity style={s.stepBtn} onPress={onDec}>
+        <Text style={s.stepBtnTxt}>−</Text>
+      </TouchableOpacity>
+      <Text style={s.stepVal}>{display}</Text>
+      <TouchableOpacity style={s.stepBtn} onPress={onInc}>
+        <Text style={s.stepBtnTxt}>+</Text>
+      </TouchableOpacity>
+    </View>
+  </View>
+);
+
+// ─── Toggle group ─────────────────────────────────────────────────────────────
+function ToggleGroup<T extends string>({
+  label, options, value, onChange,
+}: {
+  label: string;
+  options: { label: string; value: T }[];
+  value: T;
+  onChange: (v: T) => void;
+}) {
+  return (
+    <View style={s.toggleRow}>
+      <Text style={s.stepLabel}>{label}</Text>
+      <View style={s.toggleGroup}>
+        {options.map(o => (
+          <TouchableOpacity
+            key={o.value}
+            style={[s.toggleOpt, value === o.value && s.toggleOptActive]}
+            onPress={() => onChange(o.value)}
+          >
+            <Text style={[s.toggleOptTxt, value === o.value && s.toggleOptTxtActive]}>
+              {o.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+// ─── Breakdown bar row ───────────────────────────────────────────────────────
+const BreakdownRow = ({
+  icon, label, gal, totalGal,
+}: { icon: string; label: string; gal: number; totalGal: number }) => {
+  const p = pct(gal, totalGal);
+  return (
+    <View style={s.bkRow}>
+      <Text style={s.bkIcon}>{icon}</Text>
+      <View style={s.bkBody}>
+        <View style={s.bkLabelRow}>
+          <Text style={s.bkLabel}>{label}</Text>
+          <Text style={s.bkVal}>{fmt2(gal)} gal ({p}%)</Text>
+        </View>
+        <View style={s.bkBarBg}>
+          <View style={[s.bkBarFill, { width: `${p}%` as any }]} />
+        </View>
+      </View>
+    </View>
+  );
 };
 
+// ─── Main component ───────────────────────────────────────────────────────────
 const PropaneUsageScreen: React.FC = () => {
-  // Hooks
-  const { estimate, loading, error, result, clearResult } = usePropaneUsage();
+  // ── Inputs ──
+  const [outsideTempF,    setOutsideTempF]    = useState(35);
+  const [nights,          setNights]          = useState(3);
+  const [nightHours,      setNightHours]      = useState(DEFAULT_NIGHT_HOURS);
+  const [rvLengthFt,      setRvLengthFt]      = useState(28);
+  const [people,          setPeople]          = useState(2);
+  const [showersPerDay,   setShowersPerDay]   = useState(1);
+  const [showerMinutes,   setShowerMinutes]   = useState<'2'|'5'|'8'|'10'>('5');
+  const [tankSizeLb,      setTankSizeLb]      = useState(40);
+  const [tankFillPct,     setTankFillPct]     = useState(80);
+  const [furnaceBTU,      setFurnaceBTU]      = useState(30_000);
+  const [mealsPerDay,     setMealsPerDay]     = useState(2);
+  const [fridgeMode,      setFridgeMode]      = useState<'propane'|'electric'>('electric');
+  const [genHoursPerDay,  setGenHoursPerDay]  = useState(0);
+  const [showAssumptions, setShowAssumptions] = useState(false);
 
-  // State for inputs
-  const [furnaceBTU, setFurnaceBTU] = useState(20000);
-  const [dutyCyclePct, setDutyCyclePct] = useState(50);
-  const [people, setPeople] = useState(2);
-  const [nights, setNights] = useState<number[]>([35, 35, 35]);
-  const [tempInput, setTempInput] = useState('35');
+  // ── Live calculation ──
+  const inputs: PropaneInputs = {
+    outsideTempF, nights, nightHours, rvLengthFt,
+    people, showersPerDay, showerMinutes: parseInt(showerMinutes, 10),
+    tankSizeLb, tankFillPct,
+    furnaceBTU, mealsPerDay, fridgeMode, genHoursPerDay,
+  };
+  const result: PropaneResult = useMemo(() => calcPropane(inputs), [
+    outsideTempF, nights, nightHours, rvLengthFt,
+    people, showersPerDay, showerMinutes,
+    tankSizeLb, tankFillPct,
+    furnaceBTU, mealsPerDay, fridgeMode, genHoursPerDay,
+  ]);
 
-  // Furnace preset options
-  const FURNACE_PRESETS = [
-    { label: 'Small (10k)', value: 10000 },
-    { label: 'Standard (20k)', value: 20000 },
-    { label: 'Large (30k)', value: 30000 },
-    { label: 'Extra Large (40k)', value: 40000 },
+  const nightsColor =
+    result.nightsRemaining >= nights       ? '#22c55e' :
+    result.nightsRemaining >= nights * 0.7 ? '#f59e0b' : '#ef4444';
+
+  const SHOWER_OPTS: { label: string; value: '2'|'5'|'8'|'10' }[] = [
+    { label: '2 min',  value: '2'  },
+    { label: '5 min',  value: '5'  },
+    { label: '8 min',  value: '8'  },
+    { label: '10 min', value: '10' },
   ];
 
-  // Temperature adjustment helpers
-  const addTemperature = () => {
-    const temp = parseInt(tempInput, 10);
-    if (!isNaN(temp) && temp >= -50 && temp <= 110) {
-      setNights([...nights, temp]);
-    } else {
-      Alert.alert('Invalid Temperature', 'Please enter a value between -50°F and 110°F');
-    }
-  };
-
-  const removeTemperature = (index: number) => {
-    const updated = nights.filter((_, i) => i !== index);
-    setNights(updated);
-  };
-
-  const updateTemperature = (index: number, value: string) => {
-    const temp = parseInt(value, 10);
-    if (!isNaN(temp)) {
-      const updated = [...nights];
-      updated[index] = temp;
-      setNights(updated);
-    }
-  };
-
-  // Handle forecast
-  const handleEstimate = async () => {
-    if (nights.length === 0) {
-      Alert.alert('No Nights', 'Add at least one night temperature');
-      return;
-    }
-
-    const response = await estimate({
-      furnace_btu: furnaceBTU,
-      duty_cycle_pct: dutyCyclePct,
-      nights_temp_f: nights,
-      people,
-    });
-
-    if (!response) {
-      Alert.alert('Error', error || 'Failed to estimate propane usage');
-      return;
-    }
-
-    if (response.daily_lbs && response.daily_lbs.length > 0) {
-      const totalLbs = response.daily_lbs.reduce((a, b) => a + b, 0);
-      const avgLbs = totalLbs / response.daily_lbs.length;
-      Alert.alert(
-        '⛽ Propane Estimate',
-        `Total: ${totalLbs.toFixed(1)} lbs\nAverage: ${avgLbs.toFixed(2)} lbs/day\n\n${response.advisory || ''}`
-      );
-    }
-  };
-
-  // Color helper for consumption level
-  const getConsumptionColor = (lbs: number): string => {
-    if (lbs >= 2.0) return COLORS.danger;        // Red: very high
-    if (lbs >= 1.5) return COLORS.warning;       // Amber: high
-    if (lbs >= 1.0) return COLORS.secondary;     // Blue: medium
-    return COLORS.primary;                       // Green: low
-  };
-
-  const getConsumptionLabel = (lbs: number): string => {
-    if (lbs >= 2.0) return 'Very High';
-    if (lbs >= 1.5) return 'High';
-    if (lbs >= 1.0) return 'Medium';
-    return 'Low';
-  };
-
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+    <ScrollView style={s.root} contentContainerStyle={s.content} showsVerticalScrollIndicator={false}>
+
       {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.title}>⛽ Propane Usage</Text>
-        <Text style={styles.subtitle}>Estimate daily consumption for your trip</Text>
+      <Text style={s.h1}>⛽ Propane Planner</Text>
+      <Text style={s.subtitle}>How many nights will my propane last?</Text>
+
+      {/* ── HERO RESULT ── */}
+      <View style={s.heroCard}>
+        <Text style={[s.heroNights, { color: nightsColor }]}>
+          {isFinite(result.nightsRemaining) ? fmt1(result.nightsRemaining) : '∞'}
+        </Text>
+        <Text style={s.heroLabel}>nights remaining</Text>
+        <Text style={s.heroSub}>
+          {fmt2(result.totalGalPerNight)} gal/night · {fmt1(result.totalLbPerNight)} lb/night
+        </Text>
+        <View style={s.heroDivider} />
+        <View style={s.heroRow}>
+          <View style={s.heroStat}>
+            <Text style={s.heroStatVal}>{fmt2(result.usableGal)}</Text>
+            <Text style={s.heroStatLbl}>usable gal</Text>
+          </View>
+          <View style={s.heroStat}>
+            <Text style={s.heroStatVal}>{fmt2(result.totalGalTrip)}</Text>
+            <Text style={s.heroStatLbl}>trip needs (gal)</Text>
+          </View>
+          <View style={s.heroStat}>
+            <Text style={s.heroStatVal}>{fmt1(result.totalLbTrip)}</Text>
+            <Text style={s.heroStatLbl}>trip needs (lb)</Text>
+          </View>
+        </View>
       </View>
 
-      {/* Error Display */}
-      {error && (
-        <View style={styles.errorBox}>
-          <Text style={styles.errorText}>⚠️ {error}</Text>
+      {/* ── Low / Typical / High ── */}
+      <View style={s.rangeCard}>
+        <Text style={s.sectionTitle}>Range (±20%)</Text>
+        <View style={s.rangeRow}>
+          <View style={s.rangeStat}>
+            <Text style={[s.rangeVal, { color: '#22c55e' }]}>{fmt2(result.lowGalPerNight)}</Text>
+            <Text style={s.rangeLbl}>LOW gal/night</Text>
+          </View>
+          <View style={s.rangeStat}>
+            <Text style={[s.rangeVal, { color: '#f59e0b' }]}>{fmt2(result.totalGalPerNight)}</Text>
+            <Text style={s.rangeLbl}>TYPICAL</Text>
+          </View>
+          <View style={s.rangeStat}>
+            <Text style={[s.rangeVal, { color: '#ef4444' }]}>{fmt2(result.highGalPerNight)}</Text>
+            <Text style={s.rangeLbl}>HIGH gal/night</Text>
+          </View>
         </View>
-      )}
+      </View>
 
-      {/* Furnace Section */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>🔥 Furnace</Text>
+      {/* ── Breakdown ── */}
+      <View style={s.card}>
+        <Text style={s.sectionTitle}>📊 Breakdown (per night)</Text>
+        <BreakdownRow icon="🔥" label="Furnace"    gal={result.breakdown.furnaceGalPerNight}   totalGal={result.totalGalPerNight} />
+        <BreakdownRow icon="🚿" label="Showers"    gal={result.breakdown.hotWaterGalPerNight}  totalGal={result.totalGalPerNight} />
+        <BreakdownRow icon="🍳" label="Cooking"    gal={result.breakdown.cookGalPerNight}      totalGal={result.totalGalPerNight} />
+        <BreakdownRow icon="❄️"  label="Fridge"     gal={result.breakdown.fridgeGalPerNight}    totalGal={result.totalGalPerNight} />
+        <BreakdownRow icon="⚡"  label="Generator"  gal={result.breakdown.genGalPerNight}       totalGal={result.totalGalPerNight} />
+      </View>
 
-        {/* Furnace BTU Presets */}
-        <Text style={styles.label}>Furnace Capacity:</Text>
-        <View style={styles.presetGrid}>
-          {FURNACE_PRESETS.map((preset) => (
-            <TouchableOpacity
-              key={preset.value}
-              style={[
-                styles.presetButton,
-                furnaceBTU === preset.value && styles.presetButtonActive,
-              ]}
-              onPress={() => setFurnaceBTU(preset.value)}
-            >
-              <Text
-                style={[
-                  styles.presetButtonText,
-                  furnaceBTU === preset.value && styles.presetButtonTextActive,
-                ]}
-              >
-                {preset.label}
-              </Text>
-            </TouchableOpacity>
+      {/* ── INPUTS ── */}
+
+      {/* Trip & Weather */}
+      <View style={s.card}>
+        <Text style={s.sectionTitle}>🌡️ Trip & Weather</Text>
+        <Stepper
+          label="Outside temp (°F)"
+          display={`${outsideTempF}°F`}
+          onDec={() => setOutsideTempF(v => v - 5)}
+          onInc={() => setOutsideTempF(v => v + 5)}
+        />
+        <Stepper
+          label="Trip length (nights)"
+          display={String(nights)}
+          onDec={() => setNights(v => Math.max(1, v - 1))}
+          onInc={() => setNights(v => v + 1)}
+        />
+        <Stepper
+          label="Heating hours/night"
+          display={String(nightHours)}
+          onDec={() => setNightHours(v => Math.max(1, v - 1))}
+          onInc={() => setNightHours(v => Math.min(24, v + 1))}
+        />
+      </View>
+
+      {/* RV */}
+      <View style={s.card}>
+        <Text style={s.sectionTitle}>🚐 RV</Text>
+        <Stepper
+          label="RV length (ft)"
+          display={`${rvLengthFt} ft`}
+          onDec={() => setRvLengthFt(v => Math.max(10, v - 1))}
+          onInc={() => setRvLengthFt(v => v + 1)}
+        />
+        <Stepper
+          label="Furnace output"
+          display={`${(furnaceBTU / 1000).toFixed(0)}k BTU`}
+          onDec={() => setFurnaceBTU(v => Math.max(10_000, v - 5_000))}
+          onInc={() => setFurnaceBTU(v => v + 5_000)}
+        />
+        <View style={s.infoRow}>
+          <Ionicons name="information-circle-outline" size={14} color="#6b7280" />
+          <Text style={s.infoTxt}>
+            Calculated duty cycle: {Math.round(result.effectiveDuty * 100)}% (temp {outsideTempF}°F, length {rvLengthFt} ft)
+          </Text>
+        </View>
+      </View>
+
+      {/* People & Showers */}
+      <View style={s.card}>
+        <Text style={s.sectionTitle}>👥 People & Showers</Text>
+        <Stepper
+          label="People"
+          display={String(people)}
+          onDec={() => setPeople(v => Math.max(1, v - 1))}
+          onInc={() => setPeople(v => v + 1)}
+        />
+        <Stepper
+          label="Showers / person / day"
+          display={fmt1(showersPerDay)}
+          onDec={() => setShowersPerDay(v => Math.max(0, parseFloat(fmt1(v - 0.5))))}
+          onInc={() => setShowersPerDay(v => parseFloat(fmt1(v + 0.5)))}
+        />
+        <ToggleGroup
+          label="Shower duration"
+          options={SHOWER_OPTS}
+          value={showerMinutes}
+          onChange={v => setShowerMinutes(v)}
+        />
+      </View>
+
+      {/* Tank */}
+      <View style={s.card}>
+        <Text style={s.sectionTitle}>🛢️ Propane Tank</Text>
+        <Stepper
+          label="Tank size (lb)"
+          display={`${tankSizeLb} lb  (${fmt2(tankSizeLb / PROPANE_LB_PER_GAL)} gal)`}
+          onDec={() => setTankSizeLb(v => Math.max(5, v - 5))}
+          onInc={() => setTankSizeLb(v => v + 5)}
+        />
+        <Stepper
+          label="Current fill level"
+          display={`${tankFillPct}%`}
+          onDec={() => setTankFillPct(v => Math.max(0, v - 5))}
+          onInc={() => setTankFillPct(v => Math.min(100, v + 5))}
+        />
+      </View>
+
+      {/* Appliances */}
+      <View style={s.card}>
+        <Text style={s.sectionTitle}>🔌 Appliances</Text>
+        <Stepper
+          label="Meals cooked / day"
+          display={String(mealsPerDay)}
+          onDec={() => setMealsPerDay(v => Math.max(0, v - 1))}
+          onInc={() => setMealsPerDay(v => Math.min(5, v + 1))}
+        />
+        <ToggleGroup
+          label="Fridge runs on"
+          options={[
+            { label: 'Electric', value: 'electric' },
+            { label: 'Propane',  value: 'propane'  },
+          ]}
+          value={fridgeMode}
+          onChange={v => setFridgeMode(v)}
+        />
+        <Stepper
+          label="Generator (propane) hrs/day"
+          display={String(genHoursPerDay)}
+          onDec={() => setGenHoursPerDay(v => Math.max(0, v - 1))}
+          onInc={() => setGenHoursPerDay(v => Math.min(8, v + 1))}
+        />
+      </View>
+
+      {/* Assumptions accordion */}
+      <TouchableOpacity
+        style={s.accordionHeader}
+        onPress={() => setShowAssumptions(v => !v)}
+        activeOpacity={0.7}
+      >
+        <Text style={s.accordionTitle}>Assumptions & Constants</Text>
+        <Ionicons
+          name={showAssumptions ? 'chevron-up' : 'chevron-down'}
+          size={16}
+          color="#9ca3af"
+        />
+      </TouchableOpacity>
+      {showAssumptions && (
+        <View style={s.accordionBody}>
+          {([
+            ['PROPANE_BTU_PER_GAL',       '91,500 BTU/gal'],
+            ['PROPANE_LB_PER_GAL',        '4.2 lb/gal'],
+            ['HOT_WATER_BTU_PER_GAL_60F', '500 BTU/gal  (8.34 lb/gal × 60°F rise)'],
+            ['DEFAULT_SHOWER_GPM',        '2.0 gal/min'],
+            ['DEFAULT_HOT_MIX',           '60% hot water ratio'],
+            ['MAX_DUTY_CYCLE',            '90%'],
+            ['Cook propane',              '0.10 gal/meal'],
+            ['Fridge (propane mode)',      '0.20 gal/day'],
+            ['Generator (propane)',        '0.40 gal/hr'],
+          ] as [string, string][]).map(([k, v]) => (
+            <View key={k} style={s.assumRow}>
+              <Text style={s.assumKey}>{k}</Text>
+              <Text style={s.assumVal}>{v}</Text>
+            </View>
           ))}
         </View>
-
-        {/* Custom BTU Input */}
-        <Text style={styles.label}>Or enter custom BTU:</Text>
-        <View style={styles.inputGroup}>
-          <TouchableOpacity
-            style={styles.adjustButton}
-            onPress={() => setFurnaceBTU(Math.max(1000, furnaceBTU - 5000))}
-          >
-            <Text style={styles.adjustButtonText}>−</Text>
-          </TouchableOpacity>
-          <Text style={styles.inputValue}>{furnaceBTU} BTU</Text>
-          <TouchableOpacity
-            style={styles.adjustButton}
-            onPress={() => setFurnaceBTU(furnaceBTU + 5000)}
-          >
-            <Text style={styles.adjustButtonText}>+</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Duty Cycle */}
-        <Text style={styles.label}>Furnace Duty Cycle:</Text>
-        <View style={styles.inputGroup}>
-          <TouchableOpacity
-            style={styles.adjustButton}
-            onPress={() => setDutyCyclePct(Math.max(0, dutyCyclePct - 5))}
-          >
-            <Text style={styles.adjustButtonText}>−</Text>
-          </TouchableOpacity>
-          <Text style={styles.inputValue}>{dutyCyclePct.toFixed(0)}%</Text>
-          <TouchableOpacity
-            style={styles.adjustButton}
-            onPress={() => setDutyCyclePct(Math.min(100, dutyCyclePct + 5))}
-          >
-            <Text style={styles.adjustButtonText}>+</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* Environment Section */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>👥 Trip Setup</Text>
-
-        {/* People Count */}
-        <Text style={styles.label}>Number of People:</Text>
-        <View style={styles.inputGroup}>
-          <TouchableOpacity
-            style={styles.adjustButton}
-            onPress={() => setPeople(Math.max(1, people - 1))}
-          >
-            <Text style={styles.adjustButtonText}>−</Text>
-          </TouchableOpacity>
-          <Text style={styles.inputValue}>{people}</Text>
-          <TouchableOpacity
-            style={styles.adjustButton}
-            onPress={() => setPeople(people + 1)}
-          >
-            <Text style={styles.adjustButtonText}>+</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Temperature List */}
-        <Text style={styles.label}>Nightly Low Temperatures (°F):</Text>
-
-        {nights.length > 0 && (
-          <View style={styles.tempList}>
-            {nights.map((temp, index) => (
-              <View key={index} style={styles.tempItem}>
-                <View style={styles.inputGroup}>
-                  <TouchableOpacity
-                    style={styles.adjustButton}
-                    onPress={() => updateTemperature(index, (temp - 5).toString())}
-                  >
-                    <Text style={styles.adjustButtonText}>−</Text>
-                  </TouchableOpacity>
-                  <Text style={styles.inputValue}>{temp}°F</Text>
-                  <TouchableOpacity
-                    style={styles.adjustButton}
-                    onPress={() => updateTemperature(index, (temp + 5).toString())}
-                  >
-                    <Text style={styles.adjustButtonText}>+</Text>
-                  </TouchableOpacity>
-                </View>
-                <TouchableOpacity
-                  style={styles.removeButton}
-                  onPress={() => removeTemperature(index)}
-                >
-                  <Text style={styles.removeButtonText}>✕</Text>
-                </TouchableOpacity>
-              </View>
-            ))}
-          </View>
-        )}
-
-        {/* Add Temperature */}
-        <View style={styles.tempInput}>
-          <View style={[styles.inputGroup, { flex: 1 }]}>
-            <TouchableOpacity
-              style={styles.adjustButton}
-              onPress={() => setTempInput((parseInt(tempInput, 10) - 5).toString())}
-            >
-              <Text style={styles.adjustButtonText}>−</Text>
-            </TouchableOpacity>
-            <Text style={styles.inputValue}>{tempInput}°F</Text>
-            <TouchableOpacity
-              style={styles.adjustButton}
-              onPress={() => setTempInput((parseInt(tempInput, 10) + 5).toString())}
-            >
-              <Text style={styles.adjustButtonText}>+</Text>
-            </TouchableOpacity>
-          </View>
-          <TouchableOpacity
-            style={styles.addButton}
-            onPress={addTemperature}
-          >
-            <Text style={styles.addButtonText}>Add Day</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      {/* Results Section */}
-      {result && result.daily_lbs && (
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>📊 Daily Breakdown</Text>
-
-          <View style={styles.resultsList}>
-            {result.daily_lbs.map((lbs, index) => {
-              const temp = result.nights_temp_f?.[index] ?? 'N/A';
-              const color = getConsumptionColor(lbs);
-              const label = getConsumptionLabel(lbs);
-              const barWidth = (lbs / 2.5) * 100; // Scale to max 2.5 lbs
-
-              return (
-                <View key={index} style={styles.resultItem}>
-                  <View style={styles.resultLabel}>
-                    <Text style={styles.resultDate}>Day {index + 1}</Text>
-                    <Text style={styles.resultTemp}>{temp}°F</Text>
-                  </View>
-                  <View style={[styles.resultBar, { width: `${Math.min(barWidth, 100)}%`, backgroundColor: color }]}>
-                    <Text style={styles.resultBarText}>{lbs.toFixed(2)} lbs</Text>
-                  </View>
-                  <Text style={[styles.resultLabel, { color }]}>{label}</Text>
-                </View>
-              );
-            })}
-          </View>
-
-          {/* Advisory */}
-          {result.advisory && (
-            <View style={styles.advisory}>
-              <Text style={styles.advisoryText}>{result.advisory}</Text>
-            </View>
-          )}
-
-          {/* Clear Button */}
-          <TouchableOpacity
-            style={styles.clearButton}
-            onPress={clearResult}
-          >
-            <Text style={styles.clearButtonText}>Clear Results</Text>
-          </TouchableOpacity>
-        </View>
       )}
 
-      {/* Loading Indicator */}
-      {loading && (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={COLORS.primary} />
-          <Text style={styles.loadingText}>Calculating propane usage...</Text>
-        </View>
-      )}
-
-      {/* Main Action Button */}
-      {!loading && (
-        <TouchableOpacity
-          style={styles.estimateButton}
-          onPress={handleEstimate}
-          disabled={loading || nights.length === 0}
-        >
-          <Text style={styles.estimateButtonText}>📊 Estimate Propane Usage</Text>
-        </TouchableOpacity>
-      )}
+      <View style={{ height: 40 }} />
     </ScrollView>
   );
 };
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: COLORS.background,
-  },
+// ─── Styles ───────────────────────────────────────────────────────────────────
+const s = StyleSheet.create({
+  root:    { flex: 1, backgroundColor: '#0a0a0a' },
+  content: { paddingHorizontal: 16, paddingTop: 20, paddingBottom: 40 },
 
-  header: {
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 10,
-  },
+  h1:       { fontSize: 26, fontWeight: '700', color: '#f9fafb', marginBottom: 4 },
+  subtitle: { fontSize: 13, color: '#6b7280', marginBottom: 20 },
 
-  title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: COLORS.text,
-    marginBottom: 4,
+  // Hero
+  heroCard: {
+    backgroundColor: '#111827', borderRadius: 16, padding: 20,
+    alignItems: 'center', marginBottom: 12,
+    borderWidth: 1, borderColor: '#1f2937',
   },
+  heroNights:  { fontSize: 64, fontWeight: '800', lineHeight: 72 },
+  heroLabel:   { fontSize: 16, color: '#9ca3af', marginBottom: 4 },
+  heroSub:     { fontSize: 13, color: '#6b7280', marginBottom: 12 },
+  heroDivider: { width: '100%', height: 1, backgroundColor: '#1f2937', marginBottom: 12 },
+  heroRow:     { flexDirection: 'row', gap: 24 },
+  heroStat:    { alignItems: 'center' },
+  heroStatVal: { fontSize: 18, fontWeight: '700', color: '#f3f4f6' },
+  heroStatLbl: { fontSize: 10, color: '#6b7280', marginTop: 2 },
 
-  subtitle: {
-    fontSize: 14,
-    color: COLORS.textSecondary,
+  // Range
+  rangeCard: {
+    backgroundColor: '#111827', borderRadius: 12, padding: 16,
+    marginBottom: 12, borderWidth: 1, borderColor: '#1f2937',
   },
+  rangeRow:  { flexDirection: 'row', justifyContent: 'space-around', marginTop: 8 },
+  rangeStat: { alignItems: 'center' },
+  rangeVal:  { fontSize: 20, fontWeight: '700' },
+  rangeLbl:  { fontSize: 10, color: '#6b7280', marginTop: 2 },
 
-  section: {
-    marginHorizontal: 20,
-    marginBottom: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    backgroundColor: COLORS.surface,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: COLORS.border,
+  // Generic card
+  card: {
+    backgroundColor: '#111827', borderRadius: 12, padding: 16,
+    marginBottom: 12, borderWidth: 1, borderColor: '#1f2937',
   },
+  sectionTitle: { fontSize: 14, fontWeight: '600', color: '#e5e7eb', marginBottom: 12 },
 
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.text,
-    marginBottom: 12,
-  },
+  // Stepper
+  stepRow:     { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  stepLabel:   { fontSize: 13, color: '#d1d5db', flex: 1, flexShrink: 1, paddingRight: 8 },
+  stepControls:{ flexDirection: 'row', alignItems: 'center', gap: 8 },
+  stepBtn:     { width: 34, height: 34, borderRadius: 8, backgroundColor: '#1f2937', justifyContent: 'center', alignItems: 'center' },
+  stepBtnTxt:  { color: '#f9fafb', fontSize: 20, fontWeight: '600', lineHeight: 24 },
+  stepVal:     { minWidth: 90, textAlign: 'center', fontSize: 13, fontWeight: '600', color: '#f9fafb' },
 
-  label: {
-    fontSize: 13,
-    fontWeight: '500',
-    color: COLORS.textSecondary,
-    marginTop: 10,
-    marginBottom: 6,
-  },
+  // Toggle
+  toggleRow:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  toggleGroup:       { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
+  toggleOpt:         { paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, backgroundColor: '#1f2937', borderWidth: 1, borderColor: '#374151' },
+  toggleOptActive:   { backgroundColor: '#22c55e', borderColor: '#22c55e' },
+  toggleOptTxt:      { fontSize: 12, color: '#9ca3af', fontWeight: '500' },
+  toggleOptTxtActive:{ color: '#fff' },
 
-  errorBox: {
-    marginHorizontal: 20,
-    marginTop: 12,
-    marginBottom: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    backgroundColor: '#fee2e2',
-    borderLeftWidth: 4,
-    borderLeftColor: COLORS.danger,
-    borderRadius: 6,
-  },
+  // Info row
+  infoRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 4 },
+  infoTxt: { fontSize: 11, color: '#6b7280', flex: 1 },
 
-  errorText: {
-    fontSize: 13,
-    color: '#991b1b',
-    fontWeight: '500',
-  },
+  // Breakdown
+  bkRow:     { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
+  bkIcon:    { fontSize: 18, width: 24, textAlign: 'center' },
+  bkBody:    { flex: 1 },
+  bkLabelRow:{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 3 },
+  bkLabel:   { fontSize: 12, color: '#d1d5db', fontWeight: '500' },
+  bkVal:     { fontSize: 12, color: '#9ca3af' },
+  bkBarBg:   { height: 6, backgroundColor: '#1f2937', borderRadius: 3, overflow: 'hidden' },
+  bkBarFill: { height: 6, backgroundColor: '#22c55e', borderRadius: 3 },
 
-  inputGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 12,
+  // Accordion
+  accordionHeader: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    backgroundColor: '#111827', borderRadius: 12, padding: 16,
+    marginBottom: 2, borderWidth: 1, borderColor: '#1f2937',
   },
-
-  adjustButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 8,
-    backgroundColor: COLORS.primary,
-    justifyContent: 'center',
-    alignItems: 'center',
+  accordionTitle: { fontSize: 13, fontWeight: '500', color: '#9ca3af' },
+  accordionBody:  {
+    backgroundColor: '#0f172a', borderRadius: 12, padding: 16,
+    marginBottom: 12, borderWidth: 1, borderColor: '#1f2937',
   },
-
-  adjustButtonText: {
-    color: COLORS.surface,
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
-
-  inputValue: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.text,
-    minWidth: 60,
-    textAlign: 'center',
-  },
-
-  presetGrid: {
-    flexDirection: 'row',
-    gap: 10,
-    marginBottom: 12,
-    flexWrap: 'wrap',
-  },
-
-  presetButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 6,
-    backgroundColor: '#f3f4f6',
-    borderWidth: 1,
-    borderColor: COLORS.border,
-  },
-
-  presetButtonActive: {
-    backgroundColor: COLORS.primary,
-    borderColor: COLORS.primary,
-  },
-
-  presetButtonText: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: COLORS.text,
-  },
-
-  presetButtonTextActive: {
-    color: COLORS.surface,
-  },
-
-  tempList: {
-    gap: 8,
-    marginBottom: 12,
-  },
-
-  tempItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-
-  removeButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 6,
-    backgroundColor: '#fee2e2',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-
-  removeButtonText: {
-    color: COLORS.danger,
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-
-  tempInput: {
-    flexDirection: 'row',
-    gap: 8,
-    alignItems: 'center',
-  },
-
-  addButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: COLORS.primary,
-    borderRadius: 6,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-
-  addButtonText: {
-    color: COLORS.surface,
-    fontWeight: '600',
-    fontSize: 12,
-  },
-
-  resultsList: {
-    gap: 10,
-    marginBottom: 12,
-  },
-
-  resultItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-
-  resultLabel: {
-    width: 50,
-    alignItems: 'center',
-  },
-
-  resultDate: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: COLORS.text,
-  },
-
-  resultTemp: {
-    fontSize: 11,
-    color: COLORS.textSecondary,
-  },
-
-  resultBar: {
-    flex: 1,
-    minHeight: 32,
-    borderRadius: 4,
-    justifyContent: 'center',
-    paddingHorizontal: 8,
-  },
-
-  resultBarText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: COLORS.surface,
-  },
-
-  advisory: {
-    marginTop: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    backgroundColor: '#dcfce7',
-    borderLeftWidth: 3,
-    borderLeftColor: COLORS.primary,
-    borderRadius: 6,
-  },
-
-  advisoryText: {
-    fontSize: 13,
-    color: '#15803d',
-    fontWeight: '500',
-  },
-
-  clearButton: {
-    marginTop: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: '#f3f4f6',
-    borderRadius: 6,
-    alignItems: 'center',
-  },
-
-  clearButtonText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: COLORS.textSecondary,
-  },
-
-  loadingContainer: {
-    marginHorizontal: 20,
-    marginVertical: 20,
-    paddingVertical: 40,
-    alignItems: 'center',
-  },
-
-  loadingText: {
-    marginTop: 12,
-    fontSize: 14,
-    color: COLORS.textSecondary,
-  },
-
-  estimateButton: {
-    marginHorizontal: 20,
-    marginVertical: 20,
-    paddingVertical: 14,
-    backgroundColor: COLORS.primary,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-
-  estimateButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: COLORS.surface,
-  },
+  assumRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 5, borderBottomWidth: 1, borderBottomColor: '#1f2937' },
+  assumKey: { fontSize: 11, color: '#9ca3af', flex: 1 },
+  assumVal: { fontSize: 11, color: '#6b7280', flexShrink: 0, textAlign: 'right', marginLeft: 8 },
 });
 
 export default PropaneUsageScreen;
