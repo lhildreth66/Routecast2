@@ -157,6 +157,16 @@ async def verify_email(
 
     user_id = await verify_and_consume_token(db, data.token, "email_verification")
     if not user_id:
+        # Idempotency: check if this is an already-consumed token for a user
+        # who is already verified (e.g. clicking the same link twice).
+        old_token_doc = await db.verification_tokens.find_one({
+            "token": data.token,
+            "token_type": "email_verification",
+        })
+        if old_token_doc and old_token_doc.get("used"):
+            existing_user = await get_user_by_id(db, old_token_doc["user_id"])
+            if existing_user and existing_user.get("email_verified"):
+                return {"message": "Email already verified"}
         raise HTTPException(status_code=400, detail="Invalid or expired verification token")
 
     # Mark email as verified

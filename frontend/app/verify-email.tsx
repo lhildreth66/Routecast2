@@ -65,12 +65,22 @@ export default function VerifyEmailScreen() {
   // below detects email_verified=true from the server.
   // Gates on rootNavState.key so router.replace is never called before the
   // navigator is mounted.
+  //
+  // Cross-device path: user signed up on desktop, opened link on phone.
+  // Phone has no session (accessToken=null). We route to /login?verified=1
+  // so they can sign in and the index guard routes them to /subscription.
+  //
+  // Same-device path: user still has a session. Route straight to /subscription.
   useEffect(() => {
     if (!rootNavState?.key) return;
     if (verifyDone || user?.email_verified) {
-      router.replace('/subscription');
+      if (accessToken) {
+        router.replace('/subscription');
+      } else {
+        router.replace('/login?verified=1');
+      }
     }
-  }, [rootNavState?.key, verifyDone, user?.email_verified]);
+  }, [rootNavState?.key, verifyDone, user?.email_verified, accessToken]);
 
   // ── POLLING fallback (same-session tab without the token URL) ────────────
   useEffect(() => {
@@ -116,19 +126,44 @@ export default function VerifyEmailScreen() {
     router.replace('/subscription');
   };
 
-  // Full-screen loading state while consuming the token from the URL.
-  // Shows immediately when token is present so the user sees activity.
+  // Full-screen state while consuming the token from the URL.
   if (verifying) {
+    // Error state: token invalid/expired/already-used.
+    if (error) {
+      return (
+        <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: 32 }]}>
+          <Ionicons name="alert-circle" size={52} color="#ef4444" />
+          <Text style={{ color: '#ffffff', fontSize: 20, fontWeight: '700', marginTop: 16, textAlign: 'center' }}>
+            Verification Failed
+          </Text>
+          <Text style={{ color: '#a1a1aa', fontSize: 14, marginTop: 8, textAlign: 'center', lineHeight: 20 }}>
+            {error}
+          </Text>
+          <TouchableOpacity
+            style={{ marginTop: 28, backgroundColor: '#22c55e', paddingVertical: 13, paddingHorizontal: 32, borderRadius: 10 }}
+            onPress={() => router.replace('/login')}
+          >
+            <Text style={{ color: '#0a0a0a', fontWeight: '700', fontSize: 15 }}>Sign In</Text>
+          </TouchableOpacity>
+          {accessToken ? (
+            <TouchableOpacity
+              style={{ marginTop: 12, paddingVertical: 10 }}
+              onPress={handleResendEmail}
+              disabled={resending || countdown > 0}
+            >
+              <Text style={{ color: '#eab308', fontSize: 14 }}>
+                {countdown > 0 ? `Resend in ${countdown}s` : 'Request a new verification link'}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      );
+    }
+    // Loading state: request in flight.
     return (
       <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
         <ActivityIndicator size="large" color="#22c55e" />
         <Text style={{ color: '#a1a1aa', marginTop: 16, fontSize: 15 }}>Verifying your email…</Text>
-        {error ? (
-          <View style={[styles.errorContainer, { marginTop: 24, marginHorizontal: 32 }]}>
-            <Ionicons name="alert-circle" size={18} color="#ef4444" />
-            <Text style={styles.errorText}>{error}</Text>
-          </View>
-        ) : null}
       </View>
     );
   }

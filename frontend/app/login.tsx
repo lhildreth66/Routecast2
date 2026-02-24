@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function LoginScreen() {
@@ -20,6 +20,7 @@ export default function LoginScreen() {
   // this screen renders, hydration is always complete. The destructure
   // of hasHydrated is kept for the early-return below as a fallback.
   const { login, hasHydrated } = useAuth();
+  const { verified } = useLocalSearchParams<{ verified?: string }>();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -52,6 +53,9 @@ export default function LoginScreen() {
     if (result.success) {
       __DEV__ && console.log('[auth] login success – resetting loading, navigating to /');
       setLoading(false);
+      // If user arrived from a verify-email link on a different device,
+      // they are now verified and need to subscribe – the index guard will
+      // detect email_verified=true + is_premium=false and redirect them.
       router.replace('/');
       return;
     }
@@ -90,6 +94,18 @@ export default function LoginScreen() {
               <Text style={styles.title}>Welcome Back</Text>
               <Text style={styles.subtitle}>Sign in to access your account</Text>
             </View>
+
+            {/* Verified-email success banner (cross-device link flow) */}
+            {verified === '1' && (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10,
+                backgroundColor: 'rgba(34,197,94,0.12)', borderWidth: 1,
+                borderColor: '#22c55e', borderRadius: 10, padding: 14, marginBottom: 16 }}>
+                <Ionicons name="checkmark-circle" size={20} color="#22c55e" />
+                <Text style={{ color: '#22c55e', fontSize: 14, flex: 1, lineHeight: 20 }}>
+                  Email verified! Sign in to continue to your subscription.
+                </Text>
+              </View>
+            )}
 
             {/* Login Form */}
             <View style={styles.form}>
