@@ -132,14 +132,23 @@ async def update_user(db: AsyncIOMotorDatabase, user_id: str, update_data: dict)
 async def store_verification_token(db: AsyncIOMotorDatabase, user_id: str, token: str, token_type: str, expires_hours: int = 24) -> bool:
     """Store a verification token in the database"""
     now = datetime.now(timezone.utc)
-    await db.verification_tokens.insert_one({
+    expires_at = now + timedelta(hours=expires_hours)
+    safe_preview = f"{token[:6]}...{token[-6:]}" if len(token) >= 12 else "<short>"
+
+    doc = {
         "user_id": user_id,
         "token": token,
-        "token_type": token_type,  # "email_verification" or "password_reset"
+        "token_type": token_type,
         "created_at": now,
-        "expires_at": now + timedelta(hours=expires_hours),
+        "expires_at": expires_at,
         "used": False
-    })
+    }
+    result = await db.verification_tokens.insert_one(doc)
+    logger.info(
+        f"[TOKEN] stored type={token_type!r} preview={safe_preview} "
+        f"user_id={user_id} expires_at={expires_at.isoformat()} "
+        f"db_id={result.inserted_id}"
+    )
     return True
 
 

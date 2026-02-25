@@ -17,7 +17,8 @@ const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
 export default function VerifyEmailScreen() {
   const { user, accessToken, refreshUser } = useAuth();
-  const { token } = useLocalSearchParams<{ token?: string }>();
+  const { token: tokenParam, t: tParam } = useLocalSearchParams<{ token?: string; t?: string }>();
+  const token = tokenParam || tParam;
   const rootNavState = useRootNavigationState();
 
   // Token-based verification states

@@ -6,7 +6,6 @@ from fastapi import APIRouter, HTTPException, Depends, Header, Request, Backgrou
 from fastapi.responses import JSONResponse
 from typing import Optional
 from datetime import datetime, timedelta, timezone
-from urllib.parse import unquote_plus
 import logging
 import os
 
@@ -156,23 +155,61 @@ async def verify_email(
     background_tasks: BackgroundTasks,
     request: Request
 ):
-    """Verify email address with token"""
-    raw_token = data.token or ""
-    # URL-decode in case the client double-encoded (+ → space or %2B → +)
-    token = unquote_plus(raw_token)
+    """Verify email address with token (POST — called by the SPA frontend)."""
+    token = (data.token or "").strip()
+    return await _verify_email_with_token(token, background_tasks, request, source="POST_body")
 
-    safe_preview = f"{token[:6]}...{token[-6:]}" if len(token) >= 12 else "<short>"
-    logger.info(
-        f"[VERIFY-EMAIL] incoming token len={len(token)} preview={safe_preview} "
-        f"raw_len={len(raw_token)}"
-    )
 
+from fastapi import Query as FastQuery   # avoid shadowing
+
+
+@router.get("/verify-email")
+async def verify_email_get(
+    background_tasks: BackgroundTasks,
+    request: Request,
+    token: Optional[str] = FastQuery(None, alias="token"),
+    t: Optional[str] = FastQuery(None, alias="t"),
+):
+    """Verify email address with token via GET query param.
+
+    Accepts ``?token=...`` or ``?t=...``.  This route exists so that:
+    - Users who paste the link into a browser bar get verified directly.
+    - Email-security scanners that prefetch links via GET don't break the flow
+      (the token is consumed but the user is already verified).
+    """
+    raw = (token or t or "").strip()
+    return await _verify_email_with_token(raw, background_tasks, request, source="GET_query")
+
+
+async def _verify_email_with_token(
+    token: str,
+    background_tasks: BackgroundTasks,
+    request: Request,
+    source: str = "unknown",
+):
+    """Shared verify-email logic used by both GET and POST handlers."""
     db = get_db(request)
 
+    # ── Step 1: diagnostic logging (always) ──────────────────────────────
+    safe_preview = f"{token[:6]}...{token[-6:]}" if len(token) >= 12 else "<short>"
+    logger.info(
+        f"[VERIFY-EMAIL] request path={request.url.path} "
+        f"query_keys={list(request.query_params.keys())} "
+        f"source={source} "
+        f"token_present={bool(token)} "
+        f"token_len={len(token)} "
+        f"token_head={token[:6] if token else None} "
+        f"token_tail={token[-6:] if token else None}"
+    )
+
+    if not token:
+        logger.warning("[VERIFY-EMAIL] FAIL bucket=MISSING — no token supplied")
+        raise HTTPException(status_code=400, detail="Verification token is required")
+
+    # ── Step 2: consume the token ────────────────────────────────────────
     user_id = await verify_and_consume_token(db, token, "email_verification")
     if not user_id:
-        # Idempotency: check if this is an already-consumed token for a user
-        # who is already verified (e.g. clicking the same link twice).
+        # ── Idempotency: already-consumed token for an already-verified user ─
         old_token_doc = await db.verification_tokens.find_one({
             "token": token,
             "token_type": "email_verification",
@@ -180,18 +217,42 @@ async def verify_email(
         if old_token_doc and old_token_doc.get("used"):
             existing_user = await get_user_by_id(db, old_token_doc["user_id"])
             if existing_user and existing_user.get("email_verified"):
-                logger.info(f"[VERIFY-EMAIL] idempotent — already verified user={old_token_doc['user_id']}")
+                logger.info(
+                    f"[VERIFY-EMAIL] idempotent — already verified "
+                    f"user={old_token_doc['user_id']}"
+                )
                 return {"message": "Email already verified"}
-        logger.warning(
-            f"[VERIFY-EMAIL] REJECTED preview={safe_preview} — "
-            "token not valid (see TOKEN log above for detailed reason)"
-        )
+            # Token was used but user still isn't verified (edge case): log and reject
+            logger.warning(
+                f"[VERIFY-EMAIL] FAIL bucket=ALREADY_USED "
+                f"user={old_token_doc['user_id']} preview={safe_preview}"
+            )
+        elif old_token_doc:
+            # Token exists but is expired
+            logger.warning(
+                f"[VERIFY-EMAIL] FAIL bucket=EXPIRED "
+                f"user={old_token_doc.get('user_id')} "
+                f"expires_at={old_token_doc.get('expires_at')} "
+                f"preview={safe_preview}"
+            )
+        else:
+            logger.warning(
+                f"[VERIFY-EMAIL] FAIL bucket=NOT_FOUND "
+                f"preview={safe_preview}"
+            )
         raise HTTPException(status_code=400, detail="Invalid or expired verification token")
 
-    # Mark email as verified
+    # ── Step 3: mark the user as verified ────────────────────────────────
     user = await get_user_by_id(db, user_id)
+    if not user:
+        logger.warning(f"[VERIFY-EMAIL] FAIL bucket=USER_MISMATCH user_id={user_id} — user not found")
+        raise HTTPException(status_code=400, detail="User account not found")
+
     await update_user(db, user_id, {"email_verified": True})
-    logger.info(f"[VERIFY-EMAIL] SUCCESS user_id={user_id} email={user.get('email', 'unknown')}")
+    logger.info(
+        f"[VERIFY-EMAIL] SUCCESS user_id={user_id} "
+        f"email={user.get('email', 'unknown')}"
+    )
 
     # Send welcome email
     background_tasks.add_task(

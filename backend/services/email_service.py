@@ -52,8 +52,15 @@ def _send_email(to: str, subject: str, html_content: str) -> bool:
 def send_verification_email(email: str, token: str, name: Optional[str] = None) -> bool:
     """Send email verification link"""
     from urllib.parse import quote as urlquote
-    verify_url = f"{FRONTEND_URL}/verify-email?token={urlquote(token, safe='')}"
-    logger.info(f"[EMAIL] Sending verification email to={email} url_domain={FRONTEND_URL}")
+    safe_token = urlquote(token, safe='')
+    verify_url = f"{FRONTEND_URL}/verify-email?token={safe_token}"
+    logger.info(
+        f"[EMAIL] Sending verification email to={email} "
+        f"url_domain={FRONTEND_URL} "
+        f"token_len={len(token)} "
+        f"token_head={token[:6] if len(token) >= 6 else token} "
+        f"token_tail={token[-6:] if len(token) >= 6 else token}"
+    )
     greeting = f"Hi {name}," if name else "Hi there,"
 
     html_content = f"""
@@ -95,7 +102,12 @@ def send_verification_email(email: str, token: str, name: Optional[str] = None) 
     </html>
     """
 
-    return _send_email(email, "Verify your RouteCast account", html_content)
+    result = _send_email(email, "Verify your RouteCast account", html_content)
+    logger.info(
+        f"[EMAIL] Verification email send result={result} to={email} "
+        f"token_head={token[:6] if len(token) >= 6 else token}"
+    )
+    return result
 
 
 def send_password_reset_email(email: str, token: str, name: Optional[str] = None) -> bool:
