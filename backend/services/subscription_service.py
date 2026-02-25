@@ -31,7 +31,42 @@ NON_PREMIUM_STATUSES = frozenset({
 
 logger = logging.getLogger(__name__)
 
-# Subscription pricing
+
+async def _revoke_premium(
+    db: AsyncIOMotorDatabase,
+    user_id: str,
+    reason: str,
+    now: datetime,
+    clear_sub_id: bool = False,
+) -> None:
+    """
+    Immediately strip premium access from a user and log the reason.
+    Used when Stripe confirms there is no valid subscription.
+    """
+    fields: dict = {
+        "is_premium": False,
+        "subscription_status": "inactive",
+        "subscription_plan": "free",
+        "plan": "free",
+        "subscription_expiration": None,
+        "stripe_status_verified_at": now,
+        "updated_at": now,
+    }
+    if clear_sub_id:
+        fields["stripe_subscription_id"] = None
+
+    await db.users.update_one({"user_id": user_id}, {"$set": fields})
+    try:
+        await db.subscription_logs.insert_one({
+            "user_id": user_id,
+            "action": "revoked",
+            "reason": reason,
+            "admin_action": False,
+            "timestamp": now,
+        })
+    except Exception:
+        pass
+    logger.info(f"[STRIPE] Premium revoked user={user_id} reason={reason}")
 SUBSCRIPTION_PRICES = {
     "monthly": {
         "amount": 9.99,
@@ -71,14 +106,55 @@ async def check_subscription_status(db: AsyncIOMotorDatabase, user_id: str) -> d
     now = datetime.now(timezone.utc)
     status = user.get("subscription_status", "inactive")
     expiration = user.get("subscription_expiration")
+    provider = user.get("subscription_provider", "")
+    stripe_sub_id = user.get("stripe_subscription_id")
+    stripe_customer_id = user.get("stripe_customer_id")
+    is_db_premium = user.get("is_premium", False)
 
     # Normalise expiration timezone
     if expiration and isinstance(expiration, datetime):
         if expiration.tzinfo is None:
             expiration = expiration.replace(tzinfo=timezone.utc)
 
-    # ── Stripe live-check (catches missed / delayed webhooks) ──────────────
-    stripe_sub_id = user.get("stripe_subscription_id")
+    # ── Guard: Stripe provider, DB says premium, but NO subscription ID ──────
+    # This is the exact failure mode when a Stripe subscription is fully deleted
+    # and no webhook updated the DB (or was never linked at all).  We must not
+    # trust DB optimism when we can ask Stripe directly.
+    if is_db_premium and provider == "stripe" and not stripe_sub_id and _STRIPE_API_KEY:
+        # Try to find any live subscription for this customer in Stripe.
+        found_sub_id: Optional[str] = None
+        if stripe_customer_id:
+            try:
+                subs = stripe.Subscription.list(  # type: ignore[attr-defined]
+                    customer=stripe_customer_id, limit=10
+                )
+                for s in (subs.get("data") or []):
+                    if s.get("status") in ("active", "trialing", "past_due"):
+                        found_sub_id = s["id"]
+                        break
+            except Exception as _e:
+                logger.warning(f"[STRIPE GUARD] list subs failed user={user_id}: {_e}")
+                # API error — don't revoke; fall through with DB cached value
+                found_sub_id = "_api_error_"
+        if found_sub_id and found_sub_id != "_api_error_":
+            # Link the rediscovered subscription ID, then fall through to live-check
+            stripe_sub_id = found_sub_id
+            await db.users.update_one(
+                {"user_id": user_id},
+                {"$set": {"stripe_subscription_id": stripe_sub_id, "updated_at": now}},
+            )
+            logger.info(f"[STRIPE GUARD] Re-linked sub {stripe_sub_id} to user={user_id}")
+        elif found_sub_id != "_api_error_":
+            # Stripe confirms: no subscription exists → revoke immediately
+            reason = (
+                "no_subscription_found_for_customer" if stripe_customer_id
+                else "stripe_provider_no_customer_id"
+            )
+            await _revoke_premium(db, user_id, reason, now)
+            return {
+                "status": "inactive", "is_premium": False, "plan": "free",
+                "provider": provider, "expiration": None,
+            }
     if stripe_sub_id and _STRIPE_API_KEY and STRIPE_CHECK_TTL_SECONDS > 0:
         verified_at = user.get("stripe_status_verified_at")
         if isinstance(verified_at, datetime) and verified_at.tzinfo is None:
@@ -131,8 +207,21 @@ async def check_subscription_status(db: AsyncIOMotorDatabase, user_id: str) -> d
                     f"[STRIPE LIVE] user={user_id} stripe_status={s_status} "
                     f"internal={internal} is_premium={live_premium}"
                 )
+            except stripe.error.InvalidRequestError as e:  # type: ignore[attr-defined]
+                # Stripe says this subscription ID does not exist.
+                # This is definitive — revoke premium immediately.
+                logger.warning(
+                    f"[STRIPE LIVE] Sub {stripe_sub_id} not found — "
+                    f"revoking premium for user={user_id}: {e}"
+                )
+                await _revoke_premium(db, user_id, f"stripe_sub_not_found:{stripe_sub_id}", now,
+                                      clear_sub_id=True)
+                return {
+                    "status": "inactive", "is_premium": False, "plan": "free",
+                    "provider": provider, "expiration": None,
+                }
             except Exception as e:
-                # Live check failed; fall through to DB-cached value.
+                # Transient network / API error — fall through to DB-cached value.
                 logger.warning(f"[STRIPE LIVE] check failed for user={user_id}: {e}")
 
     # ── Local expiration check (catches period rollovers without a webhook) ─

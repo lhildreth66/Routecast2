@@ -314,100 +314,222 @@ async def reconcile_subscriptions(
         db_status = user.get("subscription_status", "inactive")
         db_is_premium = user.get("is_premium", False)
         stripe_sub_id = user.get("stripe_subscription_id")
+        stripe_customer_id = user.get("stripe_customer_id")
+        provider = user.get("subscription_provider", "")
 
-        if not stripe_sub_id:
+        # ── Case: has a subscription ID — check it directly ──────────────
+        if stripe_sub_id:
+            try:
+                sub = stripe.Subscription.retrieve(stripe_sub_id)  # type: ignore[attr-defined]
+                s_status = sub["status"]
+                s_period_end = sub.get("current_period_end")
+                s_cancel_at = sub.get("cancel_at_period_end", False)
+
+                if s_status == "active" and s_cancel_at:
+                    internal = "canceling"
+                else:
+                    internal = s_status
+
+                if internal in ("active", "trialing"):
+                    correct_premium = True
+                elif internal == "canceling":
+                    exp = datetime.fromtimestamp(s_period_end, tz=timezone.utc) if s_period_end else None
+                    correct_premium = bool(exp and exp > now)
+                else:
+                    correct_premium = False
+
+                needs_fix = (db_status != internal) or (db_is_premium != correct_premium)
+
+                entry = {
+                    "user_id": user_id,
+                    "email": email,
+                    "stripe_subscription_id": stripe_sub_id,
+                    "db_status": db_status,
+                    "stripe_status": s_status,
+                    "internal_status": internal,
+                    "db_is_premium": db_is_premium,
+                    "correct_is_premium": correct_premium,
+                    "needs_fix": needs_fix,
+                    "action": "no_change",
+                }
+
+                if needs_fix and not dry_run:
+                    update: dict = {
+                        "subscription_status": internal,
+                        "is_premium": correct_premium,
+                        "stripe_status_verified_at": now,
+                        "updated_at": now,
+                    }
+                    if s_period_end:
+                        update["subscription_expiration"] = datetime.fromtimestamp(
+                            s_period_end, tz=timezone.utc
+                        )
+                    if not correct_premium:
+                        update["subscription_plan"] = "free"
+                        update["plan"] = "free"
+
+                    await db.users.update_one({"user_id": user_id}, {"$set": update})
+                    await db.subscription_logs.insert_one({
+                        "user_id": user_id,
+                        "action": "reconciled",
+                        "old_status": db_status,
+                        "new_status": internal,
+                        "old_is_premium": db_is_premium,
+                        "new_is_premium": correct_premium,
+                        "stripe_status": s_status,
+                        "provider": "stripe",
+                        "admin_action": True,
+                        "timestamp": now,
+                    })
+                    entry["action"] = "fixed"
+                    fixed += 1
+                    logger.info(
+                        f"[RECONCILE] user={user_id} email={email} "
+                        f"{db_status}/{db_is_premium} → {internal}/{correct_premium}"
+                    )
+                elif needs_fix:
+                    entry["action"] = "would_fix"
+
+                results.append(entry)
+
+            except stripe.error.InvalidRequestError:  # type: ignore[attr-defined]
+                # Subscription ID doesn't exist in Stripe at all — revoke
+                entry = {
+                    "user_id": user_id, "email": email,
+                    "stripe_subscription_id": stripe_sub_id,
+                    "db_status": db_status, "db_is_premium": db_is_premium,
+                    "stripe_status": "not_found", "correct_is_premium": False,
+                    "needs_fix": db_is_premium,
+                    "action": "no_change",
+                }
+                if db_is_premium and not dry_run:
+                    await db.users.update_one(
+                        {"user_id": user_id},
+                        {"$set": {
+                            "is_premium": False,
+                            "subscription_status": "inactive",
+                            "subscription_plan": "free",
+                            "plan": "free",
+                            "stripe_subscription_id": None,
+                            "stripe_status_verified_at": now,
+                            "updated_at": now,
+                        }},
+                    )
+                    await db.subscription_logs.insert_one({
+                        "user_id": user_id, "action": "reconciled",
+                        "old_status": db_status, "new_status": "inactive",
+                        "old_is_premium": True, "new_is_premium": False,
+                        "stripe_status": "not_found",
+                        "reason": f"subscription_id_not_found:{stripe_sub_id}",
+                        "admin_action": True, "timestamp": now,
+                    })
+                    entry["action"] = "fixed"
+                    fixed += 1
+                    logger.info(f"[RECONCILE] revoked user={user_id} — sub {stripe_sub_id} not found in Stripe")
+                elif db_is_premium:
+                    entry["action"] = "would_fix"
+                results.append(entry)
+
+            except Exception as e:
+                logger.error(f"[RECONCILE] error for user={user_id}: {e}")
+                errors += 1
+                results.append({
+                    "user_id": user_id, "email": email,
+                    "action": "error", "error": str(e), "db_status": db_status,
+                })
+            continue
+
+        # ── Case: NO subscription ID in DB — check Stripe by customer ID ─
+        # This covers Megan's exact scenario: is_premium=True but no sub ID.
+        # Skip non-Stripe providers (admin grants, Apple, Google — handled elsewhere).
+        if provider not in ("stripe", "") or not db_is_premium:
             results.append({
                 "user_id": user_id, "email": email,
-                "action": "skipped", "reason": "no stripe_subscription_id",
+                "action": "skipped",
+                "reason": f"provider={provider or 'unset'}, no stripe_subscription_id",
                 "db_status": db_status,
             })
             continue
 
-        try:
-            sub = stripe.Subscription.retrieve(stripe_sub_id)  # type: ignore[attr-defined]
-            s_status = sub["status"]
-            s_period_end = sub.get("current_period_end")
-            s_cancel_at = sub.get("cancel_at_period_end", False)
-
-            # Map to internal status
-            if s_status == "active" and s_cancel_at:
-                internal = "canceling"
-            else:
-                internal = s_status
-
-            # Derive correct is_premium
-            if internal in ("active", "trialing"):
-                correct_premium = True
-            elif internal == "canceling":
-                exp = datetime.fromtimestamp(s_period_end, tz=timezone.utc) if s_period_end else None
-                correct_premium = bool(exp and exp > now)
-            else:
-                correct_premium = False
-
-            needs_fix = (db_status != internal) or (db_is_premium != correct_premium)
-
-            entry = {
-                "user_id": user_id,
-                "email": email,
-                "stripe_subscription_id": stripe_sub_id,
-                "db_status": db_status,
-                "stripe_status": s_status,
-                "internal_status": internal,
-                "db_is_premium": db_is_premium,
-                "correct_is_premium": correct_premium,
-                "needs_fix": needs_fix,
-                "action": "no_change",
-            }
-
-            if needs_fix and not dry_run:
-                update: dict = {
-                    "subscription_status": internal,
-                    "is_premium": correct_premium,
-                    "stripe_status_verified_at": now,
-                    "updated_at": now,
-                }
-                if s_period_end:
-                    update["subscription_expiration"] = datetime.fromtimestamp(
-                        s_period_end, tz=timezone.utc
-                    )
-                if not correct_premium:
-                    update["subscription_plan"] = "free"
-                    update["plan"] = "free"
-
-                await db.users.update_one({"user_id": user_id}, {"$set": update})
-
-                await db.subscription_logs.insert_one({
-                    "user_id": user_id,
-                    "action": "reconciled",
-                    "old_status": db_status,
-                    "new_status": internal,
-                    "old_is_premium": db_is_premium,
-                    "new_is_premium": correct_premium,
-                    "stripe_status": s_status,
-                    "provider": "stripe",
-                    "admin_action": True,
-                    "timestamp": now,
+        # Look up all subscriptions for this customer in Stripe
+        live_sub_id: Optional[str] = None
+        live_sub_status: str = "not_found"
+        if stripe_customer_id and _STRIPE_API_KEY:
+            try:
+                subs = stripe.Subscription.list(  # type: ignore[attr-defined]
+                    customer=stripe_customer_id, limit=10
+                )
+                for s in (subs.get("data") or []):
+                    if s.get("status") in ("active", "trialing", "past_due"):
+                        live_sub_id = s["id"]
+                        live_sub_status = s["status"]
+                        break
+            except Exception as e:
+                logger.error(f"[RECONCILE] Stripe list error for user={user_id}: {e}")
+                errors += 1
+                results.append({
+                    "user_id": user_id, "email": email,
+                    "action": "error", "error": str(e), "db_status": db_status,
                 })
+                continue
 
+        entry = {
+            "user_id": user_id, "email": email,
+            "stripe_customer_id": stripe_customer_id,
+            "stripe_subscription_id": None,
+            "db_status": db_status, "db_is_premium": db_is_premium,
+            "stripe_status": live_sub_status,
+            "correct_is_premium": live_sub_id is not None,
+            "needs_fix": True,  # always needs fixing when sub_id is missing and db is premium
+            "action": "no_change",
+        }
+
+        if live_sub_id:
+            # Re-link the discovered subscription ID
+            if not dry_run:
+                await db.users.update_one(
+                    {"user_id": user_id},
+                    {"$set": {"stripe_subscription_id": live_sub_id, "updated_at": now}},
+                )
+                entry["action"] = "linked_subscription"
+                entry["linked_subscription_id"] = live_sub_id
+                fixed += 1
+                logger.info(f"[RECONCILE] Re-linked sub {live_sub_id} to user={user_id}")
+            else:
+                entry["action"] = "would_link"
+        else:
+            # Stripe has no subscription for this customer → revoke
+            if not dry_run:
+                await db.users.update_one(
+                    {"user_id": user_id},
+                    {"$set": {
+                        "is_premium": False,
+                        "subscription_status": "inactive",
+                        "subscription_plan": "free",
+                        "plan": "free",
+                        "subscription_expiration": None,
+                        "stripe_status_verified_at": now,
+                        "updated_at": now,
+                    }},
+                )
+                await db.subscription_logs.insert_one({
+                    "user_id": user_id, "action": "reconciled",
+                    "old_status": db_status, "new_status": "inactive",
+                    "old_is_premium": True, "new_is_premium": False,
+                    "stripe_status": "no_subscription_in_stripe",
+                    "reason": "no_active_subscription_for_customer",
+                    "admin_action": True, "timestamp": now,
+                })
                 entry["action"] = "fixed"
                 fixed += 1
                 logger.info(
-                    f"[RECONCILE] user={user_id} email={email} "
-                    f"{db_status}/{db_is_premium} → {internal}/{correct_premium}"
+                    f"[RECONCILE] revoked user={user_id} email={email} — "
+                    f"no Stripe subscription found for customer={stripe_customer_id}"
                 )
-            elif needs_fix:
+            else:
                 entry["action"] = "would_fix"
 
-            results.append(entry)
-
-        except Exception as e:
-            logger.error(f"[RECONCILE] error for user={user_id}: {e}")
-            errors += 1
-            results.append({
-                "user_id": user_id, "email": email,
-                "action": "error", "error": str(e),
-                "db_status": db_status,
-            })
+        results.append(entry)
 
     return {
         "dry_run": dry_run,
