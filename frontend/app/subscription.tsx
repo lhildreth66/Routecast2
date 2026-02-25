@@ -320,15 +320,6 @@ export default function SubscriptionScreen() {
             </View>
           )}
 
-          {/* Skip for now */}
-          <TouchableOpacity
-            style={styles.skipButton}
-            onPress={() => router.replace('/')}
-            data-testid="skip-subscription-btn"
-          >
-            <Text style={styles.skipButtonText}>Continue with free version</Text>
-          </TouchableOpacity>
-
           {/* Terms */}
           <Text style={styles.termsText}>
             By subscribing, you agree to our Terms of Service and Privacy Policy.
@@ -574,15 +565,6 @@ const styles = StyleSheet.create({
     color: '#1a1a1a',
     fontSize: 16,
     fontWeight: '700',
-  },
-  skipButton: {
-    paddingVertical: 12,
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  skipButtonText: {
-    color: '#6b7280',
-    fontSize: 14,
   },
   termsText: {
     color: '#52525b',
