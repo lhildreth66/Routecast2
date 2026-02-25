@@ -8,6 +8,26 @@ from typing import Optional, Tuple
 from motor.motor_asyncio import AsyncIOMotorDatabase
 import logging
 import httpx
+import stripe
+
+# Initialise Stripe SDK once
+_STRIPE_API_KEY = os.environ.get('STRIPE_API_KEY', '')
+if _STRIPE_API_KEY:
+    stripe.api_key = _STRIPE_API_KEY
+
+# How often to re-verify subscription status against Stripe (seconds).
+# Set to 0 to disable live checks entirely.
+STRIPE_CHECK_TTL_SECONDS = int(os.environ.get('STRIPE_CHECK_TTL_SECONDS', '300'))  # 5 min default
+
+# Statuses that mean the user currently has paid access.
+# "canceling" = Stripe active + cancel_at_period_end; user paid for the period.
+PREMIUM_STATUSES = frozenset({"active", "trialing", "canceling"})
+
+# Statuses that are definitively not premium (per spec).
+NON_PREMIUM_STATUSES = frozenset({
+    "canceled", "expired", "incomplete", "incomplete_expired",
+    "past_due", "unpaid", "inactive",
+})
 
 logger = logging.getLogger(__name__)
 
@@ -30,32 +50,113 @@ TRIAL_DAYS = 7
 
 
 async def check_subscription_status(db: AsyncIOMotorDatabase, user_id: str) -> dict:
-    """Check and update subscription status for a user"""
+    """
+    Return authoritative subscription status for a user.
+
+    Premium is derived from Stripe state, not cached DB optimism:
+      - 'active'    → premium
+      - 'trialing'  → premium (within trial window)
+      - 'canceling' → premium UNTIL current_period_end
+      - everything else → NOT premium
+
+    A Stripe live-check is performed when the user has a
+    stripe_subscription_id and the cached result is older than
+    STRIPE_CHECK_TTL_SECONDS.  This catches missed webhooks.
+    """
     user = await db.users.find_one({"user_id": user_id})
     if not user:
-        return {"status": "inactive", "is_premium": False}
+        return {"status": "inactive", "is_premium": False, "plan": "free",
+                "provider": None, "expiration": None}
 
     now = datetime.now(timezone.utc)
     status = user.get("subscription_status", "inactive")
     expiration = user.get("subscription_expiration")
 
-    # Check if subscription has expired
+    # Normalise expiration timezone
     if expiration and isinstance(expiration, datetime):
-        # Make sure expiration is timezone-aware
         if expiration.tzinfo is None:
             expiration = expiration.replace(tzinfo=timezone.utc)
-        if expiration < now and status in ["active", "trialing"]:
-            # Subscription has expired
+
+    # ── Stripe live-check (catches missed / delayed webhooks) ──────────────
+    stripe_sub_id = user.get("stripe_subscription_id")
+    if stripe_sub_id and _STRIPE_API_KEY and STRIPE_CHECK_TTL_SECONDS > 0:
+        verified_at = user.get("stripe_status_verified_at")
+        if isinstance(verified_at, datetime) and verified_at.tzinfo is None:
+            verified_at = verified_at.replace(tzinfo=timezone.utc)
+        age_seconds = (
+            (now - verified_at).total_seconds() if verified_at else STRIPE_CHECK_TTL_SECONDS + 1
+        )
+        if age_seconds > STRIPE_CHECK_TTL_SECONDS:
+            try:
+                sub = stripe.Subscription.retrieve(stripe_sub_id)  # type: ignore[attr-defined]
+                s_status = sub["status"]          # active, trialing, canceled, past_due …
+                s_period_end = sub.get("current_period_end")       # Unix timestamp
+                s_cancel_at_period_end = sub.get("cancel_at_period_end", False)
+
+                # Map Stripe status → internal status
+                if s_status == "active" and s_cancel_at_period_end:
+                    internal = "canceling"
+                else:
+                    internal = s_status  # active, trialing, canceled, past_due, unpaid, …
+
+                # Refresh expiration from Stripe
+                if s_period_end:
+                    expiration = datetime.fromtimestamp(s_period_end, tz=timezone.utc)
+
+                # Determine is_premium from live Stripe data
+                if internal in ("active", "trialing"):
+                    live_premium = True
+                elif internal == "canceling" and expiration and expiration > now:
+                    live_premium = True
+                else:
+                    live_premium = False
+
+                # Persist updated state back to DB
+                db_update: dict = {
+                    "subscription_status": internal,
+                    "is_premium": live_premium,
+                    "stripe_status_verified_at": now,
+                    "updated_at": now,
+                }
+                if expiration:
+                    db_update["subscription_expiration"] = expiration
+                if not live_premium:
+                    # Also clear the plan if fully lapsed
+                    if internal not in ("canceling",):
+                        db_update["subscription_plan"] = "free"
+
+                await db.users.update_one({"user_id": user_id}, {"$set": db_update})
+                status = internal
+                logger.info(
+                    f"[STRIPE LIVE] user={user_id} stripe_status={s_status} "
+                    f"internal={internal} is_premium={live_premium}"
+                )
+            except Exception as e:
+                # Live check failed; fall through to DB-cached value.
+                logger.warning(f"[STRIPE LIVE] check failed for user={user_id}: {e}")
+
+    # ── Local expiration check (catches period rollovers without a webhook) ─
+    if expiration and isinstance(expiration, datetime):
+        if expiration.tzinfo is None:
+            expiration = expiration.replace(tzinfo=timezone.utc)
+        # Any of the "still paid" statuses should expire when the period ends
+        if expiration < now and status in PREMIUM_STATUSES:
             await db.users.update_one(
                 {"user_id": user_id},
                 {"$set": {
                     "subscription_status": "expired",
-                    "updated_at": now
-                }}
+                    "is_premium": False,
+                    "subscription_plan": "free",
+                    "updated_at": now,
+                }},
             )
             status = "expired"
 
-    is_premium = status in ["active", "trialing"]
+    # Derive is_premium: canceling is premium only while period is still valid
+    if status == "canceling":
+        is_premium = bool(expiration and expiration > now)
+    else:
+        is_premium = status in PREMIUM_STATUSES
 
     return {
         "status": status,

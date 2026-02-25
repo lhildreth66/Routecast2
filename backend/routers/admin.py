@@ -6,19 +6,26 @@ from fastapi import APIRouter, HTTPException, Depends, Header, Request, Query
 from typing import Optional, List
 from datetime import datetime, timezone
 import os
+import logging
+import stripe
 
 from models.user import (
     UserResponse, AdminUserListResponse,
     AdminGrantSubscriptionRequest, AdminRevokeSubscriptionRequest,
     SubscriptionStatus, SubscriptionPlan
 )
-from services.subscription_service import grant_subscription, revoke_subscription
+from services.subscription_service import grant_subscription, revoke_subscription, PREMIUM_STATUSES
 from routers.auth import get_current_user, get_db
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
+logger = logging.getLogger(__name__)
 
 # Simple admin authentication - in production use proper RBAC
 ADMIN_API_KEY = os.environ.get('ADMIN_API_KEY', 'routecast-admin-key-2025')
+
+_STRIPE_API_KEY = os.environ.get('STRIPE_API_KEY', '')
+if _STRIPE_API_KEY:
+    stripe.api_key = _STRIPE_API_KEY
 
 
 async def verify_admin(x_admin_key: Optional[str] = Header(None)):
@@ -260,4 +267,154 @@ async def get_subscription_logs(
         "total": total,
         "page": page,
         "per_page": per_page
+    }
+
+
+@router.post("/reconcile-subscriptions")
+async def reconcile_subscriptions(
+    request: Request,
+    dry_run: bool = Query(False, description="If true, report discrepancies without writing changes"),
+    admin: bool = Depends(verify_admin),
+):
+    """
+    Reconcile all users whose DB state says is_premium=True against Stripe.
+
+    Checks every user who:
+      - has is_premium=True in the DB, OR
+      - has a subscription_status that implies access (active / trialing / canceling)
+
+    For each user with a stripe_subscription_id, fetches the live Stripe subscription
+    and fixes any discrepancy (missed/delayed webhooks, stale data).
+
+    Use dry_run=true to preview what would change without writing to the DB.
+    """
+    if not _STRIPE_API_KEY:
+        raise HTTPException(status_code=503, detail="Stripe API key not configured")
+
+    db = get_db(request)
+    now = datetime.now(timezone.utc)
+
+    # Candidate users: anyone the DB currently thinks is premium
+    cursor = db.users.find(
+        {"$or": [
+            {"is_premium": True},
+            {"subscription_status": {"$in": list(PREMIUM_STATUSES)}},
+        ]},
+        {"hashed_password": 0},
+    )
+    candidates = await cursor.to_list(length=None)
+
+    results: list = []
+    fixed = 0
+    errors = 0
+
+    for user in candidates:
+        user_id = user.get("user_id", "?")
+        email = user.get("email", "?")
+        db_status = user.get("subscription_status", "inactive")
+        db_is_premium = user.get("is_premium", False)
+        stripe_sub_id = user.get("stripe_subscription_id")
+
+        if not stripe_sub_id:
+            results.append({
+                "user_id": user_id, "email": email,
+                "action": "skipped", "reason": "no stripe_subscription_id",
+                "db_status": db_status,
+            })
+            continue
+
+        try:
+            sub = stripe.Subscription.retrieve(stripe_sub_id)  # type: ignore[attr-defined]
+            s_status = sub["status"]
+            s_period_end = sub.get("current_period_end")
+            s_cancel_at = sub.get("cancel_at_period_end", False)
+
+            # Map to internal status
+            if s_status == "active" and s_cancel_at:
+                internal = "canceling"
+            else:
+                internal = s_status
+
+            # Derive correct is_premium
+            if internal in ("active", "trialing"):
+                correct_premium = True
+            elif internal == "canceling":
+                exp = datetime.fromtimestamp(s_period_end, tz=timezone.utc) if s_period_end else None
+                correct_premium = bool(exp and exp > now)
+            else:
+                correct_premium = False
+
+            needs_fix = (db_status != internal) or (db_is_premium != correct_premium)
+
+            entry = {
+                "user_id": user_id,
+                "email": email,
+                "stripe_subscription_id": stripe_sub_id,
+                "db_status": db_status,
+                "stripe_status": s_status,
+                "internal_status": internal,
+                "db_is_premium": db_is_premium,
+                "correct_is_premium": correct_premium,
+                "needs_fix": needs_fix,
+                "action": "no_change",
+            }
+
+            if needs_fix and not dry_run:
+                update: dict = {
+                    "subscription_status": internal,
+                    "is_premium": correct_premium,
+                    "stripe_status_verified_at": now,
+                    "updated_at": now,
+                }
+                if s_period_end:
+                    update["subscription_expiration"] = datetime.fromtimestamp(
+                        s_period_end, tz=timezone.utc
+                    )
+                if not correct_premium:
+                    update["subscription_plan"] = "free"
+                    update["plan"] = "free"
+
+                await db.users.update_one({"user_id": user_id}, {"$set": update})
+
+                await db.subscription_logs.insert_one({
+                    "user_id": user_id,
+                    "action": "reconciled",
+                    "old_status": db_status,
+                    "new_status": internal,
+                    "old_is_premium": db_is_premium,
+                    "new_is_premium": correct_premium,
+                    "stripe_status": s_status,
+                    "provider": "stripe",
+                    "admin_action": True,
+                    "timestamp": now,
+                })
+
+                entry["action"] = "fixed"
+                fixed += 1
+                logger.info(
+                    f"[RECONCILE] user={user_id} email={email} "
+                    f"{db_status}/{db_is_premium} → {internal}/{correct_premium}"
+                )
+            elif needs_fix:
+                entry["action"] = "would_fix"
+
+            results.append(entry)
+
+        except Exception as e:
+            logger.error(f"[RECONCILE] error for user={user_id}: {e}")
+            errors += 1
+            results.append({
+                "user_id": user_id, "email": email,
+                "action": "error", "error": str(e),
+                "db_status": db_status,
+            })
+
+    return {
+        "dry_run": dry_run,
+        "candidates_checked": len(candidates),
+        "fixed": fixed if not dry_run else 0,
+        "would_fix": sum(1 for r in results if r.get("action") == "would_fix"),
+        "errors": errors,
+        "timestamp": now.isoformat(),
+        "results": results,
     }

@@ -301,51 +301,63 @@ async def handle_subscription_updated(db, data: dict, now: datetime):
     
     user_id = user["user_id"]
     plan = determine_plan(data)
-    
-    # Determine premium status based on Stripe status
-    is_premium = status in ["active", "trialing"]
-    
-    # Map Stripe status to our status
+
+    # ── Map Stripe status → internal status ───────────────────────────────
+    # cancel_at_period_end=True with status=active means the user has scheduled
+    # a cancellation but is still within their paid period — treat as "canceling".
     if status == "active" and cancel_at_period_end:
-        subscription_status = "canceling"  # Will cancel at period end
-    elif status == "active":
-        subscription_status = "active"
-    elif status == "trialing":
-        subscription_status = "trialing"
-    elif status == "past_due":
-        subscription_status = "past_due"
-        is_premium = True  # Give grace period
-    elif status == "canceled":
-        subscription_status = "canceled"
-        is_premium = False
-    elif status == "unpaid":
-        subscription_status = "unpaid"
-        is_premium = False
-    else:
+        subscription_status = "canceling"
+    elif status in ("active", "trialing", "canceled", "unpaid",
+                    "incomplete", "incomplete_expired", "past_due"):
         subscription_status = status
-    
-    # Calculate expiration from Stripe's period end
+    else:
+        subscription_status = status  # forward-compatible fall-through
+
+    # ── Determine is_premium ───────────────────────────────────────────────
+    # Per spec:
+    #   premium ONLY when status == active OR trialing (within trial)
+    #   canceling → premium until current_period_end  (checked via expiration below)
+    #   past_due / unpaid / canceled / incomplete* → NOT premium
+    if subscription_status in ("active", "trialing"):
+        is_premium = True
+    elif subscription_status == "canceling":
+        # User paid for the period; keep premium until it ends.
+        # check_subscription_status will flip is_premium=False when the
+        # expiration timestamp passes.
+        is_premium = True
+    else:
+        # canceled, past_due, unpaid, incomplete, incomplete_expired, …
+        is_premium = False
+
+    # ── Calculate expiration from Stripe's period end ─────────────────────
     if current_period_end:
         expiration = datetime.fromtimestamp(current_period_end, tz=timezone.utc)
-    elif plan == "annual":
+    elif plan in ("annual", "yearly"):
         expiration = now + timedelta(days=365)
     else:
         expiration = now + timedelta(days=30)
-    
-    await db.users.update_one(
-        {"user_id": user_id},
-        {"$set": {
-            "is_premium": is_premium,
-            "plan": plan if is_premium else user.get("plan", "free"),
-            "subscription_status": subscription_status,
-            "subscription_plan": plan,
-            "subscription_expiration": expiration,
-            "stripe_subscription_id": subscription_id,
-            "updated_at": now
-        }}
+
+    update_fields = {
+        "is_premium": is_premium,
+        "subscription_status": subscription_status,
+        "subscription_plan": plan if is_premium else "free",
+        "subscription_expiration": expiration,
+        "stripe_subscription_id": subscription_id,
+        # Reset Stripe live-check TTL so /me re-verifies promptly
+        "stripe_status_verified_at": now,
+        "updated_at": now,
+    }
+    if not is_premium:
+        # Demote plan on non-premium transitions
+        update_fields["plan"] = "free"
+
+    await db.users.update_one({"user_id": user_id}, {"$set": update_fields})
+
+    logger.info(
+        f"[WEBHOOK] subscription.updated user={user_id} "
+        f"stripe_status={status} cancel_at_period_end={cancel_at_period_end} "
+        f"internal={subscription_status} is_premium={is_premium}"
     )
-    
-    logger.info(f"User {user_id} subscription updated: status={subscription_status}, is_premium={is_premium}")
 
 
 async def handle_subscription_deleted(db, data: dict, now: datetime):
@@ -360,30 +372,32 @@ async def handle_subscription_deleted(db, data: dict, now: datetime):
         return
     
     user_id = user["user_id"]
-    
-    # Revoke premium access
+
+    # Revoke premium access immediately
     await db.users.update_one(
         {"user_id": user_id},
         {"$set": {
             "is_premium": False,
             "plan": "free",
-            "subscription_plan": "free",  # Fixed: also set subscription_plan field
-            "subscription_status": "expired",
+            "subscription_plan": "free",
+            "subscription_status": "canceled",
             "subscription_expiration": now,
             "stripe_subscription_id": None,
-            "updated_at": now
+            # Reset live-check cache so /me picks up fresh state immediately
+            "stripe_status_verified_at": now,
+            "updated_at": now,
         }}
     )
-    
-    logger.info(f"Premium revoked for user {user_id}")
-    
-    # Log the cancellation
+
+    logger.info(f"[WEBHOOK] subscription.deleted — premium revoked for user={user_id}")
+
     await db.subscription_logs.insert_one({
         "user_id": user_id,
-        "action": "expired",
+        "action": "canceled",
         "provider": "stripe",
         "stripe_customer_id": customer_id,
-        "timestamp": now
+        "stripe_subscription_id": subscription_id,
+        "timestamp": now,
     })
 
 
