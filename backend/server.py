@@ -77,6 +77,16 @@ except ModuleNotFoundError:
         logging.getLogger(__name__).error(f"Failed to import subscription_router from both package and module: {e}")
         subscription_router = None
 
+admin_router = None
+try:
+    from backend.routers.admin import router as admin_router
+except ModuleNotFoundError:
+    try:
+        from routers.admin import router as admin_router
+    except ModuleNotFoundError as e:
+        logging.getLogger(__name__).error(f"Failed to import admin_router: {e}")
+        admin_router = None
+
 # Google Gemini for chat
 try:
     from google import genai
@@ -8845,4 +8855,10 @@ if auth_router:
         auth_router,
         prefix="/api",
         tags=["auth"],
+    )
+if admin_router:
+    app.include_router(
+        admin_router,
+        prefix="/api",
+        tags=["admin"],
     )
