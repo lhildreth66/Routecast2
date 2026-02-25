@@ -365,21 +365,23 @@ async def revoke_subscription(db: AsyncIOMotorDatabase, user_id: str, reason: Op
     result = await db.users.update_one(
         {"user_id": user_id},
         {"$set": {
+            "is_premium": False,
             "subscription_status": "inactive",
             "subscription_plan": "free",
+            "plan": "free",
             "subscription_expiration": None,
-            "updated_at": now
+            "stripe_status_verified_at": now,
+            "updated_at": now,
         }}
     )
 
-    if reason:
-        await db.subscription_logs.insert_one({
-            "user_id": user_id,
-            "action": "revoke",
-            "reason": reason,
-            "admin_action": True,
-            "timestamp": now
-        })
+    await db.subscription_logs.insert_one({
+        "user_id": user_id,
+        "action": "revoke",
+        "reason": reason or "admin_revoke",
+        "admin_action": True,
+        "timestamp": now,
+    })
 
     return result.modified_count > 0
 

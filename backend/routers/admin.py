@@ -442,14 +442,15 @@ async def reconcile_subscriptions(
         # ── Case: NO subscription ID in DB — check Stripe by customer ID ─
         # This covers Megan's exact scenario: is_premium=True but no sub ID.
         # Skip non-Stripe providers (admin grants, Apple, Google — handled elsewhere).
-        if provider not in ("stripe", "") or not db_is_premium:
+        if provider in ("apple", "google", "admin"):
             results.append({
                 "user_id": user_id, "email": email,
                 "action": "skipped",
-                "reason": f"provider={provider or 'unset'}, no stripe_subscription_id",
+                "reason": f"provider={provider} (non-Stripe, skip)",
                 "db_status": db_status,
             })
             continue
+        # provider is "stripe" OR None/unset — treat both as potentially Stripe
 
         # Look up all subscriptions for this customer in Stripe
         live_sub_id: Optional[str] = None
