@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -32,13 +32,13 @@ export default function SubscriptionScreen() {
   const { user, accessToken, refreshUser, isAuthenticated } = useAuth();
   const { canceled } = useLocalSearchParams<{ canceled?: string }>();
   const [plans, setPlans] = useState<Plan[]>([]);
-  const [selectedPlan, setSelectedPlan] = useState<string>('yearly');
   const [loading, setLoading] = useState(true);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [trialLoading, setTrialLoading] = useState(false);
   const [error, setError] = useState('');
   const [mounted, setMounted] = useState(false);
-  const autoLaunchFired = useRef(false);
+  // track which plan is currently launching so each card can show its own spinner
+  const [launchingPlan, setLaunchingPlan] = useState<string | null>(null);
 
   useEffect(() => {
     fetchPlans();
@@ -47,20 +47,6 @@ export default function SubscriptionScreen() {
   useEffect(() => {
     setMounted(true);
   }, []);
-
-  // Auto-launch Stripe on mount for authenticated, non-premium users.
-  // Only fires once per component mount (ref guard prevents retrigger).
-  // Skipped on the ?canceled=1 return so the user sees the retry UI.
-  useEffect(() => {
-    if (!mounted) return;
-    if (!isAuthenticated || !accessToken) return;
-    if (user?.is_premium) return; // already subscribed – show success state
-    if (canceled === '1') return; // user hit Cancel in Stripe – show retry UI
-    if (autoLaunchFired.current) return;
-    autoLaunchFired.current = true;
-    handleCheckout(selectedPlan);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mounted, isAuthenticated, accessToken, user?.is_premium, canceled]);
 
   const fetchPlans = async () => {
     try {
@@ -104,21 +90,18 @@ export default function SubscriptionScreen() {
       return;
     }
 
+    setLaunchingPlan(planId);
     setCheckoutLoading(true);
     setError('');
 
     try {
-      // Get the current origin for redirect URLs
       const origin = Platform.OS === 'web' && typeof window !== 'undefined'
-        ? window.location.origin 
+        ? window.location.origin
         : 'https://routecastweather.com';
 
       const response = await axios.post(
         `${API_BASE}/api/subscription/checkout`,
-        { 
-          plan: planId,
-          origin_url: origin
-        },
+        { plan: planId, origin_url: origin },
         { headers: { Authorization: `Bearer ${accessToken}` } }
       );
 
@@ -131,9 +114,9 @@ export default function SubscriptionScreen() {
       }
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to start checkout');
-      autoLaunchFired.current = false; // allow retry on error
     } finally {
       setCheckoutLoading(false);
+      setLaunchingPlan(null);
     }
   };
 
@@ -142,17 +125,6 @@ export default function SubscriptionScreen() {
   const isPremium = user?.is_premium;
   const isTrialing = user?.subscription_status === 'trialing';
   const canStartTrial = user?.trial_available && !isPremium && !isTrialing;
-
-  // Auto-launching Stripe (first mount, non-canceled, non-premium authenticated user).
-  // Show a branded loading screen — user will be at Stripe in <1s.
-  if (checkoutLoading || (!canceled && !error && mounted && isAuthenticated && !isPremium)) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#22c55e" />
-        <Text style={{ color: '#a1a1aa', marginTop: 16, fontSize: 15 }}>Starting your 7-day free trial…</Text>
-      </View>
-    );
-  }
 
   if (loading && !error) {
     return (
@@ -293,13 +265,9 @@ export default function SubscriptionScreen() {
           
           <View style={styles.plansContainer}>
             {plans.map((plan) => (
-              <TouchableOpacity
+              <View
                 key={plan.id}
-                style={[
-                  styles.planCard,
-                  selectedPlan === plan.id && styles.planCardSelected
-                ]}
-                onPress={() => setSelectedPlan(plan.id)}
+                style={styles.planCard}
                 data-testid={`plan-${plan.id}`}
               >
                 {plan.savings && (
@@ -325,12 +293,22 @@ export default function SubscriptionScreen() {
                   ))}
                 </View>
 
-                {selectedPlan === plan.id && (
-                  <View style={styles.selectedIndicator}>
-                    <Ionicons name="checkmark-circle" size={24} color="#eab308" />
-                  </View>
-                )}
-              </TouchableOpacity>
+                {/* Per-plan CTA button */}
+                <TouchableOpacity
+                  style={[styles.planCTAButton, launchingPlan === plan.id && styles.buttonDisabled]}
+                  onPress={() => handleCheckout(plan.id)}
+                  disabled={checkoutLoading}
+                  data-testid={`checkout-${plan.id}`}
+                >
+                  {launchingPlan === plan.id ? (
+                    <ActivityIndicator color="#1a1a1a" size="small" />
+                  ) : (
+                    <Text style={styles.planCTAButtonText}>
+                      Start 7-day free trial — {plan.interval === 'year' || plan.id === 'yearly' ? `$${plan.price}/yr` : `$${plan.price}/mo`}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
             ))}
           </View>
 
@@ -341,25 +319,6 @@ export default function SubscriptionScreen() {
               <Text style={styles.errorText}>{error}</Text>
             </View>
           )}
-
-          {/* Checkout Button */}
-          <TouchableOpacity
-            style={[styles.checkoutButton, checkoutLoading && styles.buttonDisabled]}
-            onPress={() => handleCheckout(selectedPlan)}
-            disabled={checkoutLoading}
-            data-testid="checkout-btn"
-          >
-            {checkoutLoading ? (
-              <ActivityIndicator color="#1a1a1a" size="small" />
-            ) : (
-              <>
-                <Ionicons name="card" size={22} color="#1a1a1a" />
-                <Text style={styles.checkoutButtonText}>
-                  Subscribe - ${plans.find(p => p.id === selectedPlan)?.price || '0'}/{selectedPlan === 'yearly' ? 'year' : 'month'}
-                </Text>
-              </>
-            )}
-          </TouchableOpacity>
 
           {/* Skip for now */}
           <TouchableOpacity
@@ -570,6 +529,19 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 12,
     left: 12,
+  },
+  planCTAButton: {
+    backgroundColor: '#eab308',
+    borderRadius: 10,
+    paddingVertical: 13,
+    alignItems: 'center',
+    marginTop: 14,
+  },
+  planCTAButtonText: {
+    color: '#1a1a1a',
+    fontSize: 14,
+    fontWeight: '800',
+    letterSpacing: 0.2,
   },
   errorContainer: {
     flexDirection: 'row',

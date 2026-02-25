@@ -4549,7 +4549,7 @@ async def _create_checkout_session(plan: str, origin_url: Optional[str]):
     price_id = _stripe_price_for_plan(plan)
     base_origin = _normalize_origin(origin_url)
 
-    success_url = f"{base_origin}/login?trial=1&session_id={{CHECKOUT_SESSION_ID}}"
+    success_url = f"{base_origin}/subscription/success?session_id={{CHECKOUT_SESSION_ID}}"
     cancel_url = f"{base_origin}/subscription?canceled=1"
 
     try:
