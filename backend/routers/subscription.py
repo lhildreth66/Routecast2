@@ -6,7 +6,10 @@ from fastapi import APIRouter, HTTPException, Depends, Header, Request
 from typing import Optional
 from datetime import datetime, timezone
 import os
+import asyncio
 import logging
+
+import stripe
 
 from models.user import (
     CreateCheckoutRequest, CheckoutResponse, SubscriptionInfo,
@@ -27,6 +30,8 @@ router = APIRouter(prefix="/subscription", tags=["Subscription"])
 
 # Stripe integration
 STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY")
+STRIPE_PRICE_MONTHLY = os.environ.get("STRIPE_PRICE_MONTHLY")
+STRIPE_PRICE_YEARLY  = os.environ.get("STRIPE_PRICE_YEARLY")
 
 
 @router.get("/status", response_model=SubscriptionInfo)
@@ -73,71 +78,80 @@ async def create_checkout_session(
     request: Request,
     current_user: dict = Depends(get_current_user)
 ):
-    """Create a Stripe checkout session for subscription"""
+    """Create a Stripe Checkout session for a recurring subscription.
+
+    Uses STRIPE_PRICE_MONTHLY / STRIPE_PRICE_YEARLY from environment so that
+    the correct recurring price is always applied.
+    """
     db = get_db(request)
     user_id = current_user.get("sub")
     email = current_user.get("email")
 
-    # Validate plan
-    if data.plan not in [SubscriptionPlan.MONTHLY, SubscriptionPlan.YEARLY]:
-        raise HTTPException(status_code=400, detail="Invalid plan")
+    if not STRIPE_API_KEY:
+        raise HTTPException(status_code=500, detail="Stripe API key not configured")
 
-    plan_key = data.plan.value
-    price_config = SUBSCRIPTION_PRICES.get(plan_key)
+    # Normalise plan — default to monthly if missing
+    plan_key = (getattr(data.plan, "value", data.plan) or "monthly").lower()
+    logger.info(f"[CHECKOUT] received plan={plan_key!r} user_id={user_id}")
 
-    if not price_config:
-        raise HTTPException(status_code=400, detail="Plan not found")
+    # Map plan → Stripe price ID (hard fail if env var missing)
+    if plan_key == "monthly":
+        price_id = STRIPE_PRICE_MONTHLY
+    elif plan_key == "yearly":
+        price_id = STRIPE_PRICE_YEARLY
+    else:
+        raise HTTPException(status_code=400, detail=f"Invalid plan: {plan_key!r}")
+
+    if not price_id:
+        logger.error(f"[CHECKOUT] Stripe price ID not configured for plan={plan_key!r}")
+        raise HTTPException(status_code=500, detail=f"Stripe price ID not configured for plan '{plan_key}'")
+
+    logger.info(f"[CHECKOUT] plan={plan_key!r} → price_id={price_id!r}")
+
+    origin = (data.origin_url or "https://routecastweather.com").rstrip("/")
+    success_url = f"{origin}/subscription/success?session_id={{CHECKOUT_SESSION_ID}}"
+    cancel_url  = f"{origin}/subscription?canceled=1"
 
     try:
-        from emergentintegrations.payments.stripe.checkout import (
-            StripeCheckout, CheckoutSessionRequest
-        )
-
-        # Build URLs
-        success_url = f"{data.origin_url}/subscription/success?session_id={{CHECKOUT_SESSION_ID}}"
-        cancel_url = f"{data.origin_url}/subscription/cancel"
-
-        # Get webhook URL
-        api_url = os.environ.get('API_URL', data.origin_url.replace('app.', 'api.'))
-        webhook_url = f"{api_url}/api/webhook/stripe"
-
-        # Initialize Stripe
-        stripe_checkout = StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
-
-        # Create checkout session
-        checkout_request = CheckoutSessionRequest(
-            amount=float(price_config["amount"]),
-            currency="usd",
+        stripe.api_key = STRIPE_API_KEY  # type: ignore[attr-defined]
+        session = await asyncio.to_thread(
+            stripe.checkout.Session.create,  # type: ignore[attr-defined]
+            mode="subscription",
+            line_items=[{"price": price_id, "quantity": 1}],
+            subscription_data={"trial_period_days": 7},
             success_url=success_url,
             cancel_url=cancel_url,
+            payment_method_collection="always",
             metadata={
                 "user_id": user_id,
                 "plan": plan_key,
-                "email": email
-            }
+                "email": email or "",
+            },
         )
 
-        session = await stripe_checkout.create_checkout_session(checkout_request)
-
-        # Store transaction record
+        # Store pending transaction so success/webhook can activate the subscription
         await db.payment_transactions.insert_one({
-            "session_id": session.session_id,
+            "session_id": session.id,
             "user_id": user_id,
             "email": email,
             "plan": plan_key,
-            "amount": price_config["amount"],
+            "price_id": price_id,
             "currency": "usd",
             "payment_status": "pending",
-            "created_at": datetime.now(timezone.utc)
+            "created_at": datetime.now(timezone.utc),
         })
 
+        logger.info(f"[CHECKOUT] session created: id={session.id} plan={plan_key!r} price={price_id!r}")
         return CheckoutResponse(
             checkout_url=session.url,
-            session_id=session.session_id
+            session_id=session.id,
         )
 
+    except stripe.error.StripeError as e:  # type: ignore[attr-defined]
+        logger.error(f"[CHECKOUT] Stripe error: {e}")
+        raise HTTPException(status_code=502, detail="Unable to start checkout")
     except Exception as e:
-        logger.error(f"Stripe checkout error: {e}")
+        logger.error(f"[CHECKOUT] Unexpected error: {e}")
         raise HTTPException(status_code=500, detail="Failed to create checkout session")
 
 

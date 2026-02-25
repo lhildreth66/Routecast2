@@ -730,7 +730,7 @@ class SubscriptionResponse(BaseModel):
 class SubscriptionCheckoutRequest(BaseModel):
     """Request payload for Stripe Checkout session creation"""
 
-    plan: Literal["monthly", "yearly"]
+    plan: Literal["monthly", "yearly"] = "monthly"  # default to monthly
     origin_url: Optional[str] = None
 
 
@@ -4545,16 +4545,30 @@ def _normalize_origin(origin_url: Optional[str]) -> str:
 
 
 def _stripe_price_for_plan(plan: str) -> str:
-    if plan not in ("monthly", "yearly"):
-        raise HTTPException(status_code=400, detail="Invalid plan")
+    """Map plan name to Stripe price ID.  Explicit if/elif so a missing env var
+    for one plan never silently falls through to the other plan's price."""
+    plan = (plan or "monthly").lower()
+    if plan == "monthly":
+        price_id = STRIPE_PRICE_MONTHLY
+    elif plan == "yearly":
+        price_id = STRIPE_PRICE_YEARLY
+    else:
+        raise HTTPException(status_code=400, detail=f"Invalid plan: {plan!r}")
 
-    price_id = STRIPE_PRICE_MONTHLY if plan == "monthly" else STRIPE_PRICE_YEARLY
     if not price_id:
-        raise HTTPException(status_code=500, detail="Stripe price ID not configured")
+        logger.error(f"[CHECKOUT] Stripe price ID not configured for plan={plan!r}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Stripe price ID not configured for plan '{plan}'"
+        )
+    logger.info(f"[CHECKOUT] plan={plan!r} → price_id={price_id!r}")
     return price_id
 
 
 async def _create_checkout_session(plan: str, origin_url: Optional[str]):
+    plan = (plan or "monthly").lower()
+    logger.info(f"[CHECKOUT] _create_checkout_session: plan={plan!r}")
+
     if not STRIPE_API_KEY:
         raise HTTPException(status_code=500, detail="Stripe API key not configured")
 
