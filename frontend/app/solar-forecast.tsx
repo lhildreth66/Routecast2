@@ -221,9 +221,10 @@ export default function SolarForecastScreen() {
   );
 
   // Use backend-fetched PSH when available, else local math, else 4.5 default
+  // Clamp to [1, 8] — the sane real-world window for continental/tropical latitudes
   const psh = useMemo(() => {
-    if (peakSunHours !== null) return peakSunHours;
-    if (lat) return localPeakSunHours(parseFloat(lat));
+    if (peakSunHours !== null) return peakSunHours; // already clamped on set
+    if (lat) return Math.min(8, Math.max(1, localPeakSunHours(parseFloat(lat))));
     return 4.5;
   }, [peakSunHours, lat]);
 
@@ -277,26 +278,76 @@ export default function SolarForecastScreen() {
 
     try {
       const today = new Date().toISOString().split('T')[0];
+      // Use a 1 kW reference panel (shade=0, cloud=0) so that
+      //   peak_sun_hours = daily_wh[0] / 1000  (backend also returns it directly)
       const resp = await axios.post(buildUrl('solar-forecast'), {
         lat: parseFloat(lat),
         lon: parseFloat(lon),
         date_range: [today],
-        panel_watts: 1000, // reference 1 kW panel — Wh/1000 = peak sun hours
+        panel_watts: 1000,
         shade_pct: 0,
         cloud_cover: [0],
       });
-      const refWh: number = resp.data?.daily_wh?.[0] ?? 4500;
-      setPeakSunHours(Math.max(0.5, refWh / 1000));
+
+      const data = resp.data;
+
+      // ── 1. Prefer backend-computed peak_sun_hours field ──────────────────
+      let derivedPsh: number | null = null;
+
+      if (typeof data?.peak_sun_hours === 'number' && isFinite(data.peak_sun_hours)) {
+        derivedPsh = data.peak_sun_hours;
+      } else if (
+        // ── 2. Fall back to manual derivation from daily_wh ───────────────
+        Array.isArray(data?.daily_wh) &&
+        data.daily_wh.length > 0 &&
+        typeof data.daily_wh[0] === 'number' &&
+        isFinite(data.daily_wh[0])
+      ) {
+        derivedPsh = data.daily_wh[0] / 1000; // panel_watts was 1000
+      }
+
+      // ── 3. Validate range (1–8 hrs is the sane real-world window) ────────
+      if (derivedPsh === null || !isFinite(derivedPsh) || derivedPsh < 0.5 || derivedPsh > 12) {
+        // Response shape is bad or value is outside any credible range
+        const fallback = localPeakSunHours(parseFloat(lat));
+        setPeakSunHours(Math.min(8, Math.max(1, fallback)));
+        setUsedFallback(true);
+        setSolarApiError('Received unexpected sun hours from server — using local estimate.');
+        return;
+      }
+
+      // Clamp to the 1–8 hr sane window
+      const clamped = Math.min(8, Math.max(1, derivedPsh));
+      if (clamped !== derivedPsh) {
+        setSolarApiError(
+          `Derived sun hours (${derivedPsh.toFixed(1)} hr) out of expected range; clamped to ${clamped.toFixed(1)} hr.`,
+        );
+      }
+      setPeakSunHours(clamped);
       setUsedFallback(false);
-    } catch (err: any) {
+    } catch (err: unknown) {
       const fallback = localPeakSunHours(parseFloat(lat));
-      setPeakSunHours(Math.max(0.5, fallback));
+      setPeakSunHours(Math.min(8, Math.max(1, fallback)));
       setUsedFallback(true);
-      const detail =
-        typeof err?.response?.data?.detail === 'string'
-          ? err.response.data.detail
-          : err?.message ?? '';
-      if (detail) setSolarApiError(detail);
+
+      // ── 4. Always stringify errors — never store raw objects (React #31) ─
+      let detail = '';
+      if (err && typeof err === 'object') {
+        const e = err as Record<string, any>;
+        const respDetail = e?.response?.data?.detail;
+        if (typeof respDetail === 'string') {
+          detail = respDetail;
+        } else if (respDetail !== undefined) {
+          detail = JSON.stringify(respDetail);
+        } else if (typeof e?.message === 'string') {
+          detail = e.message;
+        } else {
+          detail = 'Network error — using local estimate.';
+        }
+      } else if (typeof err === 'string') {
+        detail = err;
+      }
+      setSolarApiError(detail || 'Solar API unavailable — using local estimate.');
     } finally {
       setCalculating(false);
     }
@@ -538,7 +589,7 @@ export default function SolarForecastScreen() {
                 <Ionicons name="information-circle" size={16} color="#facc15" />
                 <Text style={styles.noticeText}>
                   {solarApiError
-                    ? `Solar data unavailable — using estimated sun hours. (${solarApiError})`
+                    ? solarApiError
                     : !lat
                     ? 'No location set — using default 4.5 peak sun hours. Add a location for accurate results.'
                     : 'Using locally calculated sun hours based on latitude and today\'s date.'}

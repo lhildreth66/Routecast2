@@ -377,6 +377,7 @@ app.add_middleware(
     allow_origins=[
         "https://routecastweather.com",
         "https://www.routecastweather.com",
+        "https://api.routecastweather.com",
     ],
     allow_credentials=False,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
@@ -766,6 +767,7 @@ class SolarForecastResponse(BaseModel):
     panel_watts: Optional[float] = None
     shade_pct: Optional[float] = None
     advisory: Optional[str] = None
+    peak_sun_hours: Optional[float] = None  # Clear-sky PSH derived from daily_wh[0]/panel_watts
     is_premium_locked: bool = False
     premium_message: Optional[str] = None
 
@@ -4825,6 +4827,13 @@ async def forecast_solar_energy(request: SolarForecastRequest):
 
         logger.info("[solar-forecast] forecast completed")
 
+        # Derive peak sun hours: Wh produced by a 1W panel under clear-sky conditions
+        # (only meaningful when shade_pct=0 and cloud_cover=[0], i.e. the reference call)
+        psh: Optional[float] = None
+        if result.daily_wh and len(result.daily_wh) > 0 and request.panel_watts > 0:
+            raw_psh = result.daily_wh[0] / request.panel_watts
+            psh = round(max(0.1, min(16.0, raw_psh)), 2)
+
         # Convert domain result to API response
         return SolarForecastResponse(
             daily_wh=result.daily_wh,
@@ -4832,6 +4841,7 @@ async def forecast_solar_energy(request: SolarForecastRequest):
             panel_watts=result.panel_watts,
             shade_pct=result.shade_pct,
             advisory=result.advisory,
+            peak_sun_hours=psh,
             is_premium_locked=False,
         )
     except ValueError as e:
