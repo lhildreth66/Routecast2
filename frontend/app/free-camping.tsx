@@ -89,7 +89,7 @@ export default function FreeCampingScreen() {
     if (q.length < 2) { setSuggestions([]); return; }
     setSuggestionsLoading(true);
     try {
-      const res = await axios.get(`${API_BASE}/api/geocode/autocomplete`, { params: { query: q, limit: 6 } });
+      const res = await axios.get(`${API_BASE}/geocode/autocomplete`, { params: { query: q, limit: 6 } });
       setSuggestions(Array.isArray(res.data) ? res.data : []);
       setShowSuggestions(true);
     } catch {

@@ -87,7 +87,7 @@ export function useLocationSearch(sessionKey: string): UseLocationSearchResult {
   const fetchSuggestions = async (q: string) => {
     if (q.length < 2) { setSuggestions([]); return; }
     try {
-      const res = await axios.get(`${API_BASE}/api/geocode/autocomplete`, {
+      const res = await axios.get(`${API_BASE}/geocode/autocomplete`, {
         params: { query: q, limit: 6 },
       });
       setSuggestions(Array.isArray(res.data) ? res.data : []);
