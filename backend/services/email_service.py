@@ -13,7 +13,13 @@ logger = logging.getLogger(__name__)
 SENDGRID_API_KEY = os.environ.get('SENDGRID_API_KEY', '')
 SENDER_EMAIL = os.environ.get('SEND_FROM_EMAIL') or os.environ.get('SENDER_EMAIL', 'no-reply@routecastweather.com')
 SENDER_NAME = os.environ.get('SEND_FROM_NAME', 'Routecast')
-APP_URL = os.environ.get('APP_URL', 'https://app.routecastweather.com')
+# FRONTEND_URL is the public web address of the frontend (used in email links).
+# Prefer FRONTEND_URL; fall back to APP_URL; hard-default to production domain.
+FRONTEND_URL = (
+    os.environ.get('FRONTEND_URL')
+    or os.environ.get('APP_URL', '')
+    or 'https://app.routecastweather.com'
+).rstrip('/')
 CONTACT_TO_EMAIL = os.environ.get('CONTACT_TO_EMAIL', 'support@routecastweather.com')
 
 
@@ -45,7 +51,9 @@ def _send_email(to: str, subject: str, html_content: str) -> bool:
 
 def send_verification_email(email: str, token: str, name: Optional[str] = None) -> bool:
     """Send email verification link"""
-    verify_url = f"{APP_URL}/verify-email?token={token}"
+    from urllib.parse import quote as urlquote
+    verify_url = f"{FRONTEND_URL}/verify-email?token={urlquote(token, safe='')}"
+    logger.info(f"[EMAIL] Sending verification email to={email} url_domain={FRONTEND_URL}")
     greeting = f"Hi {name}," if name else "Hi there,"
 
     html_content = f"""
@@ -92,7 +100,7 @@ def send_verification_email(email: str, token: str, name: Optional[str] = None) 
 
 def send_password_reset_email(email: str, token: str, name: Optional[str] = None) -> bool:
     """Send password reset link"""
-    reset_url = f"{APP_URL}/reset-password?token={token}"
+    reset_url = f"{FRONTEND_URL}/reset-password?token={token}"
     greeting = f"Hi {name}," if name else "Hi there,"
 
     html_content = f"""
@@ -193,7 +201,7 @@ def send_welcome_email(email: str, name: Optional[str] = None) -> bool:
                 </div>
 
                 <p style="text-align: center;">
-                    <a href="{APP_URL}" class="button">Open RouteCast</a>
+                    <a href="{FRONTEND_URL}" class="button">Open RouteCast</a>
                 </p>
             </div>
             <div class="footer">
@@ -253,7 +261,7 @@ def send_subscription_confirmation_email(email: str, plan: str, name: Optional[s
                 </ul>
 
                 <p style="text-align: center;">
-                    <a href="{APP_URL}" class="button">Start Using Premium</a>
+                    <a href="{FRONTEND_URL}" class="button">Start Using Premium</a>
                 </p>
             </div>
             <div class="footer">

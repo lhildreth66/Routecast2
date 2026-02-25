@@ -6,7 +6,11 @@ from fastapi import APIRouter, HTTPException, Depends, Header, Request, Backgrou
 from fastapi.responses import JSONResponse
 from typing import Optional
 from datetime import datetime, timedelta, timezone
+from urllib.parse import unquote_plus
+import logging
 import os
+
+logger = logging.getLogger(__name__)
 
 from models.user import (
     UserCreate, UserLogin, UserResponse, UserMeResponse,
@@ -153,25 +157,41 @@ async def verify_email(
     request: Request
 ):
     """Verify email address with token"""
+    raw_token = data.token or ""
+    # URL-decode in case the client double-encoded (+ → space or %2B → +)
+    token = unquote_plus(raw_token)
+
+    safe_preview = f"{token[:6]}...{token[-6:]}" if len(token) >= 12 else "<short>"
+    logger.info(
+        f"[VERIFY-EMAIL] incoming token len={len(token)} preview={safe_preview} "
+        f"raw_len={len(raw_token)}"
+    )
+
     db = get_db(request)
 
-    user_id = await verify_and_consume_token(db, data.token, "email_verification")
+    user_id = await verify_and_consume_token(db, token, "email_verification")
     if not user_id:
         # Idempotency: check if this is an already-consumed token for a user
         # who is already verified (e.g. clicking the same link twice).
         old_token_doc = await db.verification_tokens.find_one({
-            "token": data.token,
+            "token": token,
             "token_type": "email_verification",
         })
         if old_token_doc and old_token_doc.get("used"):
             existing_user = await get_user_by_id(db, old_token_doc["user_id"])
             if existing_user and existing_user.get("email_verified"):
+                logger.info(f"[VERIFY-EMAIL] idempotent — already verified user={old_token_doc['user_id']}")
                 return {"message": "Email already verified"}
+        logger.warning(
+            f"[VERIFY-EMAIL] REJECTED preview={safe_preview} — "
+            "token not valid (see TOKEN log above for detailed reason)"
+        )
         raise HTTPException(status_code=400, detail="Invalid or expired verification token")
 
     # Mark email as verified
     user = await get_user_by_id(db, user_id)
     await update_user(db, user_id, {"email_verified": True})
+    logger.info(f"[VERIFY-EMAIL] SUCCESS user_id={user_id} email={user.get('email', 'unknown')}")
 
     # Send welcome email
     background_tasks.add_task(
@@ -189,7 +209,8 @@ async def resend_verification(
     request: Request,
     current_user: dict = Depends(get_current_user)
 ):
-    """Resend email verification link"""
+    """Resend email verification link. Invalidates any previous unused tokens
+    so only the freshly-sent link is valid."""
     db = get_db(request)
 
     user_id = current_user.get("sub")
@@ -201,7 +222,18 @@ async def resend_verification(
     if user.get("email_verified"):
         raise HTTPException(status_code=400, detail="Email already verified")
 
-    # Generate new verification token
+    # Invalidate all previous unused verification tokens for this user so old
+    # links stop working immediately.  The user is warned in the response.
+    now = datetime.now(timezone.utc)
+    invalidated = await db.verification_tokens.update_many(
+        {"user_id": user_id, "token_type": "email_verification", "used": False},
+        {"$set": {"used": True, "invalidated_by_resend": True, "invalidated_at": now}},
+    )
+    logger.info(
+        f"[RESEND-VERIFY] user_id={user_id} invalidated {invalidated.modified_count} old token(s)"
+    )
+
+    # Generate new verification token (24-hour TTL)
     verification_token = generate_verification_token()
     await store_verification_token(db, user_id, verification_token, "email_verification", 24)
 
@@ -213,7 +245,10 @@ async def resend_verification(
         user.get("name")
     )
 
-    return {"message": "Verification email sent"}
+    return {
+        "message": "Verification email sent",
+        "note": "Only the most recent verification link will work — previous links have been invalidated.",
+    }
 
 
 @router.post("/forgot-password")

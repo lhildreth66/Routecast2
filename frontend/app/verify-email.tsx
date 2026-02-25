@@ -26,6 +26,7 @@ export default function VerifyEmailScreen() {
 
   const [resending, setResending] = useState(false);
   const [resendSuccess, setResendSuccess] = useState(false);
+  const [resendNote, setResendNote] = useState('');
   const [error, setError] = useState('');
   const [countdown, setCountdown] = useState(0);
 
@@ -135,14 +136,16 @@ export default function VerifyEmailScreen() {
     setResending(true);
     setError('');
     setResendSuccess(false);
+    setResendNote('');
 
     try {
-      await axios.post(
+      const res = await axios.post(
         `${API_BASE}/api/auth/resend-verification`,
         {},
         { headers: { Authorization: `Bearer ${accessToken}` } }
       );
       setResendSuccess(true);
+      setResendNote(res.data?.note || '');
       setCountdown(60); // 60 second cooldown
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to resend email');
@@ -235,6 +238,11 @@ export default function VerifyEmailScreen() {
               <Ionicons name="checkmark-circle" size={18} color="#22c55e" />
               <Text style={styles.successText}>Verification email sent!</Text>
             </View>
+          )}
+          {resendSuccess && !!resendNote && (
+            <Text style={{ color: '#a1a1aa', fontSize: 12, textAlign: 'center', marginTop: 4, marginBottom: 4 }}>
+              {resendNote}
+            </Text>
           )}
 
           {error && (
