@@ -12,11 +12,14 @@
  *  - NO auto-GPS on mount. GPS only on "Use My Location" tap.
  *  - Uses shared useLocationSearch / LocationSearchBox pattern.
  *  - All errors shown as banners, never thrown to React.
- *  - Backend `/solar-forecast` used to get peak sun hours; falls back to
- *    local latitude-based math if the call fails.
+ *  - Backend /solar-forecast used to derive peak sun hours;
+ *    falls back to local latitude-based math if call fails.
+ *  - Appliance editable fields use STRING state (not number) to avoid
+ *    controlled-input cursor-jump on web.
+ *  - No Switch component (unreliable on RN Web); uses TouchableOpacity toggle.
  */
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import {
   View,
   Text,
@@ -25,7 +28,6 @@ import {
   TextInput,
   ActivityIndicator,
   ScrollView,
-  Switch,
 } from 'react-native';
 import axios from 'axios';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -39,19 +41,20 @@ import LocationSearchBox from '../lib/components/LocationSearchBox';
 
 type BattType = 'lithium' | 'agm' | 'gel' | 'lead';
 
+/** All editable fields kept as strings to avoid controlled-input issues on web */
 interface Appliance {
   id: string;
   label: string;
   icon: string;
-  watts: number;
-  hours: number;
-  mins: number;
+  wattStr: string;
+  hourStr: string;
+  minStr: string;
   enabled: boolean;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const ACCENT = '#eab308'; // yellow
+const ACCENT = '#eab308';
 
 const DEFAULT_DOD: Record<BattType, number> = {
   lithium: 0.85,
@@ -60,50 +63,83 @@ const DEFAULT_DOD: Record<BattType, number> = {
   lead: 0.50,
 };
 
-const INVERTER_EFF = 0.92;   // inverter efficiency
-const SYSTEM_LOSS = 0.77;    // wiring + MPPT + temperature + dust losses
+const DOD_PRESETS: Record<BattType, number[]> = {
+  lithium: [0.80, 0.85, 0.90],
+  agm:     [0.40, 0.50, 0.60],
+  gel:     [0.40, 0.50, 0.60],
+  lead:    [0.40, 0.50, 0.60],
+};
+
+const INVERTER_EFF = 0.92;
+const SYSTEM_LOSS  = 0.77;   // wiring + MPPT + temp + dust
+
+const MK = (id: string, label: string, icon: string,
+            w: number, h: number, m: number, on: boolean): Appliance => ({
+  id, label, icon,
+  wattStr: String(w), hourStr: String(h), minStr: String(m),
+  enabled: on,
+});
 
 const DEFAULT_APPLIANCES: Appliance[] = [
-  { id: 'fridge',    label: '12V Compressor Fridge', icon: '🧊', watts: 50,   hours: 24, mins:  0, enabled: true  },
-  { id: 'lights',    label: 'LED Lights',             icon: '💡', watts: 20,   hours:  5, mins:  0, enabled: true  },
-  { id: 'pump',      label: 'Water Pump',             icon: '🚿', watts: 60,   hours:  0, mins: 30, enabled: true  },
-  { id: 'phone',     label: 'Phone Charging',         icon: '📱', watts: 15,   hours:  2, mins:  0, enabled: true  },
-  { id: 'fan',       label: 'Roof Vent Fan',          icon: '🌀', watts: 25,   hours:  4, mins:  0, enabled: false },
-  { id: 'cpap',      label: 'CPAP Machine',           icon: '💨', watts: 55,   hours:  8, mins:  0, enabled: false },
-  { id: 'laptop',    label: 'Laptop / Tablet',        icon: '💻', watts: 45,   hours:  2, mins:  0, enabled: false },
-  { id: 'tv',        label: 'TV / Streaming',         icon: '📺', watts: 60,   hours:  2, mins:  0, enabled: false },
-  { id: 'microwave', label: 'Microwave',              icon: '📡', watts: 1000, hours:  0, mins: 10, enabled: false },
-  { id: 'coffee',    label: 'Coffee Maker',           icon: '☕', watts: 900,  hours:  0, mins:  6, enabled: false },
-  { id: 'airfryer',  label: 'Air Fryer',              icon: '🍳', watts: 1500, hours:  0, mins: 15, enabled: false },
-  { id: 'other',     label: 'Other / Custom',         icon: '🔌', watts: 100,  hours:  1, mins:  0, enabled: false },
+  MK('fridge',    '12V Compressor Fridge', '🧊',   50, 24,  0, true),
+  MK('lights',    'LED Lights',            '💡',   20,  5,  0, true),
+  MK('pump',      'Water Pump',            '🚿',   60,  0, 30, true),
+  MK('phone',     'Phone Charging',        '📱',   15,  2,  0, true),
+  MK('fan',       'Roof Vent Fan',         '🌀',   25,  4,  0, false),
+  MK('cpap',      'CPAP Machine',          '💨',   55,  8,  0, false),
+  MK('laptop',    'Laptop / Tablet',       '💻',   45,  2,  0, false),
+  MK('tv',        'TV / Streaming',        '📺',   60,  2,  0, false),
+  MK('microwave', 'Microwave',             '📡', 1000,  0, 10, false),
+  MK('coffee',    'Coffee Maker',          '☕',  900,  0,  6, false),
+  MK('airfryer',  'Air Fryer',             '🍳', 1500,  0, 15, false),
+  MK('other',     'Other / Custom',        '🔌',  100,  1,  0, false),
 ];
 
-// ─── Local peak-sun-hours approximation (mirrors backend solar geometry) ──────
+// ─── Local peak-sun-hours estimate (mirrors backend solar geometry) ────────────
 
 function localPeakSunHours(lat: number): number {
-  const now = new Date();
+  const now   = new Date();
   const start = new Date(now.getFullYear(), 0, 0);
-  const doy = Math.floor((now.getTime() - start.getTime()) / 864e5);
-  const decl = 23.44 * Math.sin((2 * Math.PI * (doy - 81)) / 365);
-  const lr = (lat * Math.PI) / 180;
-  const dr = (decl * Math.PI) / 180;
-  const sinE = Math.sin(lr) * Math.sin(dr) + Math.cos(lr) * Math.cos(dr);
-  const elevDeg = (Math.asin(Math.max(-1, Math.min(1, sinE))) * 180) / Math.PI;
-  if (elevDeg <= 0) return 0.5;
-  const cosH = -Math.tan(lr) * Math.tan(dr);
-  const ha = Math.acos(Math.max(-1, Math.min(1, cosH)));
+  const doy   = Math.floor((now.getTime() - start.getTime()) / 864e5);
+  const decl  = 23.44 * Math.sin((2 * Math.PI * (doy - 81)) / 365);
+  const lr    = (lat  * Math.PI) / 180;
+  const dr    = (decl * Math.PI) / 180;
+  const sinE  = Math.sin(lr) * Math.sin(dr) + Math.cos(lr) * Math.cos(dr);
+  const elev  = (Math.asin(Math.max(-1, Math.min(1, sinE))) * 180) / Math.PI;
+  if (elev <= 0) return 1;
+  const cosH  = -Math.tan(lr) * Math.tan(dr);
+  const ha    = Math.acos(Math.max(-1, Math.min(1, cosH)));
   const dayLen = (2 * 24 * ha) / (2 * Math.PI);
-  return Math.max(0.5, 5.5 * (elevDeg / 90) ** 0.75 * (dayLen / 12));
+  return Math.max(1, Math.min(8, 5.5 * (elev / 90) ** 0.75 * (dayLen / 12)));
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const fmt = (n: number, dec = 0) => (isFinite(n) ? n.toFixed(dec) : '—');
+const num  = (s: string, fallback = 0) => { const n = parseFloat(s); return isFinite(n) ? Math.max(0, n) : fallback; };
+const fmt  = (n: number, dec = 0)      => (isFinite(n) && n >= 0 ? n.toFixed(dec) : '—');
+const fmtN = (n: number, dec = 0)      => (isFinite(n) ? n.toFixed(dec) : '—');
+
+const appWh = (a: Appliance) => num(a.wattStr) * (num(a.hourStr) + num(a.minStr) / 60);
 
 const pctColor = (ratio: number) =>
   ratio >= 1 ? '#4ade80' : ratio >= 0.7 ? '#facc15' : '#f87171';
 
-// ─── Sub-components ──────────────────────────────────────────────────────────
+// ─── Toggle sub-component (replaces Switch — more reliable on RN Web) ─────────
+
+function Toggle({ value, onToggle }: { value: boolean; onToggle: () => void }) {
+  return (
+    <TouchableOpacity
+      onPress={onToggle}
+      activeOpacity={0.8}
+      style={[styles.toggleTrack, value && styles.toggleTrackOn]}
+      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+    >
+      <View style={[styles.toggleThumb, value && styles.toggleThumbOn]} />
+    </TouchableOpacity>
+  );
+}
+
+// ─── Section header ───────────────────────────────────────────────────────────
 
 function SectionHeader({ n, label, icon }: { n: number; label: string; icon: string }) {
   return (
@@ -117,45 +153,31 @@ function SectionHeader({ n, label, icon }: { n: number; label: string; icon: str
   );
 }
 
-function Stepper({
-  value,
-  onChange,
-  min = 1,
-  max = 99,
-}: {
-  value: string;
-  onChange: (v: string) => void;
-  min?: number;
-  max?: number;
+// ─── Stepper (+/–) ────────────────────────────────────────────────────────────
+
+function Stepper({ value, onChange, min = 1, max = 99 }: {
+  value: string; onChange: (v: string) => void; min?: number; max?: number;
 }) {
   const n = parseInt(value) || 1;
   return (
     <View style={styles.stepper}>
-      <TouchableOpacity
-        style={styles.stepBtn}
-        onPress={() => onChange(String(Math.max(min, n - 1)))}
-        disabled={n <= min}
-      >
+      <TouchableOpacity style={styles.stepBtn} onPress={() => onChange(String(Math.max(min, n - 1)))} disabled={n <= min}>
         <Ionicons name="remove" size={16} color={n <= min ? '#52525b' : '#e4e4e7'} />
       </TouchableOpacity>
       <Text style={styles.stepValue}>{n}</Text>
-      <TouchableOpacity
-        style={styles.stepBtn}
-        onPress={() => onChange(String(Math.min(max, n + 1)))}
-        disabled={n >= max}
-      >
+      <TouchableOpacity style={styles.stepBtn} onPress={() => onChange(String(Math.min(max, n + 1)))} disabled={n >= max}>
         <Ionicons name="add" size={16} color={n >= max ? '#52525b' : '#e4e4e7'} />
       </TouchableOpacity>
     </View>
   );
 }
 
-// ─── Main Screen ─────────────────────────────────────────────────────────────
+// ─── Main screen ──────────────────────────────────────────────────────────────
 
 export default function SolarForecastScreen() {
   const router = useRouter();
 
-  // ── Location (no auto-GPS on mount) ─────────────────────────────────────
+  // ── Location (no auto-GPS on mount) ──────────────────────────────────────
   const {
     lat, lon, locationLabel, locationLoading,
     locationQuery, suggestions, showSuggestions,
@@ -163,42 +185,38 @@ export default function SolarForecastScreen() {
     clearManualLocation, triggerGps, setShowSuggestions,
   } = useLocationSearch('solarForecastLoc');
 
-  // ── Battery bank ────────────────────────────────────────────────────────
-  const [battType, setBattType] = useState<BattType>('lithium');
-  const [numBatt, setNumBatt] = useState('2');
-  const [ahPerBatt, setAhPerBatt] = useState('100');
-  const [voltage, setVoltage] = useState<12 | 24>(12);
-  const [customDodStr, setCustomDodStr] = useState('');
+  // ── Battery bank ─────────────────────────────────────────────────────────
+  const [battType,    setBattType]    = useState<BattType>('lithium');
+  const [numBatt,     setNumBatt]     = useState('2');
+  const [ahPerBatt,   setAhPerBatt]   = useState('100');
+  const [voltage,     setVoltage]     = useState<12 | 24>(12);
+  const [dod,         setDod]         = useState<number>(DEFAULT_DOD['lithium']);
 
-  // ── Solar array ─────────────────────────────────────────────────────────
+  // ── Solar array ───────────────────────────────────────────────────────────
   const [panelWatts, setPanelWatts] = useState('200');
-  const [numPanels, setNumPanels] = useState('2');
+  const [numPanels,  setNumPanels]  = useState('2');
 
-  // ── Appliances ──────────────────────────────────────────────────────────
+  // ── Appliances ────────────────────────────────────────────────────────────
   const [appliances, setAppliances] = useState<Appliance[]>(DEFAULT_APPLIANCES);
 
-  // ── Results state ────────────────────────────────────────────────────────
-  const [showResults, setShowResults] = useState(false);
-  const [calculating, setCalculating] = useState(false);
+  // ── Results ───────────────────────────────────────────────────────────────
+  const [showResults,  setShowResults]  = useState(false);
+  const [calculating,  setCalculating]  = useState(false);
   const [peakSunHours, setPeakSunHours] = useState<number | null>(null);
   const [usedFallback, setUsedFallback] = useState(false);
-  const [solarApiError, setSolarApiError] = useState('');
-
-  // ── Assumptions drawer ───────────────────────────────────────────────────
+  const [apiError,     setApiError]     = useState('');
   const [showAssumptions, setShowAssumptions] = useState(false);
 
-  // ─── Computed values ──────────────────────────────────────────────────────
+  // When battery type changes, reset DoD to its default
+  const selectBattType = (bt: BattType) => {
+    setBattType(bt);
+    setDod(DEFAULT_DOD[bt]);
+  };
 
-  const dod = useMemo(() => {
-    if (customDodStr) {
-      const n = parseFloat(customDodStr);
-      if (!isNaN(n) && n > 0 && n <= 100) return n / 100;
-    }
-    return DEFAULT_DOD[battType];
-  }, [battType, customDodStr]);
+  // ── Computed values ───────────────────────────────────────────────────────
 
   const totalBattWh = useMemo(
-    () => (parseInt(numBatt) || 0) * (parseFloat(ahPerBatt) || 0) * voltage,
+    () => (parseInt(numBatt) || 0) * (num(ahPerBatt)) * voltage,
     [numBatt, ahPerBatt, voltage],
   );
 
@@ -207,34 +225,39 @@ export default function SolarForecastScreen() {
     [totalBattWh, dod],
   );
 
+  const usableBattAh = voltage > 0 ? usableBattWh / voltage : 0;
+
+  // Capacity after DoD only, before inverter losses — for breakdown display
+  const preinvBattWh = useMemo(() => totalBattWh * dod, [totalBattWh, dod]);
+  const preinvBattAh = voltage > 0 ? preinvBattWh / voltage : 0;
+
   const arrayWatts = useMemo(
     () => (parseInt(panelWatts) || 0) * (parseInt(numPanels) || 0),
     [panelWatts, numPanels],
   );
 
   const dailyUsageWh = useMemo(
-    () =>
-      appliances
-        .filter((a) => a.enabled)
-        .reduce((s, a) => s + a.watts * (a.hours + a.mins / 60), 0),
+    () => appliances.filter(a => a.enabled).reduce((s, a) => s + appWh(a), 0),
     [appliances],
   );
 
-  // Use backend-fetched PSH when available, else local math, else 4.5 default
-  // Clamp to [1, 8] — the sane real-world window for continental/tropical latitudes
+  const dailyUsageAh = voltage > 0 ? dailyUsageWh / voltage : 0;
+
+  // Peak sun hours: backend value (clamped 1–8); local estimate; or 4.5 default
   const psh = useMemo(() => {
-    if (peakSunHours !== null) return peakSunHours; // already clamped on set
+    if (peakSunHours !== null) return peakSunHours;
     if (lat) return Math.min(8, Math.max(1, localPeakSunHours(parseFloat(lat))));
     return 4.5;
   }, [peakSunHours, lat]);
 
-  const solarWhDay = arrayWatts * psh * SYSTEM_LOSS;
-  const batteryDays = dailyUsageWh > 0 ? usableBattWh / dailyUsageWh : Infinity;
-  const netWh = solarWhDay - dailyUsageWh;
+  const solarWhDay    = arrayWatts * psh * SYSTEM_LOSS;
+  const batteryDays   = dailyUsageWh > 0 ? usableBattWh / dailyUsageWh : Infinity;
+  const batteryHours  = batteryDays * 24;
+  const netWh         = solarWhDay - dailyUsageWh;
   const coverageRatio = dailyUsageWh > 0 ? solarWhDay / dailyUsageWh : 1;
 
-  const panelWattsNum = parseInt(panelWatts) || 200;
-  const ahPerBattNum = parseFloat(ahPerBatt) || 100;
+  const panelWattsNum  = parseInt(panelWatts) || 200;
+  const ahPerBattNum   = num(ahPerBatt) || 100;
 
   const panelsNeeded =
     dailyUsageWh > 0
@@ -246,28 +269,24 @@ export default function SolarForecastScreen() {
       ? Math.ceil((dailyUsageWh * 2) / Math.max(0.01, ahPerBattNum * voltage * dod * INVERTER_EFF))
       : 0;
 
-  // ─── Handlers ──────────────────────────────────────────────────────────────
+  const extraWattsNeeded = netWh < 0
+    ? Math.ceil(-netWh / (psh * SYSTEM_LOSS))
+    : 0;
 
-  const toggleAppliance = (id: string) =>
-    setAppliances((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, enabled: !a.enabled } : a)),
-    );
+  // ── Appliance handlers ────────────────────────────────────────────────────
 
-  const updateAppliance = (
-    id: string,
-    field: 'watts' | 'hours' | 'mins',
-    raw: string,
-  ) => {
-    const n = Math.max(0, parseFloat(raw) || 0);
-    setAppliances((prev) =>
-      prev.map((a) => (a.id === id ? { ...a, [field]: n } : a)),
-    );
-  };
+  const toggleAppliance = useCallback((id: string) =>
+    setAppliances(prev => prev.map(a => a.id === id ? { ...a, enabled: !a.enabled } : a)), []);
+
+  const updateAppliance = useCallback((id: string, field: 'wattStr' | 'hourStr' | 'minStr', val: string) =>
+    setAppliances(prev => prev.map(a => a.id === id ? { ...a, [field]: val } : a)), []);
+
+  // ── Calculate ─────────────────────────────────────────────────────────────
 
   const calculate = async () => {
     setShowResults(true);
     setCalculating(true);
-    setSolarApiError('');
+    setApiError('');
 
     if (!lat || !lon) {
       setPeakSunHours(4.5);
@@ -278,8 +297,7 @@ export default function SolarForecastScreen() {
 
     try {
       const today = new Date().toISOString().split('T')[0];
-      // Use a 1 kW reference panel (shade=0, cloud=0) so that
-      //   peak_sun_hours = daily_wh[0] / 1000  (backend also returns it directly)
+      // 1000 W reference panel, no shade, no cloud → daily_wh[0] / 1000 = PSH
       const resp = await axios.post(buildUrl('solar-forecast'), {
         lat: parseFloat(lat),
         lon: parseFloat(lon),
@@ -289,71 +307,57 @@ export default function SolarForecastScreen() {
         cloud_cover: [0],
       });
 
-      const data = resp.data;
+      const data = resp.data as Record<string, unknown>;
 
-      // ── 1. Prefer backend-computed peak_sun_hours field ──────────────────
-      let derivedPsh: number | null = null;
-
-      if (typeof data?.peak_sun_hours === 'number' && isFinite(data.peak_sun_hours)) {
-        derivedPsh = data.peak_sun_hours;
+      // Prefer explicit peak_sun_hours field; fall back to derivation
+      let derived: number | null = null;
+      if (typeof data?.peak_sun_hours === 'number' && isFinite(data.peak_sun_hours as number)) {
+        derived = data.peak_sun_hours as number;
       } else if (
-        // ── 2. Fall back to manual derivation from daily_wh ───────────────
         Array.isArray(data?.daily_wh) &&
-        data.daily_wh.length > 0 &&
-        typeof data.daily_wh[0] === 'number' &&
-        isFinite(data.daily_wh[0])
+        (data.daily_wh as unknown[]).length > 0 &&
+        typeof (data.daily_wh as unknown[])[0] === 'number' &&
+        isFinite((data.daily_wh as number[])[0])
       ) {
-        derivedPsh = data.daily_wh[0] / 1000; // panel_watts was 1000
+        derived = (data.daily_wh as number[])[0] / 1000;
       }
 
-      // ── 3. Validate range (1–8 hrs is the sane real-world window) ────────
-      if (derivedPsh === null || !isFinite(derivedPsh) || derivedPsh < 0.5 || derivedPsh > 12) {
-        // Response shape is bad or value is outside any credible range
-        const fallback = localPeakSunHours(parseFloat(lat));
-        setPeakSunHours(Math.min(8, Math.max(1, fallback)));
+      if (derived === null || !isFinite(derived) || derived < 0.5 || derived > 12) {
+        const fb = localPeakSunHours(parseFloat(lat));
+        setPeakSunHours(Math.min(8, Math.max(1, fb)));
         setUsedFallback(true);
-        setSolarApiError('Received unexpected sun hours from server — using local estimate.');
+        setApiError('Server returned unexpected sun-hours value — using local estimate.');
         return;
       }
 
-      // Clamp to the 1–8 hr sane window
-      const clamped = Math.min(8, Math.max(1, derivedPsh));
-      if (clamped !== derivedPsh) {
-        setSolarApiError(
-          `Derived sun hours (${derivedPsh.toFixed(1)} hr) out of expected range; clamped to ${clamped.toFixed(1)} hr.`,
-        );
+      const clamped = Math.min(8, Math.max(1, derived));
+      if (clamped !== derived) {
+        setApiError(`Sun hours (${derived.toFixed(1)} hr) clamped to ${clamped.toFixed(1)} hr.`);
       }
       setPeakSunHours(clamped);
       setUsedFallback(false);
     } catch (err: unknown) {
-      const fallback = localPeakSunHours(parseFloat(lat));
-      setPeakSunHours(Math.min(8, Math.max(1, fallback)));
+      const fb = localPeakSunHours(parseFloat(lat));
+      setPeakSunHours(Math.min(8, Math.max(1, fb)));
       setUsedFallback(true);
-
-      // ── 4. Always stringify errors — never store raw objects (React #31) ─
-      let detail = '';
+      let detail = 'Solar API unavailable — using local estimate.';
       if (err && typeof err === 'object') {
-        const e = err as Record<string, any>;
-        const respDetail = e?.response?.data?.detail;
-        if (typeof respDetail === 'string') {
-          detail = respDetail;
-        } else if (respDetail !== undefined) {
-          detail = JSON.stringify(respDetail);
-        } else if (typeof e?.message === 'string') {
-          detail = e.message;
-        } else {
-          detail = 'Network error — using local estimate.';
-        }
+        const e = err as Record<string, unknown>;
+        const rd = (e?.response as Record<string, unknown>)?.data as Record<string, unknown> | undefined;
+        const rdDetail = rd?.detail;
+        if (typeof rdDetail === 'string') detail = rdDetail;
+        else if (rdDetail !== undefined) detail = `API error — using local estimate.`;
+        else if (typeof e?.message === 'string') detail = e.message as string;
       } else if (typeof err === 'string') {
         detail = err;
       }
-      setSolarApiError(detail || 'Solar API unavailable — using local estimate.');
+      setApiError(detail);
     } finally {
       setCalculating(false);
     }
   };
 
-  // ─── Render ────────────────────────────────────────────────────────────────
+  // ─── Render ───────────────────────────────────────────────────────────────
 
   return (
     <SafeAreaView style={styles.container}>
@@ -363,16 +367,17 @@ export default function SolarForecastScreen() {
       </TouchableOpacity>
 
       <ScrollView style={styles.scroll} keyboardShouldPersistTaps="handled">
+
         {/* Title */}
         <View style={styles.titleCard}>
-          <Text style={styles.titleEmoji}>☀️</Text>
+          <Text style={styles.titleEmoji}>{'☀️'}</Text>
           <View style={{ flex: 1 }}>
             <Text style={styles.title}>RV Solar + Battery Calculator</Text>
-            <Text style={styles.subtitle}>Estimate off-grid runtime, solar coverage &amp; sizing</Text>
+            <Text style={styles.subtitle}>Estimate off-grid runtime, solar coverage {'&'} sizing</Text>
           </View>
         </View>
 
-        {/* ── Step 1: Location ── */}
+        {/* ── Step 1: Location ─────────────────────────────────────────── */}
         <View style={styles.section}>
           <SectionHeader n={1} label="Location" icon="📍" />
           <LocationSearchBox
@@ -390,21 +395,27 @@ export default function SolarForecastScreen() {
             setShowSuggestions={setShowSuggestions}
             accentColor={ACCENT}
           />
-          <Text style={styles.hint}>Used to estimate peak sun hours for your campsite.</Text>
+          {locationLabel ? (
+            <View style={styles.locationBadge}>
+              <Ionicons name="location" size={13} color={ACCENT} />
+              <Text style={styles.locationBadgeText}>{locationLabel}</Text>
+            </View>
+          ) : (
+            <Text style={styles.hint}>
+              {lat ? `Coordinates: ${parseFloat(lat).toFixed(4)}, ${parseFloat(lon).toFixed(4)}` : 'Search a city or tap "Use My Location" for accurate sun hours.'}
+            </Text>
+          )}
         </View>
 
-        {/* ── Step 2: Battery Bank ── */}
+        {/* ── Step 2: Battery Bank ─────────────────────────────────────── */}
         <View style={styles.section}>
           <SectionHeader n={2} label="Battery Bank" icon="🔋" />
 
           <Text style={styles.fieldLabel}>Battery type</Text>
           <View style={styles.chipRow}>
-            {(['lithium', 'agm', 'gel', 'lead'] as BattType[]).map((bt) => (
-              <TouchableOpacity
-                key={bt}
-                style={[styles.chip, battType === bt && styles.chipActive]}
-                onPress={() => { setBattType(bt); setCustomDodStr(''); }}
-              >
+            {(['lithium', 'agm', 'gel', 'lead'] as BattType[]).map(bt => (
+              <TouchableOpacity key={bt} style={[styles.chip, battType === bt && styles.chipActive]}
+                onPress={() => selectBattType(bt)}>
                 <Text style={[styles.chipText, battType === bt && styles.chipTextActive]}>
                   {bt === 'lithium' ? '⚡ Lithium' : bt === 'agm' ? 'AGM' : bt === 'gel' ? 'Gel' : 'Lead Acid'}
                 </Text>
@@ -414,12 +425,9 @@ export default function SolarForecastScreen() {
 
           <Text style={styles.fieldLabel}>System voltage</Text>
           <View style={styles.chipRow}>
-            {([12, 24] as const).map((v) => (
-              <TouchableOpacity
-                key={v}
-                style={[styles.chip, voltage === v && styles.chipActive]}
-                onPress={() => setVoltage(v)}
-              >
+            {([12, 24] as const).map(v => (
+              <TouchableOpacity key={v} style={[styles.chip, voltage === v && styles.chipActive]}
+                onPress={() => setVoltage(v)}>
                 <Text style={[styles.chipText, voltage === v && styles.chipTextActive]}>{v}V</Text>
               </TouchableOpacity>
             ))}
@@ -432,58 +440,49 @@ export default function SolarForecastScreen() {
             </View>
             <View style={styles.halfCol}>
               <Text style={styles.fieldLabel}>Ah each</Text>
-              <TextInput
-                style={styles.input}
-                value={ahPerBatt}
-                onChangeText={setAhPerBatt}
-                keyboardType="numeric"
-                placeholder="100"
-                placeholderTextColor="#6b7280"
-              />
+              <TextInput style={styles.input} value={ahPerBatt} onChangeText={setAhPerBatt}
+                keyboardType="numeric" placeholder="100" placeholderTextColor="#6b7280" />
             </View>
           </View>
 
-          <View style={styles.rowInput}>
-            <Text style={styles.rowLabel}>
-              Depth of discharge (default {(DEFAULT_DOD[battType] * 100).toFixed(0)}%)
-            </Text>
-            <View style={styles.rowInputRight}>
-              <TextInput
-                style={styles.smallInput}
-                value={customDodStr}
-                onChangeText={setCustomDodStr}
-                keyboardType="numeric"
-                placeholder={`${(DEFAULT_DOD[battType] * 100).toFixed(0)}`}
-                placeholderTextColor="#6b7280"
-              />
-              <Text style={styles.unitText}>%</Text>
-            </View>
+          <Text style={styles.fieldLabel}>
+            Depth of discharge — DoD ({(dod * 100).toFixed(0)}%)
+          </Text>
+          <View style={styles.chipRow}>
+            {DOD_PRESETS[battType].map(p => (
+              <TouchableOpacity key={p} style={[styles.chip, dod === p && styles.chipActive]}
+                onPress={() => setDod(p)}>
+                <Text style={[styles.chipText, dod === p && styles.chipTextActive]}>{(p * 100).toFixed(0)}%</Text>
+              </TouchableOpacity>
+            ))}
           </View>
+          <Text style={styles.hint}>
+            {battType === 'lithium'
+              ? 'Lithium: safe to discharge to 10–20% SOC.'
+              : 'Lead-based: discharge deeper than 50% shortens cycle life.'}
+          </Text>
 
           {totalBattWh > 0 && (
             <View style={styles.summaryChip}>
               <Text style={styles.summaryText}>
-                Bank: {fmt(totalBattWh)} Wh total · {fmt(usableBattWh)} Wh usable
-                ({(dod * 100).toFixed(0)}% DoD, {(INVERTER_EFF * 100).toFixed(0)}% inverter)
+                Total: {fmt(totalBattWh)} Wh
+                {'  ·  '}
+                After {(dod * 100).toFixed(0)}% DoD: {fmt(preinvBattWh)} Wh / {fmt(preinvBattAh, 1)} Ah
+                {'  ·  '}
+                Effective AC: {fmt(usableBattWh)} Wh
               </Text>
             </View>
           )}
         </View>
 
-        {/* ── Step 3: Solar Array ── */}
+        {/* ── Step 3: Solar Array ──────────────────────────────────────── */}
         <View style={styles.section}>
           <SectionHeader n={3} label="Solar Array" icon="🌞" />
           <View style={styles.rowGrid}>
             <View style={styles.halfCol}>
               <Text style={styles.fieldLabel}>Watts / panel</Text>
-              <TextInput
-                style={styles.input}
-                value={panelWatts}
-                onChangeText={setPanelWatts}
-                keyboardType="numeric"
-                placeholder="200"
-                placeholderTextColor="#6b7280"
-              />
+              <TextInput style={styles.input} value={panelWatts} onChangeText={setPanelWatts}
+                keyboardType="numeric" placeholder="200" placeholderTextColor="#6b7280" />
             </View>
             <View style={styles.halfCol}>
               <Text style={styles.fieldLabel}>Panels</Text>
@@ -493,77 +492,73 @@ export default function SolarForecastScreen() {
           {arrayWatts > 0 && (
             <View style={styles.summaryChip}>
               <Text style={styles.summaryText}>
-                Array: {arrayWatts} W ({numPanels} × {panelWatts} W)
+                Array: {arrayWatts} W ({numPanels} {'\u00d7'} {panelWatts} W)
               </Text>
             </View>
           )}
         </View>
 
-        {/* ── Step 4: Appliances ── */}
+        {/* ── Step 4: Appliance Usage ──────────────────────────────────── */}
         <View style={styles.section}>
           <SectionHeader n={4} label="Daily Usage" icon="🔌" />
-          <Text style={styles.hint}>Toggle appliances you use. Edit watts or time as needed.</Text>
+          <View style={styles.appHeader}>
+            <Text style={styles.appHeaderCol}>Appliance</Text>
+            <Text style={styles.appHeaderSmall}>W</Text>
+            <Text style={styles.appHeaderSmall}>h</Text>
+            <Text style={styles.appHeaderSmall}>min</Text>
+            <Text style={styles.appHeaderWh}>Wh/day</Text>
+          </View>
 
-          {appliances.map((a) => (
-            <View key={a.id} style={[styles.applianceRow, !a.enabled && styles.applianceRowOff]}>
-              <View style={styles.applianceLeft}>
-                <Switch
-                  value={a.enabled}
-                  onValueChange={() => toggleAppliance(a.id)}
-                  thumbColor={a.enabled ? ACCENT : '#52525b'}
-                  trackColor={{ false: '#3f3f46', true: ACCENT + '55' }}
-                />
-                <Text style={[styles.applianceLabel, !a.enabled && styles.applianceLabelOff]}>
-                  {a.icon} {a.label}
-                </Text>
-              </View>
-              {a.enabled && (
-                <View style={styles.applianceInputs}>
-                  <View style={styles.applianceField}>
-                    <TextInput
-                      style={styles.tinyInput}
-                      value={String(a.watts)}
-                      onChangeText={(v) => updateAppliance(a.id, 'watts', v)}
-                      keyboardType="numeric"
-                    />
-                    <Text style={styles.tinyUnit}>W</Text>
-                  </View>
-                  <View style={styles.applianceField}>
-                    <TextInput
-                      style={styles.tinyInput}
-                      value={String(a.hours)}
-                      onChangeText={(v) => updateAppliance(a.id, 'hours', v)}
-                      keyboardType="numeric"
-                    />
-                    <Text style={styles.tinyUnit}>h</Text>
-                  </View>
-                  <View style={styles.applianceField}>
-                    <TextInput
-                      style={styles.tinyInput}
-                      value={String(a.mins)}
-                      onChangeText={(v) => updateAppliance(a.id, 'mins', v)}
-                      keyboardType="numeric"
-                    />
-                    <Text style={styles.tinyUnit}>m</Text>
-                  </View>
-                  <Text style={styles.applianceWh}>
-                    {fmt(a.watts * (a.hours + a.mins / 60))} Wh
+          {appliances.map(a => {
+            const wh = appWh(a);
+            return (
+              <View key={a.id} style={[styles.appRow, !a.enabled && styles.appRowOff]}>
+                {/* Toggle + label */}
+                <View style={styles.appRowLeft}>
+                  <Toggle value={a.enabled} onToggle={() => toggleAppliance(a.id)} />
+                  <Text style={[styles.appLabel, !a.enabled && styles.appLabelOff]} numberOfLines={1}>
+                    {a.icon} {a.label}
                   </Text>
                 </View>
-              )}
-            </View>
-          ))}
+                {/* Editable fields — always rendered so layout doesn't shift */}
+                <TextInput
+                  style={[styles.appInput, !a.enabled && styles.appInputOff]}
+                  value={a.wattStr}
+                  onChangeText={v => updateAppliance(a.id, 'wattStr', v)}
+                  keyboardType="numeric"
+                  editable={a.enabled}
+                />
+                <TextInput
+                  style={[styles.appInput, !a.enabled && styles.appInputOff]}
+                  value={a.hourStr}
+                  onChangeText={v => updateAppliance(a.id, 'hourStr', v)}
+                  keyboardType="numeric"
+                  editable={a.enabled}
+                />
+                <TextInput
+                  style={[styles.appInput, !a.enabled && styles.appInputOff]}
+                  value={a.minStr}
+                  onChangeText={v => updateAppliance(a.id, 'minStr', v)}
+                  keyboardType="numeric"
+                  editable={a.enabled}
+                />
+                <Text style={[styles.appWh, !a.enabled && { color: '#52525b' }]}>
+                  {a.enabled ? fmt(wh) : '—'}
+                </Text>
+              </View>
+            );
+          })}
 
           {dailyUsageWh > 0 && (
-            <View style={[styles.summaryChip, { marginTop: 10 }]}>
+            <View style={[styles.summaryChip, { marginTop: 12 }]}>
               <Text style={styles.summaryText}>
-                Total daily load: {fmt(dailyUsageWh)} Wh/day
+                Daily load: {fmt(dailyUsageWh)} Wh/day {'\u00b7'} {fmt(dailyUsageAh, 1)} Ah/day @ {voltage}V
               </Text>
             </View>
           )}
         </View>
 
-        {/* ── Calculate button ── */}
+        {/* ── Calculate button ─────────────────────────────────────────── */}
         <TouchableOpacity
           style={[styles.calcBtn, calculating && styles.calcBtnDisabled]}
           onPress={calculate}
@@ -579,41 +574,63 @@ export default function SolarForecastScreen() {
           )}
         </TouchableOpacity>
 
-        {/* ── Step 5: Results ── */}
+        {/* ── Step 5: Results ──────────────────────────────────────────── */}
         {showResults && !calculating && (
           <View style={styles.section}>
             <SectionHeader n={5} label="Results" icon="📊" />
 
-            {(usedFallback || solarApiError) && (
-              <View style={styles.noticeBanner}>
-                <Ionicons name="information-circle" size={16} color="#facc15" />
-                <Text style={styles.noticeText}>
-                  {solarApiError
-                    ? solarApiError
-                    : !lat
-                    ? 'No location set — using default 4.5 peak sun hours. Add a location for accurate results.'
-                    : 'Using locally calculated sun hours based on latitude and today\'s date.'}
+            {/* Location context banner */}
+            {lat && (
+              <View style={styles.locContext}>
+                <Ionicons name="location" size={13} color={ACCENT} />
+                <Text style={styles.locContextText}>
+                  {locationLabel
+                    ? locationLabel
+                    : `${parseFloat(lat).toFixed(3)}, ${parseFloat(lon).toFixed(3)}`}
+                  {' '}{'\u2014'} {psh.toFixed(1)} peak sun hrs
+                  {usedFallback ? ' (estimated)' : ''}
                 </Text>
               </View>
             )}
 
+            {/* API notice */}
+            {(usedFallback || apiError) && (
+              <View style={styles.noticeBanner}>
+                <Ionicons name="information-circle" size={16} color="#facc15" />
+                <Text style={styles.noticeText}>
+                  {apiError
+                    ? apiError
+                    : !lat
+                    ? 'No location set — using 4.5 peak sun hrs default. Add a location for better accuracy.'
+                    : 'Using locally estimated sun hours (latitude + day-of-year).'}
+                </Text>
+              </View>
+            )}
+
+            {/* 4-metric grid */}
             <View style={styles.metricsGrid}>
               <View style={styles.metricCard}>
                 <Text style={styles.metricLabel}>Daily Usage</Text>
                 <Text style={styles.metricValue}>{fmt(dailyUsageWh)}</Text>
                 <Text style={styles.metricUnit}>Wh/day</Text>
+                <Text style={styles.metricSub}>{fmt(dailyUsageAh, 1)} Ah/day</Text>
               </View>
               <View style={styles.metricCard}>
                 <Text style={styles.metricLabel}>Usable Battery</Text>
                 <Text style={styles.metricValue}>{fmt(usableBattWh)}</Text>
                 <Text style={styles.metricUnit}>Wh</Text>
+                <Text style={styles.metricSub}>{fmt(usableBattAh, 1)} Ah @ {voltage}V</Text>
               </View>
               <View style={styles.metricCard}>
                 <Text style={styles.metricLabel}>Battery Runtime</Text>
-                <Text style={[styles.metricValue, { color: batteryDays >= 2 ? '#4ade80' : batteryDays >= 1 ? '#facc15' : '#f87171' }]}>
-                  {isFinite(batteryDays) ? fmt(batteryDays, 1) : '∞'}
+                <Text style={[styles.metricValue,
+                  { color: batteryDays >= 2 ? '#4ade80' : batteryDays >= 1 ? '#facc15' : '#f87171' }]}>
+                  {isFinite(batteryDays) ? fmt(batteryDays, 1) : '\u221e'}
                 </Text>
                 <Text style={styles.metricUnit}>days (no sun)</Text>
+                <Text style={styles.metricSub}>
+                  {isFinite(batteryHours) ? `${fmt(batteryHours, 0)} hrs` : ''}
+                </Text>
               </View>
               <View style={styles.metricCard}>
                 <Text style={styles.metricLabel}>Solar Production</Text>
@@ -623,59 +640,97 @@ export default function SolarForecastScreen() {
               </View>
             </View>
 
+            {/* Battery capacity breakdown */}
+            {totalBattWh > 0 && (
+              <View style={styles.battBreakCard}>
+                <Text style={styles.battBreakTitle}>{'🔋'} Battery Capacity Breakdown</Text>
+                <View style={styles.battBreakRow}>
+                  <Text style={styles.battBreakLabel}>Total capacity</Text>
+                  <Text style={styles.battBreakVal}>{fmt(totalBattWh)} Wh</Text>
+                </View>
+                <View style={styles.battBreakRow}>
+                  <Text style={styles.battBreakLabel}>After {(dod * 100).toFixed(0)}% DoD</Text>
+                  <Text style={styles.battBreakVal}>{fmt(preinvBattWh)} Wh{' · '}{fmt(preinvBattAh, 1)} Ah @ {voltage}V</Text>
+                </View>
+                <View style={styles.battBreakRow}>
+                  <Text style={styles.battBreakLabel}>Inverter loss ({((1 - INVERTER_EFF) * 100).toFixed(0)}% at {(INVERTER_EFF * 100).toFixed(0)}% eff.)</Text>
+                  <Text style={[styles.battBreakVal, { color: '#f87171' }]}>{'−'}{fmt(preinvBattWh - usableBattWh)} Wh</Text>
+                </View>
+                <View style={[styles.battBreakRow, styles.battBreakTotalRow]}>
+                  <Text style={styles.battBreakLabelBold}>Effective AC capacity</Text>
+                  <Text style={[styles.battBreakVal, { color: '#4ade80', fontWeight: '700' }]}>{fmt(usableBattWh)} Wh{' · '}{fmt(usableBattAh, 1)} Ah</Text>
+                </View>
+              </View>
+            )}
+
+            {/* Coverage progress bar */}
             {dailyUsageWh > 0 && (
               <View style={styles.coverageCard}>
                 <View style={styles.coverageRow}>
                   <Text style={styles.coverageLabel}>Solar Coverage</Text>
                   <Text style={[styles.coveragePct, { color: pctColor(coverageRatio) }]}>
-                    {(coverageRatio * 100).toFixed(0)}%
+                    {(Math.min(coverageRatio, 9.99) * 100).toFixed(0)}%
                   </Text>
                 </View>
                 <View style={styles.barBg}>
-                  <View
-                    style={[
-                      styles.barFill,
-                      {
-                        width: `${Math.min(100, coverageRatio * 100).toFixed(0)}%` as any,
-                        backgroundColor: pctColor(coverageRatio),
-                      },
-                    ]}
-                  />
+                  <View style={[styles.barFill, {
+                    width: (Math.round(Math.min(1, coverageRatio) * 100) + '%') as any,
+                    backgroundColor: pctColor(coverageRatio),
+                  }]} />
                 </View>
                 <Text style={[styles.coverageNet, { color: netWh >= 0 ? '#4ade80' : '#f87171' }]}>
-                  {netWh >= 0 ? `Surplus: +${fmt(netWh)} Wh/day` : `Deficit: ${fmt(netWh)} Wh/day`}
+                  {netWh >= 0
+                    ? ('Surplus: +' + fmt(netWh) + ' Wh/day')
+                    : ('Deficit: ' + fmtN(netWh) + ' Wh/day')}
                 </Text>
               </View>
             )}
 
+            {/* Recommendations */}
             <View style={styles.recoCard}>
-              <Text style={styles.recoTitle}>💡 Recommendations</Text>
+              <Text style={styles.recoTitle}>{'💡'} Recommendations</Text>
               {dailyUsageWh > 0 ? (
                 <>
+                  {netWh < 0 && (
+                    <View style={styles.recoRow}>
+                      <Text style={styles.recoText}>
+                        {'☀️ '}To break even daily at {locationLabel ?? 'this location'}, add{' '}
+                        <Text style={{ color: ACCENT, fontWeight: '700' }}>
+                          ~{extraWattsNeeded} W
+                        </Text>
+                        {' '}more solar (about{' '}
+                        {Math.ceil(extraWattsNeeded / panelWattsNum)} {'\u00d7'} {panelWattsNum} W panel{Math.ceil(extraWattsNeeded / panelWattsNum) !== 1 ? 's' : ''})
+                        {' '}OR reduce usage by{' '}
+                        <Text style={{ color: '#f87171', fontWeight: '700' }}>
+                          {fmt(-netWh)} Wh/day.
+                        </Text>
+                      </Text>
+                    </View>
+                  )}
                   <View style={styles.recoRow}>
                     <Text style={styles.recoText}>
                       {'⚡ '}To cover {fmt(dailyUsageWh)} Wh/day you need{' '}
                       <Text style={{ color: ACCENT, fontWeight: '700' }}>
                         {panelsNeeded} panel{panelsNeeded !== 1 ? 's' : ''}
-                      </Text>{' '}
-                      @ {panelWattsNum} W each
+                      </Text>
+                      {' '}@ {panelWattsNum} W each
                       {panelsNeeded <= parseInt(numPanels) ? ' ✅' : ` (you have ${numPanels})`}
                     </Text>
                   </View>
                   <View style={styles.recoRow}>
                     <Text style={styles.recoText}>
-                      {'🔋 '}For 2 days without sun you need{' '}
+                      {'🔋 '}For 2 days without sun, you need{' '}
                       <Text style={{ color: '#4ade80', fontWeight: '700' }}>
                         {batt2DaysNeeded} batter{batt2DaysNeeded !== 1 ? 'ies' : 'y'}
-                      </Text>{' '}
-                      @ {ahPerBattNum} Ah
+                      </Text>
+                      {' '}@ {fmt(ahPerBattNum)} Ah
                       {batt2DaysNeeded <= parseInt(numBatt) ? ' ✅' : ` (you have ${numBatt})`}
                     </Text>
                   </View>
                   {coverageRatio >= 1 && isFinite(batteryDays) && batteryDays >= 2 && (
                     <View style={[styles.recoRow, styles.greenBanner]}>
                       <Text style={[styles.recoText, { color: '#4ade80' }]}>
-                        ✅ Your setup should handle average off-grid days at this location! 🎉
+                        {'✅ '}Your setup should comfortably handle an average off-grid day{locationLabel ? ` at ${locationLabel}` : ''}!
                       </Text>
                     </View>
                   )}
@@ -687,47 +742,46 @@ export default function SolarForecastScreen() {
               )}
             </View>
 
-            <TouchableOpacity
-              style={styles.assumptionsToggle}
-              onPress={() => setShowAssumptions((v) => !v)}
-              activeOpacity={0.7}
-            >
+            {/* Assumptions */}
+            <TouchableOpacity onPress={() => setShowAssumptions(v => !v)} style={styles.assumptionsToggle}>
               <Text style={styles.assumptionsToggleText}>
-                {showAssumptions ? '▲' : '▼'} Assumptions &amp; methodology
+                {showAssumptions ? '\u25b2' : '\u25bc'} Assumptions {'&'} methodology
               </Text>
             </TouchableOpacity>
-
             {showAssumptions && (
               <View style={styles.assumptionsBox}>
                 <Text style={styles.assumptionsText}>
-                  {'• '}<Text style={{ fontWeight: '700' }}>Peak sun hours ({psh.toFixed(1)} hrs):</Text>{' '}
+                  {'• '}<Text style={{ fontWeight: '700' }}>Peak sun hours ({psh.toFixed(1)} hrs):</Text>
                   {usedFallback || !lat
-                    ? 'Estimated from latitude and day-of-year using solar geometry.'
-                    : "Fetched from backend solar forecast service for your location + today's date."}
+                    ? ' Estimated from latitude and day-of-year using solar geometry.'
+                    : " Fetched from backend solar service for your location + today's date."}
                 </Text>
                 <Text style={styles.assumptionsText}>
-                  {'• '}<Text style={{ fontWeight: '700' }}>System losses ({(SYSTEM_LOSS * 100).toFixed(0)}%):</Text>{' '}
-                  Wiring resistance, MPPT efficiency, temperature derating, dust and soiling.
+                  {'• '}<Text style={{ fontWeight: '700' }}>System losses ({(SYSTEM_LOSS * 100).toFixed(0)}%):</Text>
+                  {' '}Wiring resistance, MPPT efficiency, temperature derating, dust, and soiling.
                 </Text>
                 <Text style={styles.assumptionsText}>
-                  {'• '}<Text style={{ fontWeight: '700' }}>Inverter efficiency ({(INVERTER_EFF * 100).toFixed(0)}%):</Text>{' '}
-                  Applied to usable battery capacity for DC→AC conversion losses.
+                  {'• '}<Text style={{ fontWeight: '700' }}>Inverter efficiency ({(INVERTER_EFF * 100).toFixed(0)}%):</Text>
+                  {' '}Applied to usable battery (DC-to-AC conversion loss).
                 </Text>
                 <Text style={styles.assumptionsText}>
-                  {'• '}<Text style={{ fontWeight: '700' }}>DoD ({(dod * 100).toFixed(0)}%):</Text>{' '}
+                  {'• '}<Text style={{ fontWeight: '700' }}>DoD ({(dod * 100).toFixed(0)}%):</Text>
                   {battType === 'lithium'
-                    ? 'Lithium can safely discharge to ~15% state-of-charge.'
-                    : 'Lead-based batteries limited to 50% DoD to preserve cycle life.'}
+                    ? ' Lithium can safely discharge to ~10-15% state-of-charge.'
+                    : ' Lead-based batteries limited to 50% DoD to preserve cycle life.'}
                 </Text>
                 <Text style={styles.assumptionsText}>
                   {'• '}Cloud cover not included — results represent a clear-sky baseline.
+                </Text>
+                <Text style={styles.assumptionsText}>
+                  {'• '}Fridge draw shown as average (compressor cycles ~50% duty cycle).
                 </Text>
               </View>
             )}
           </View>
         )}
 
-        <View style={{ height: 40 }} />
+        <View style={{ height: 48 }} />
       </ScrollView>
     </SafeAreaView>
   );
@@ -737,36 +791,24 @@ export default function SolarForecastScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#09090b' },
-  scroll: { flex: 1 },
+  scroll:    { flex: 1 },
 
   backButton: { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 8 },
-  backText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  backText:   { color: '#fff', fontSize: 16, fontWeight: '600' },
 
   titleCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 14,
-    backgroundColor: '#18181b',
-    marginHorizontal: 14,
-    marginTop: 4,
-    marginBottom: 10,
-    padding: 16,
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#27272a',
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    backgroundColor: '#18181b', marginHorizontal: 14, marginTop: 4, marginBottom: 10,
+    padding: 16, borderRadius: 14, borderWidth: 1, borderColor: '#27272a',
   },
   titleEmoji: { fontSize: 36 },
-  title: { color: '#fff', fontSize: 19, fontWeight: '800' },
+  title:    { color: '#fff',    fontSize: 19, fontWeight: '800' },
   subtitle: { color: '#a1a1aa', fontSize: 13, marginTop: 2 },
 
   section: {
-    backgroundColor: '#18181b',
-    borderRadius: 14,
-    marginHorizontal: 14,
-    marginBottom: 12,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#27272a',
+    backgroundColor: '#18181b', borderRadius: 14,
+    marginHorizontal: 14, marginBottom: 12,
+    padding: 16, borderWidth: 1, borderColor: '#27272a',
   },
 
   sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 14 },
@@ -775,24 +817,34 @@ const styles = StyleSheet.create({
     backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center',
   },
   stepBadgeText: { color: '#1a1a1a', fontSize: 12, fontWeight: '800' },
-  sectionIcon: { fontSize: 16 },
-  sectionLabel: { color: '#fff', fontSize: 15, fontWeight: '700', flex: 1 },
+  sectionIcon:   { fontSize: 16 },
+  sectionLabel:  { color: '#fff', fontSize: 15, fontWeight: '700', flex: 1 },
 
-  hint: { color: '#71717a', fontSize: 12, marginBottom: 10, marginTop: -6 },
+  hint: { color: '#71717a', fontSize: 12, marginTop: 4, marginBottom: 6 },
+
+  locationBadge: {
+    flexDirection: 'row', alignItems: 'center', gap: 4,
+    marginTop: 8, backgroundColor: ACCENT + '18',
+    borderRadius: 6, paddingHorizontal: 10, paddingVertical: 6,
+    alignSelf: 'flex-start',
+    borderWidth: 1, borderColor: ACCENT + '40',
+  },
+  locationBadgeText: { color: ACCENT, fontSize: 13, fontWeight: '600' },
+
   fieldLabel: { color: '#a1a1aa', fontSize: 12, fontWeight: '600', marginBottom: 6, marginTop: 8 },
 
   chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 },
   chip: {
-    paddingHorizontal: 12, paddingVertical: 6,
+    paddingHorizontal: 12, paddingVertical: 7,
     borderRadius: 20, borderWidth: 1,
     borderColor: '#3f3f46', backgroundColor: '#27272a',
   },
-  chipActive: { borderColor: ACCENT, backgroundColor: ACCENT + '22' },
-  chipText: { color: '#a1a1aa', fontSize: 13, fontWeight: '600' },
+  chipActive:     { borderColor: ACCENT, backgroundColor: ACCENT + '22' },
+  chipText:       { color: '#a1a1aa', fontSize: 13, fontWeight: '600' },
   chipTextActive: { color: ACCENT },
 
-  rowGrid: { flexDirection: 'row', gap: 12, marginTop: 4 },
-  halfCol: { flex: 1 },
+  rowGrid:  { flexDirection: 'row', gap: 12, marginTop: 4 },
+  halfCol:  { flex: 1 },
 
   input: {
     backgroundColor: '#27272a', color: '#f4f4f5',
@@ -800,57 +852,67 @@ const styles = StyleSheet.create({
     fontSize: 15, borderWidth: 1, borderColor: '#3f3f46',
   },
 
-  rowInput: {
-    flexDirection: 'row', alignItems: 'center',
-    justifyContent: 'space-between', marginTop: 8,
-  },
-  rowLabel: { color: '#a1a1aa', fontSize: 13, flex: 1 },
-  rowInputRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  smallInput: {
-    backgroundColor: '#27272a', color: '#f4f4f5',
-    borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7,
-    fontSize: 14, width: 70, textAlign: 'right',
-    borderWidth: 1, borderColor: '#3f3f46',
-  },
-  unitText: { color: '#71717a', fontSize: 13, width: 24 },
-
   stepper: {
     flexDirection: 'row', alignItems: 'center',
     backgroundColor: '#27272a', borderRadius: 8,
     borderWidth: 1, borderColor: '#3f3f46', overflow: 'hidden',
   },
-  stepBtn: { padding: 10 },
+  stepBtn:   { padding: 10 },
   stepValue: { color: '#f4f4f5', fontSize: 15, fontWeight: '700', paddingHorizontal: 10 },
 
   summaryChip: {
     backgroundColor: ACCENT + '18', borderRadius: 8,
-    padding: 10, marginTop: 10,
+    padding: 10, marginTop: 6,
     borderWidth: 1, borderColor: ACCENT + '40',
   },
   summaryText: { color: ACCENT, fontSize: 12, fontWeight: '600' },
 
-  applianceRow: {
-    borderBottomWidth: 1, borderBottomColor: '#27272a',
-    paddingVertical: 10, gap: 6,
+  // Custom toggle (replaces Switch — more reliable on RN Web)
+  toggleTrack: {
+    width: 38, height: 22, borderRadius: 11,
+    backgroundColor: '#3f3f46',
+    justifyContent: 'center', paddingHorizontal: 2,
   },
-  applianceRowOff: { opacity: 0.5 },
-  applianceLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  applianceLabel: { color: '#e4e4e7', fontSize: 13, flex: 1 },
-  applianceLabelOff: { color: '#71717a' },
-  applianceInputs: {
-    flexDirection: 'row', alignItems: 'center',
-    gap: 6, paddingLeft: 44,
+  toggleTrackOn: { backgroundColor: ACCENT + '88' },
+  toggleThumb: {
+    width: 18, height: 18, borderRadius: 9,
+    backgroundColor: '#71717a',
+    alignSelf: 'flex-start',
   },
-  applianceField: { flexDirection: 'row', alignItems: 'center', gap: 2 },
-  tinyInput: {
-    backgroundColor: '#27272a', color: '#f4f4f5',
-    borderRadius: 6, paddingHorizontal: 6, paddingVertical: 4,
-    fontSize: 13, width: 46, textAlign: 'center',
-    borderWidth: 1, borderColor: '#3f3f46',
+  toggleThumbOn: {
+    backgroundColor: ACCENT,
+    alignSelf: 'flex-end',
   },
-  tinyUnit: { color: '#71717a', fontSize: 11, width: 14 },
-  applianceWh: { color: '#a1a1aa', fontSize: 12, marginLeft: 4, minWidth: 50, textAlign: 'right' },
 
+  // Appliances
+  appHeader: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingBottom: 6, borderBottomWidth: 1, borderBottomColor: '#3f3f46', marginBottom: 4,
+  },
+  appHeaderCol:   { color: '#52525b', fontSize: 11, flex: 1, marginLeft: 46 },
+  appHeaderSmall: { color: '#52525b', fontSize: 11, width: 40, textAlign: 'center' },
+  appHeaderWh:    { color: '#52525b', fontSize: 11, width: 52, textAlign: 'right' },
+
+  appRow: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingVertical: 8,
+    borderBottomWidth: 1, borderBottomColor: '#27272a',
+  },
+  appRowOff: { opacity: 0.45 },
+  appRowLeft: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, minWidth: 0 },
+  appLabel:    { color: '#e4e4e7', fontSize: 12, flex: 1, marginRight: 4 },
+  appLabelOff: { color: '#71717a' },
+
+  appInput: {
+    backgroundColor: '#27272a', color: '#f4f4f5',
+    borderRadius: 6, paddingHorizontal: 4, paddingVertical: 5,
+    fontSize: 13, width: 40, textAlign: 'center',
+    borderWidth: 1, borderColor: '#3f3f46', marginHorizontal: 0,
+  },
+  appInputOff: { color: '#52525b', borderColor: '#27272a' },
+  appWh: { color: '#a1a1aa', fontSize: 12, width: 52, textAlign: 'right' },
+
+  // Calculate
   calcBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
     backgroundColor: ACCENT, borderRadius: 12,
@@ -858,6 +920,15 @@ const styles = StyleSheet.create({
   },
   calcBtnDisabled: { opacity: 0.6 },
   calcBtnText: { color: '#1a1a1a', fontSize: 16, fontWeight: '800' },
+
+  // Results
+  locContext: {
+    flexDirection: 'row', gap: 6, alignItems: 'center',
+    backgroundColor: ACCENT + '12', borderRadius: 6,
+    paddingHorizontal: 10, paddingVertical: 6,
+    marginBottom: 10,
+  },
+  locContextText: { color: ACCENT, fontSize: 12, fontWeight: '600', flex: 1 },
 
   noticeBanner: {
     flexDirection: 'row', gap: 8,
@@ -875,39 +946,59 @@ const styles = StyleSheet.create({
   },
   metricLabel: { color: '#71717a', fontSize: 11, fontWeight: '600', marginBottom: 4, textAlign: 'center' },
   metricValue: { color: '#f4f4f5', fontSize: 24, fontWeight: '800' },
-  metricUnit: { color: '#71717a', fontSize: 11, marginTop: 2 },
-  metricSub: { color: ACCENT, fontSize: 10, marginTop: 2 },
+  metricUnit:  { color: '#71717a', fontSize: 11, marginTop: 2 },
+  metricSub:   { color: ACCENT,    fontSize: 10, marginTop: 3 },
 
   coverageCard: {
     backgroundColor: '#27272a', borderRadius: 10,
     padding: 14, marginBottom: 12,
     borderWidth: 1, borderColor: '#3f3f46',
   },
-  coverageRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
+  coverageRow:  { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
   coverageLabel: { color: '#a1a1aa', fontSize: 13, fontWeight: '600' },
-  coveragePct: { fontSize: 15, fontWeight: '800' },
-  barBg: { height: 8, backgroundColor: '#3f3f46', borderRadius: 4, overflow: 'hidden' },
+  coveragePct:  { fontSize: 15, fontWeight: '800' },
+  barBg:   { height: 8, backgroundColor: '#3f3f46', borderRadius: 4, overflow: 'hidden' },
   barFill: { height: 8, borderRadius: 4 },
   coverageNet: { fontSize: 12, fontWeight: '600', marginTop: 8, textAlign: 'right' },
 
   recoCard: {
     backgroundColor: '#1a1a1e', borderRadius: 10,
     padding: 14, marginBottom: 10,
-    borderWidth: 1, borderColor: '#3f3f46', gap: 10,
+    borderWidth: 1, borderColor: '#3f3f46',
   },
-  recoTitle: { color: '#e4e4e7', fontSize: 14, fontWeight: '700' },
-  recoRow: { flexDirection: 'row', alignItems: 'flex-start' },
-  recoText: { color: '#d4d4d8', fontSize: 13, flex: 1, lineHeight: 19 },
+  recoTitle: { color: '#e4e4e7', fontSize: 14, fontWeight: '700', marginBottom: 8 },
+  recoRow:   { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 8 },
+  recoText:  { color: '#d4d4d8', fontSize: 13, flex: 1, lineHeight: 19 },
   greenBanner: {
     backgroundColor: '#052e16', borderRadius: 8,
     padding: 10, borderWidth: 1, borderColor: '#14532d',
   },
 
-  assumptionsToggle: { alignItems: 'center', paddingVertical: 10 },
+  assumptionsToggle:     { alignItems: 'center', paddingVertical: 10 },
   assumptionsToggleText: { color: '#71717a', fontSize: 12 },
   assumptionsBox: {
     backgroundColor: '#111113', borderRadius: 8,
-    padding: 12, gap: 6,
+    padding: 12,
   },
-  assumptionsText: { color: '#71717a', fontSize: 12, lineHeight: 17 },
+  assumptionsText: { color: '#71717a', fontSize: 12, lineHeight: 17, marginBottom: 4 },
+
+  // Battery breakdown card (Results step)
+  battBreakCard: {
+    backgroundColor: '#27272a', borderRadius: 10,
+    padding: 14, marginBottom: 12,
+    borderWidth: 1, borderColor: '#3f3f46',
+  },
+  battBreakTitle: { color: '#e4e4e7', fontSize: 13, fontWeight: '700', marginBottom: 10 },
+  battBreakRow: {
+    flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
+    paddingVertical: 5,
+    borderBottomWidth: 1, borderBottomColor: '#3f3f46',
+  },
+  battBreakTotalRow: {
+    borderBottomWidth: 0, marginTop: 2, paddingTop: 8,
+    borderTopWidth: 1, borderTopColor: '#52525b',
+  },
+  battBreakLabel:     { color: '#a1a1aa', fontSize: 12, flex: 1 },
+  battBreakLabelBold: { color: '#e4e4e7', fontSize: 12, fontWeight: '700', flex: 1 },
+  battBreakVal:       { color: '#f4f4f5', fontSize: 12, fontWeight: '600', textAlign: 'right' },
 });
