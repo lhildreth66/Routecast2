@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator, ScrollView, Alert, Linking, RefreshControl } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator, ScrollView, Alert, Linking, RefreshControl, Platform } from 'react-native';
 import axios from 'axios';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -60,8 +60,31 @@ export default function FreeCampingScreen() {
   const [error, setError] = useState<string>('');
   const [expandedSpots, setExpandedSpots] = useState(new Set<number>());
 
-  // Automatically get current location on mount
+  // Manual location search state
+  const [locationLabel, setLocationLabel] = useState<string | null>(null); // "Key West, FL"
+  const [locationQuery, setLocationQuery] = useState('');
+  const [suggestions, setSuggestions] = useState<Array<{ place_name: string; short_name: string; coordinates: [number, number] }>>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const SESSION_KEY = 'freeCampingLocation';
+
+  // Restore saved location from sessionStorage on mount
   useEffect(() => {
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      try {
+        const saved = window.sessionStorage.getItem(SESSION_KEY);
+        if (saved) {
+          const { lat, lon, label } = JSON.parse(saved);
+          setLatitude(lat);
+          setLongitude(lon);
+          setLocationLabel(label);
+          setLocationLoading(false);
+          return;
+        }
+      } catch { /* ignore */ }
+    }
+    // Fall through to GPS
     (async () => {
       try {
         const { status } = await Location.requestForegroundPermissionsAsync();
@@ -71,7 +94,6 @@ export default function FreeCampingScreen() {
           setLongitude(location.coords.longitude.toFixed(4));
         }
       } catch (err) {
-        // Silently fail and use default coordinates
         console.log('Could not get current location, using defaults');
       } finally {
         setLocationLoading(false);
@@ -79,7 +101,53 @@ export default function FreeCampingScreen() {
     })();
   }, []);
 
+  const fetchSuggestions = async (q: string) => {
+    if (q.length < 2) { setSuggestions([]); return; }
+    setSuggestionsLoading(true);
+    try {
+      const res = await axios.get(`${API_BASE}/api/geocode/autocomplete`, { params: { query: q, limit: 6 } });
+      setSuggestions(Array.isArray(res.data) ? res.data : []);
+      setShowSuggestions(true);
+    } catch {
+      setSuggestions([]);
+    } finally {
+      setSuggestionsLoading(false);
+    }
+  };
+
+  const handleLocationQueryChange = (text: string) => {
+    setLocationQuery(text);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (text.length < 2) { setSuggestions([]); setShowSuggestions(false); return; }
+    debounceRef.current = setTimeout(() => fetchSuggestions(text), 300);
+  };
+
+  const selectSuggestion = (s: { place_name: string; short_name: string; coordinates: [number, number] }) => {
+    const [lon, lat] = s.coordinates;
+    const label = s.short_name || s.place_name;
+    setLatitude(lat.toFixed(6));
+    setLongitude(lon.toFixed(6));
+    setLocationLabel(label);
+    setLocationQuery('');
+    setSuggestions([]);
+    setShowSuggestions(false);
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      try { window.sessionStorage.setItem(SESSION_KEY, JSON.stringify({ lat: lat.toFixed(6), lon: lon.toFixed(6), label })); } catch { /* ignore */ }
+    }
+  };
+
+  const clearManualLocation = () => {
+    setLocationLabel(null);
+    setLocationQuery('');
+    setSuggestions([]);
+    setShowSuggestions(false);
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      try { window.sessionStorage.removeItem(SESSION_KEY); } catch { /* ignore */ }
+    }
+  };
+
   const useCurrentLocation = async () => {
+    clearManualLocation();
     setLocationLoading(true);
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
@@ -101,7 +169,6 @@ export default function FreeCampingScreen() {
       setLatitude(location.coords.latitude.toFixed(4));
       setLongitude(location.coords.longitude.toFixed(4));
       setLocationLoading(false);
-      Alert.alert('Location Updated', 'Your current location has been set.');
     } catch (err: any) {
       setLocationLoading(false);
       Alert.alert(
@@ -189,26 +256,74 @@ export default function FreeCampingScreen() {
           <Text style={styles.title}>🏕️ Free Camping Finder</Text>
           <Text style={styles.subtitle}>Discover BLM land, National Forest dispersed camping, and other free spots</Text>
 
-          {/* Location Display with Auto-detect */}
+          {/* Location Search */}
           <View style={styles.locationBox}>
-            <View style={styles.locationHeader}>
-              <Ionicons name="location" size={18} color="#06b6d4" />
-              <Text style={styles.locationLabel}>Your Location</Text>
-              <TouchableOpacity 
-                onPress={useCurrentLocation} 
-                style={styles.refreshLocationBtn}
+            {/* Manual search input */}
+            <View style={styles.locationSearchRow}>
+              <Ionicons name="search" size={16} color="#9ca3af" style={{ marginRight: 6 }} />
+              <TextInput
+                style={styles.locationSearchInput}
+                placeholder="Search city, place… (e.g. Key West, FL)"
+                placeholderTextColor="#6b7280"
+                value={locationQuery}
+                onChangeText={handleLocationQueryChange}
+                onFocus={() => { if (suggestions.length > 0) setShowSuggestions(true); }}
+                returnKeyType="search"
+                autoCorrect={false}
+              />
+              {suggestionsLoading && <ActivityIndicator size="small" color="#06b6d4" style={{ marginLeft: 4 }} />}
+            </View>
+
+            {/* Autocomplete dropdown */}
+            {showSuggestions && suggestions.length > 0 && (
+              <View style={styles.suggestionsBox}>
+                {suggestions.map((s, i) => (
+                  <TouchableOpacity
+                    key={i}
+                    style={[styles.suggestionRow, i > 0 && styles.suggestionDivider]}
+                    onPress={() => selectSuggestion(s)}
+                    activeOpacity={0.75}
+                  >
+                    <Ionicons name="location-outline" size={14} color="#06b6d4" style={{ marginRight: 6 }} />
+                    <Text style={styles.suggestionText} numberOfLines={2}>{s.place_name}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
+            {/* Active location display */}
+            <View style={styles.locationActiveRow}>
+              {locationLabel ? (
+                <View style={styles.locationChip}>
+                  <Ionicons name="location" size={14} color="#06b6d4" />
+                  <Text style={styles.locationChipText} numberOfLines={1}>{locationLabel}</Text>
+                  <TouchableOpacity onPress={clearManualLocation} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                    <Ionicons name="close-circle" size={16} color="#6b7280" />
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={styles.locationChip}>
+                  <Ionicons name="navigate" size={14} color="#06b6d4" />
+                  <Text style={styles.locationChipText} numberOfLines={1}>
+                    {locationLoading ? 'Detecting GPS…' : `GPS · ${latitude}, ${longitude}`}
+                  </Text>
+                </View>
+              )}
+              <TouchableOpacity
+                onPress={useCurrentLocation}
+                style={styles.useGpsBtn}
                 disabled={locationLoading}
               >
                 {locationLoading ? (
                   <ActivityIndicator size="small" color="#06b6d4" />
                 ) : (
-                  <Ionicons name="refresh" size={18} color="#06b6d4" />
+                  <>
+                    <Ionicons name="refresh" size={14} color="#06b6d4" />
+                    <Text style={styles.useGpsBtnText}>Use my location</Text>
+                  </>
                 )}
               </TouchableOpacity>
             </View>
-            <Text style={styles.locationCoords}>
-              {locationLoading ? 'Detecting...' : `${latitude}, ${longitude}`}
-            </Text>
           </View>
 
           <View style={styles.inputRow}>
@@ -270,7 +385,10 @@ export default function FreeCampingScreen() {
         {/* Results */}
         {spots.length > 0 && (
           <View style={styles.resultsContainer}>
-            <Text style={styles.resultsTitle}>Found {spots.length} Free Camping Spot{spots.length !== 1 ? 's' : ''}</Text>
+            <Text style={styles.resultsTitle}>
+              Found {spots.length} Free Camping Spot{spots.length !== 1 ? 's' : ''}
+              {locationLabel ? ` near ${locationLabel}` : ''}
+            </Text>
             
             {spots.map((spot, index) => {
               const key = spot.source_id || `${spot.name}-${spot.latitude}-${spot.longitude}`;
@@ -462,6 +580,81 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#06b6d420',
   },
+  locationSearchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#27272a',
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#3f3f46',
+  },
+  locationSearchInput: {
+    flex: 1,
+    color: '#f4f4f5',
+    fontSize: 14,
+    paddingVertical: 0,
+  },
+  suggestionsBox: {
+    backgroundColor: '#18181b',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#3f3f46',
+    marginBottom: 8,
+    overflow: 'hidden',
+  },
+  suggestionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  suggestionDivider: {
+    borderTopWidth: 1,
+    borderTopColor: '#27272a',
+  },
+  suggestionText: {
+    color: '#e4e4e7',
+    fontSize: 13,
+    flex: 1,
+  },
+  locationActiveRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  locationChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    flex: 1,
+  },
+  locationChipText: {
+    color: '#06b6d4',
+    fontSize: 13,
+    fontWeight: '600',
+    flex: 1,
+  },
+  useGpsBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: '#06b6d415',
+    borderWidth: 1,
+    borderColor: '#06b6d430',
+  },
+  useGpsBtnText: {
+    color: '#06b6d4',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  // legacy styles kept so nothing else breaks
   locationHeader: {
     flexDirection: 'row',
     alignItems: 'center',
