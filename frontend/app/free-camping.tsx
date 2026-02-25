@@ -79,26 +79,10 @@ export default function FreeCampingScreen() {
           setLatitude(lat);
           setLongitude(lon);
           setLocationLabel(label);
-          setLocationLoading(false);
-          return;
         }
       } catch { /* ignore */ }
     }
-    // Fall through to GPS
-    (async () => {
-      try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status === 'granted') {
-          const location = await Location.getCurrentPositionAsync({});
-          setLatitude(location.coords.latitude.toFixed(4));
-          setLongitude(location.coords.longitude.toFixed(4));
-        }
-      } catch (err) {
-        console.log('Could not get current location, using defaults');
-      } finally {
-        setLocationLoading(false);
-      }
-    })();
+    setLocationLoading(false);
   }, []);
 
   const fetchSuggestions = async (q: string) => {

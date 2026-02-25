@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -12,8 +12,9 @@ import {
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
-import * as Location from 'expo-location';
 import { API_BASE, buildUrl } from '../lib/apiConfig';
+import { useLocationSearch } from '../lib/useLocationSearch';
+import LocationSearchBox from '../lib/components/LocationSearchBox';
 
 interface CampsiteIndexResult {
   score: number;
@@ -30,9 +31,16 @@ interface CampsiteIndexResult {
 
 export default function CampsiteIndexScreen() {
   const router = useRouter();
-  const [latitude, setLatitude] = useState('');
-  const [longitude, setLongitude] = useState('');
-  const [locationLoading, setLocationLoading] = useState(false);
+
+  // ── Location (manual search + explicit GPS only) ────────────────────
+  const {
+    lat: latitude, lon: longitude,
+    locationLabel, locationLoading,
+    locationQuery, suggestions, showSuggestions,
+    handleLocationQueryChange, selectSuggestion,
+    clearManualLocation, triggerGps, setShowSuggestions,
+  } = useLocationSearch('campsiteIndexLoc');
+
   
   // Keep manual inputs as fallback
   const [windGustMph, setWindGustMph] = useState('15');
@@ -46,53 +54,9 @@ export default function CampsiteIndexScreen() {
   const [result, setResult] = useState<CampsiteIndexResult | null>(null);
   const [loading, setLoading] = useState(false);
 
-  useEffect(() => {
-    // Get current location on mount
-    (async () => {
-      try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status === 'granted') {
-          const location = await Location.getCurrentPositionAsync({});
-          setLatitude(location.coords.latitude.toFixed(4));
-          setLongitude(location.coords.longitude.toFixed(4));
-        }
-      } catch (err) {
-        console.log('Could not get current location');
-      }
-    })();
-  }, []);
 
   const refreshLocation = async () => {
-    setLocationLoading(true);
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert(
-          'Location Permission Required',
-          'Please enable location permissions in your device settings to use this feature.',
-          [{ text: 'OK' }]
-        );
-        setLocationLoading(false);
-        return;
-      }
-
-      const location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-        timeInterval: 10000,
-        distanceInterval: 0,
-      });
-      setLatitude(location.coords.latitude.toFixed(4));
-      setLongitude(location.coords.longitude.toFixed(4));
-      setLocationLoading(false);
-      Alert.alert('Location Updated', `Refreshed to: ${location.coords.latitude.toFixed(4)}, ${location.coords.longitude.toFixed(4)}`);
-    } catch (err: any) {
-      setLocationLoading(false);
-      Alert.alert(
-        'Location Error',
-        err.message || 'Unable to get your location. Make sure GPS is enabled.',
-        [{ text: 'OK' }]
-      );
-    }
+    await triggerGps();
   };
 
   const calculateScore = async () => {
@@ -176,27 +140,21 @@ export default function CampsiteIndexScreen() {
               Automatic mode fetches real-time data: current wind, terrain slope, tree shade, road access, cell signal, and passability conditions.
             </Text>
             
-            {/* Location Display with Auto-detect */}
-            <View style={styles.locationBox}>
-              <View style={styles.locationBoxHeader}>
-                <Ionicons name="location" size={18} color="#eab308" />
-                <Text style={styles.locationBoxLabel}>Your Location</Text>
-                <TouchableOpacity
-                  style={styles.refreshLocationBtn}
-                  onPress={refreshLocation}
-                  disabled={locationLoading || loading}
-                >
-                  {locationLoading ? (
-                    <ActivityIndicator size="small" color="#eab308" />
-                  ) : (
-                    <Ionicons name="refresh" size={18} color="#eab308" />
-                  )}
-                </TouchableOpacity>
-              </View>
-              <Text style={styles.locationBoxCoords}>
-                {locationLoading ? 'Detecting...' : `${latitude}, ${longitude}`}
-              </Text>
-            </View>
+            <LocationSearchBox
+              lat={latitude}
+              lon={longitude}
+              locationLabel={locationLabel}
+              locationLoading={locationLoading}
+              locationQuery={locationQuery}
+              suggestions={suggestions}
+              showSuggestions={showSuggestions}
+              handleLocationQueryChange={handleLocationQueryChange}
+              selectSuggestion={selectSuggestion}
+              clearManualLocation={clearManualLocation}
+              triggerGps={triggerGps}
+              setShowSuggestions={setShowSuggestions}
+              accentColor="#22c55e"
+            />
           </>
         ) : (
           <>

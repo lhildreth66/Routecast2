@@ -1,13 +1,14 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator, ScrollView, Alert, Linking, RefreshControl } from 'react-native';
 import axios from 'axios';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_BASE, buildUrl } from '../lib/apiConfig';
 import InfoBanner from '../lib/components/InfoBanner';
+import { useLocationSearch } from '../lib/useLocationSearch';
+import LocationSearchBox from '../lib/components/LocationSearchBox';
 
 interface ParkingSpot {
   name: string;
@@ -24,57 +25,27 @@ interface ParkingSpot {
 
 export default function TruckParkingScreen() {
   const router = useRouter();
-  const [latitude, setLatitude] = useState('');
-  const [longitude, setLongitude] = useState('');
+
+  // ── Location (manual search + explicit GPS only) ────────────────────
+  const {
+    lat: latitude, lon: longitude,
+    locationLabel, locationLoading,
+    locationQuery, suggestions, showSuggestions,
+    handleLocationQueryChange, selectSuggestion,
+    clearManualLocation, triggerGps, setShowSuggestions,
+  } = useLocationSearch('truckParkingLoc');
+
   const [searchRadius, setSearchRadius] = useState('25');
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [locationLoading, setLocationLoading] = useState(false);
   const [spots, setSpots] = useState<ParkingSpot[]>([]);
   const [error, setError] = useState<string>('');
   const [expandedSpots, setExpandedSpots] = useState(new Set<number>());
 
-  useEffect(() => {
-    getCurrentLocation();
-  }, []);
 
-  const getCurrentLocation = async () => {
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === 'granted') {
-        const location = await Location.getCurrentPositionAsync({});
-        setLatitude(location.coords.latitude.toFixed(4));
-        setLongitude(location.coords.longitude.toFixed(4));
-      }
-    } catch (err) {
-      console.log('Could not get current location:', err);
-      // Set default location (center of US) if location fails
-      setLatitude('39.8283');
-      setLongitude('-98.5795');
-    }
-  };
 
   const refreshLocation = async () => {
-    setLocationLoading(true);
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Location Permission Required', 'Please enable location permissions.');
-        setLocationLoading(false);
-        return;
-      }
-
-      const location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-      setLatitude(location.coords.latitude.toFixed(4));
-      setLongitude(location.coords.longitude.toFixed(4));
-      setLocationLoading(false);
-      Alert.alert('Location Updated', `Refreshed to: ${location.coords.latitude.toFixed(4)}, ${location.coords.longitude.toFixed(4)}`);
-    } catch (err: any) {
-      setLocationLoading(false);
-      Alert.alert('Location Error', err.message || 'Unable to get your location.');
-    }
+    await triggerGps();
   };
 
   const searchParking = async () => {
@@ -153,27 +124,21 @@ export default function TruckParkingScreen() {
         </View>
 
         <View style={styles.formContainer}>
-          {/* Location Display with Auto-detect */}
-          <View style={styles.locationBox}>
-            <View style={styles.locationBoxHeader}>
-              <Ionicons name="location" size={18} color="#22c55e" />
-              <Text style={styles.locationBoxLabel}>Your Location</Text>
-              <TouchableOpacity
-                style={styles.refreshLocationBtn}
-                onPress={refreshLocation}
-                disabled={locationLoading}
-              >
-                {locationLoading ? (
-                  <ActivityIndicator size="small" color="#22c55e" />
-                ) : (
-                  <Ionicons name="refresh" size={18} color="#22c55e" />
-                )}
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.locationBoxCoords}>
-              {locationLoading ? 'Detecting...' : `${latitude}, ${longitude}`}
-            </Text>
-          </View>
+          <LocationSearchBox
+            lat={latitude}
+            lon={longitude}
+            locationLabel={locationLabel}
+            locationLoading={locationLoading}
+            locationQuery={locationQuery}
+            suggestions={suggestions}
+            showSuggestions={showSuggestions}
+            handleLocationQueryChange={handleLocationQueryChange}
+            selectSuggestion={selectSuggestion}
+            clearManualLocation={clearManualLocation}
+            triggerGps={triggerGps}
+            setShowSuggestions={setShowSuggestions}
+            accentColor="#22c55e"
+          />
 
           <View style={styles.inputRow}>
             <Text style={styles.label}>Search Radius (miles)</Text>

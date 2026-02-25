@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator, Platform, ScrollView, Alert } from 'react-native';
 import axios from 'axios';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -9,8 +9,8 @@ import { API_BASE, buildUrl } from '../lib/apiConfig';
 
 export default function SolarForecastScreen() {
   const router = useRouter();
-  const [latitude, setLatitude] = useState('34.05');
-  const [longitude, setLongitude] = useState('-111.03');
+  const [latitude, setLatitude] = useState('');
+  const [longitude, setLongitude] = useState('');
   const [panelWatts, setPanelWatts] = useState('400');
   const [numPanels, setNumPanels] = useState('2');
 
@@ -19,26 +19,7 @@ export default function SolarForecastScreen() {
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string>('');
 
-  useEffect(() => {
-    getCurrentLocation();
-  }, []);
 
-  const getCurrentLocation = async () => {
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === 'granted') {
-        const location = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
-        setLatitude(location.coords.latitude.toFixed(4));
-        setLongitude(location.coords.longitude.toFixed(4));
-      }
-    } catch (err) {
-      console.log('Could not get current location:', err);
-    } finally {
-      setLocationLoading(false);
-    }
-  };
 
   const refreshLocation = async () => {
     setLocationLoading(true);

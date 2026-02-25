@@ -1,18 +1,27 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, Modal, ActivityIndicator, Platform, ScrollView, Alert } from 'react-native';
 import axios from 'axios';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import * as Location from 'expo-location';
 import { API_BASE, buildUrl } from '../lib/apiConfig';
+import { useLocationSearch } from '../lib/useLocationSearch';
+import LocationSearchBox from '../lib/components/LocationSearchBox';
 
 type ConnectivityTab = 'cell' | 'starlink';
 
 export default function ConnectivityScreen() {
   const router = useRouter();
-  const [latitude, setLatitude] = useState('34.05');
-  const [longitude, setLongitude] = useState('-111.03');
+
+  // ── Location (manual search + explicit GPS only) ────────────────────
+  const {
+    lat: latitude, lon: longitude,
+    locationLabel, locationLoading,
+    locationQuery, suggestions, showSuggestions,
+    handleLocationQueryChange, selectSuggestion,
+    clearManualLocation, triggerGps, setShowSuggestions,
+  } = useLocationSearch('connectivityLoc');
+
   
   // Cell inputs
   const [carrier, setCarrier] = useState<'verizon' | 'att' | 'tmobile'>('att');
@@ -24,58 +33,19 @@ export default function ConnectivityScreen() {
   // UI state
   const [tab, setTab] = useState<ConnectivityTab>('cell');
   const [loading, setLoading] = useState(false);
-  const [locationLoading, setLocationLoading] = useState(true);
   const [cellResult, setCellResult] = useState<string | null>(null);
   const [cellResultData, setCellResultData] = useState<any>(null);
   const [starlinkResult, setStarlinkResult] = useState<string | null>(null);
   const [starlinkResultData, setStarlinkResultData] = useState<any>(null);
 
-  useEffect(() => {
-    getCurrentLocation();
-  }, []);
 
-  const getCurrentLocation = async () => {
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === 'granted') {
-        const location = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
-        setLatitude(location.coords.latitude.toFixed(4));
-        setLongitude(location.coords.longitude.toFixed(4));
-      }
-    } catch (err) {
-      console.log('Could not get current location:', err);
-    } finally {
-      setLocationLoading(false);
-    }
-  };
 
   const refreshLocation = async () => {
-    setLocationLoading(true);
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission Denied', 'Location permission is required.');
-        setLocationLoading(false);
-        return;
-      }
-
-      const location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-      setLatitude(location.coords.latitude.toFixed(4));
-      setLongitude(location.coords.longitude.toFixed(4));
-      Alert.alert('Location Updated', `Refreshed to: ${location.coords.latitude.toFixed(4)}, ${location.coords.longitude.toFixed(4)}`);
-    } catch (err) {
-      Alert.alert('Error', 'Failed to refresh location');
-    } finally {
-      setLocationLoading(false);
-    }
+    await triggerGps();
   };
 
   const useCurrentLocation = async () => {
-    await refreshLocation();
+    await triggerGps();
   };
 
   const runCellPrediction = async () => {
@@ -155,27 +125,21 @@ export default function ConnectivityScreen() {
             <Text style={styles.title}>Connectivity</Text>
             <Text style={styles.subtitle}>Predict cellular and Starlink signal quality</Text>
 
-            {/* Location Display with Auto-detect */}
-            <View style={styles.locationBox}>
-              <View style={styles.locationBoxHeader}>
-                <Ionicons name="location" size={18} color="#06b6d4" />
-                <Text style={styles.locationBoxLabel}>Your Location</Text>
-                <TouchableOpacity 
-                  onPress={refreshLocation} 
-                  style={styles.refreshLocationBtn}
-                  disabled={locationLoading}
-                >
-                  {locationLoading ? (
-                    <ActivityIndicator size="small" color="#06b6d4" />
-                  ) : (
-                    <Ionicons name="refresh" size={18} color="#06b6d4" />
-                  )}
-                </TouchableOpacity>
-              </View>
-              <Text style={styles.locationBoxCoords}>
-                {locationLoading ? 'Detecting...' : `${latitude}, ${longitude}`}
-              </Text>
-            </View>
+            <LocationSearchBox
+              lat={latitude}
+              lon={longitude}
+              locationLabel={locationLabel}
+              locationLoading={locationLoading}
+              locationQuery={locationQuery}
+              suggestions={suggestions}
+              showSuggestions={showSuggestions}
+              handleLocationQueryChange={handleLocationQueryChange}
+              selectSuggestion={selectSuggestion}
+              clearManualLocation={clearManualLocation}
+              triggerGps={triggerGps}
+              setShowSuggestions={setShowSuggestions}
+              accentColor="#06b6d4"
+            />
 
             {/* Tab buttons */}
             <View style={styles.tabRow}>

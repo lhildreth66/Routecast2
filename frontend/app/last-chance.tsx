@@ -1,12 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator, ScrollView, Alert, Linking, RefreshControl } from 'react-native';
 import axios from 'axios';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import * as Location from 'expo-location';
 import { API_BASE, buildUrl } from '../lib/apiConfig';
 import InfoBanner from '../lib/components/InfoBanner';
+import { useLocationSearch } from '../lib/useLocationSearch';
+import LocationSearchBox from '../lib/components/LocationSearchBox';
 
 interface SupplyPoint {
   name: string;
@@ -30,49 +31,26 @@ interface SupplyPoint {
 
 export default function LastChanceScreen() {
   const router = useRouter();
-  const [latitude, setLatitude] = useState('34.05');
-  const [longitude, setLongitude] = useState('-111.03');
+
+  // ── Location (manual search + explicit GPS only) ────────────────────
+  const {
+    lat: latitude, lon: longitude,
+    locationLabel, locationLoading,
+    locationQuery, suggestions, showSuggestions,
+    handleLocationQueryChange, selectSuggestion,
+    clearManualLocation, triggerGps, setShowSuggestions,
+  } = useLocationSearch('lastChanceLoc');
+
   const [searchRadius, setSearchRadius] = useState('75'); // miles - large radius for "last chance"
   const [loading, setLoading] = useState(false);
-  const [locationLoading, setLocationLoading] = useState(true);
   const [supplies, setSupplies] = useState<SupplyPoint[]>([]);
   const [error, setError] = useState<string>('');
   const [expandedSupplies, setExpandedSupplies] = useState(new Set<number>());
   const [filterType, setFilterType] = useState<'all' | 'grocery' | 'propane' | 'hardware'>('all');
 
-  // Automatically get current location on mount
-  useEffect(() => {
-    (async () => {
-      try {
-        const { status} = await Location.requestForegroundPermissionsAsync();
-        if (status === 'granted') {
-          const location = await Location.getCurrentPositionAsync({});
-          setLatitude(location.coords.latitude.toFixed(4));
-          setLongitude(location.coords.longitude.toFixed(4));
-        }
-      } catch (err) {
-        console.log('Could not get current location, using defaults');
-      } finally {
-        setLocationLoading(false);
-      }
-    })();
-  }, []);
 
   const useCurrentLocation = async () => {
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission Denied', 'Location permission is required to use current location.');
-        return;
-      }
-
-      const location = await Location.getCurrentPositionAsync({});
-      setLatitude(location.coords.latitude.toFixed(4));
-      setLongitude(location.coords.longitude.toFixed(4));
-      Alert.alert('Location Updated', `Using current position: ${location.coords.latitude.toFixed(4)}, ${location.coords.longitude.toFixed(4)}`);
-    } catch (err) {
-      Alert.alert('Error', 'Failed to get current location');
-    }
+    await triggerGps();
   };
 
   const searchSupplies = async () => {
@@ -149,27 +127,21 @@ export default function LastChanceScreen() {
           <Text style={styles.title}>🏪 Last Chance Supplies</Text>
           <Text style={styles.subtitle}>Find grocery, propane, and hardware stores before going remote</Text>
 
-          {/* Location Display with Auto-detect */}
-          <View style={styles.locationBox}>
-            <View style={styles.locationHeader}>
-              <Ionicons name="location" size={18} color="#f59e0b" />
-              <Text style={styles.locationLabel}>Your Location</Text>
-              <TouchableOpacity 
-                onPress={useCurrentLocation} 
-                style={styles.refreshLocationBtn}
-                disabled={locationLoading}
-              >
-                {locationLoading ? (
-                  <ActivityIndicator size="small" color="#f59e0b" />
-                ) : (
-                  <Ionicons name="refresh" size={18} color="#f59e0b" />
-                )}
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.locationCoords}>
-              {locationLoading ? 'Detecting...' : `${latitude}, ${longitude}`}
-            </Text>
-          </View>
+          <LocationSearchBox
+            lat={latitude}
+            lon={longitude}
+            locationLabel={locationLabel}
+            locationLoading={locationLoading}
+            locationQuery={locationQuery}
+            suggestions={suggestions}
+            showSuggestions={showSuggestions}
+            handleLocationQueryChange={handleLocationQueryChange}
+            selectSuggestion={selectSuggestion}
+            clearManualLocation={clearManualLocation}
+            triggerGps={triggerGps}
+            setShowSuggestions={setShowSuggestions}
+            accentColor="#f59e0b"
+          />
 
           <View style={styles.inputRow}>
             <Text style={styles.label}>Search Radius (miles)</Text>

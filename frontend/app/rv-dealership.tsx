@@ -1,12 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView, Alert, Linking, RefreshControl } from 'react-native';
 import axios from 'axios';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import * as Location from 'expo-location';
 import { API_BASE, buildUrl } from '../lib/apiConfig';
 import InfoBanner from '../lib/components/InfoBanner';
+import { useLocationSearch } from '../lib/useLocationSearch';
+import LocationSearchBox from '../lib/components/LocationSearchBox';
 
 interface RVDealership {
   name: string;
@@ -26,41 +27,21 @@ interface RVDealership {
 
 export default function RVDealershipScreen() {
   const router = useRouter();
-  const [latitude, setLatitude] = useState('');
-  const [longitude, setLongitude] = useState('');
+
+  // ── Location (manual search + explicit GPS only) ────────────────────
+  const {
+    lat: latitude, lon: longitude,
+    locationLabel, locationLoading,
+    locationQuery, suggestions, showSuggestions,
+    handleLocationQueryChange, selectSuggestion,
+    clearManualLocation, triggerGps, setShowSuggestions,
+  } = useLocationSearch('rvDealershipLoc');
+
   const [loading, setLoading] = useState(true);
-  const [locationLoading, setLocationLoading] = useState(true);
   const [dealerships, setDealerships] = useState<RVDealership[]>([]);
   const [error, setError] = useState<string>('');
   const [expandedDealerships, setExpandedDealerships] = useState(new Set<number>());
 
-  // Automatically get current location and search on mount
-  useEffect(() => {
-    (async () => {
-      try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status === 'granted') {
-          const location = await Location.getCurrentPositionAsync({});
-          const lat = location.coords.latitude.toFixed(4);
-          const lon = location.coords.longitude.toFixed(4);
-          setLatitude(lat);
-          setLongitude(lon);
-          setLocationLoading(false);
-          
-          // Auto-search immediately
-          await performSearch(parseFloat(lat), parseFloat(lon));
-        } else {
-          setLocationLoading(false);
-          setLoading(false);
-          setError('Location permission required to find nearby RV dealerships');
-        }
-      } catch (err) {
-        setLocationLoading(false);
-        setLoading(false);
-        setError('Failed to get current location');
-      }
-    })();
-  }, []);
 
   const performSearch = async (lat: number, lon: number) => {
     setLoading(true);
@@ -85,28 +66,7 @@ export default function RVDealershipScreen() {
   };
 
   const refreshLocation = async () => {
-    setLocationLoading(true);
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission Denied', 'Location permission is required.');
-        setLocationLoading(false);
-        return;
-      }
-
-      const location = await Location.getCurrentPositionAsync({});
-      const lat = location.coords.latitude.toFixed(4);
-      const lon = location.coords.longitude.toFixed(4);
-      setLatitude(lat);
-      setLongitude(lon);
-      setLocationLoading(false);
-      
-      Alert.alert('Location Updated', 'Searching for nearby RV dealerships...');
-      await performSearch(parseFloat(lat), parseFloat(lon));
-    } catch (err) {
-      setLocationLoading(false);
-      Alert.alert('Error', 'Failed to get current location');
-    }
+    await triggerGps();
   };
 
   const toggleDealershipExpand = (index: number) => {
@@ -142,27 +102,21 @@ export default function RVDealershipScreen() {
           <Text style={styles.title}>🚐 Nearest RV Dealerships</Text>
           <Text style={styles.subtitle}>Find RV dealerships, service centers, and parts within 10 miles</Text>
 
-          {/* Location Display with Auto-detect */}
-          <View style={styles.locationBox}>
-            <View style={styles.locationHeader}>
-              <Ionicons name="location" size={18} color="#ec4899" />
-              <Text style={styles.locationLabel}>Your Location</Text>
-              <TouchableOpacity 
-                onPress={refreshLocation} 
-                style={styles.refreshLocationBtn}
-                disabled={locationLoading}
-              >
-                {locationLoading ? (
-                  <ActivityIndicator size="small" color="#ec4899" />
-                ) : (
-                  <Ionicons name="refresh" size={18} color="#ec4899" />
-                )}
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.locationCoords}>
-              {locationLoading ? 'Detecting...' : `${latitude}, ${longitude}`}
-            </Text>
-          </View>
+          <LocationSearchBox
+            lat={latitude}
+            lon={longitude}
+            locationLabel={locationLabel}
+            locationLoading={locationLoading}
+            locationQuery={locationQuery}
+            suggestions={suggestions}
+            showSuggestions={showSuggestions}
+            handleLocationQueryChange={handleLocationQueryChange}
+            selectSuggestion={selectSuggestion}
+            clearManualLocation={clearManualLocation}
+            triggerGps={triggerGps}
+            setShowSuggestions={setShowSuggestions}
+            accentColor="#3b82f6"
+          />
 
           <TouchableOpacity 
             onPress={refreshLocation} 

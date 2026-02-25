@@ -1,12 +1,13 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator, ScrollView, Alert, Linking, RefreshControl } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import * as Location from 'expo-location';
 import axios from 'axios';
 import { buildUrl } from '../lib/apiConfig';
 import InfoBanner from '../lib/components/InfoBanner';
+import { useLocationSearch } from '../lib/useLocationSearch';
+import LocationSearchBox from '../lib/components/LocationSearchBox';
 
 interface OvernightSpot {
   name: string;
@@ -35,56 +36,26 @@ function groupSpots(items: OvernightSpot[]) {
 
 export default function WalmartParkingScreen() {
   const router = useRouter();
-  const [latitude, setLatitude] = useState('34.05');
-  const [longitude, setLongitude] = useState('-111.03');
+
+  // ── Location (manual search + explicit GPS only) ────────────────────
+  const {
+    lat: latitude, lon: longitude,
+    locationLabel, locationLoading,
+    locationQuery, suggestions, showSuggestions,
+    handleLocationQueryChange, selectSuggestion,
+    clearManualLocation, triggerGps, setShowSuggestions,
+  } = useLocationSearch('walmartParkingLoc');
+
   const [searchRadius, setSearchRadius] = useState('75');
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [locationLoading, setLocationLoading] = useState(true);
   const [spots, setSpots] = useState<OvernightSpot[]>([]);
   const [error, setError] = useState('');
   const [overpassUnavailable, setOverpassUnavailable] = useState(false);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status === 'granted') {
-          const location = await Location.getCurrentPositionAsync({});
-          setLatitude(location.coords.latitude.toFixed(4));
-          setLongitude(location.coords.longitude.toFixed(4));
-        }
-      } catch (err) {
-        console.log('Could not get current location, using defaults');
-      } finally {
-        setLocationLoading(false);
-      }
-    })();
-  }, []);
 
   const useCurrentLocation = async () => {
-    setLocationLoading(true);
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Location Permission Required', 'Please enable location permissions in your device settings to use this feature.', [{ text: 'OK' }]);
-        setLocationLoading(false);
-        return;
-      }
-
-      const location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-        timeInterval: 10000,
-        distanceInterval: 0,
-      });
-      setLatitude(location.coords.latitude.toFixed(4));
-      setLongitude(location.coords.longitude.toFixed(4));
-      setLocationLoading(false);
-      Alert.alert('Location Updated', 'Your current location has been set.');
-    } catch (err: any) {
-      setLocationLoading(false);
-      Alert.alert('Location Error', err?.message || 'Unable to get your location. Make sure GPS is enabled and you have a clear view of the sky.', [{ text: 'OK' }]);
-    }
+    await triggerGps();
   };
 
   const searchWalmart = async () => {
@@ -178,16 +149,21 @@ export default function WalmartParkingScreen() {
           <Text style={styles.title}>🛒 Walmart Overnight Parking</Text>
           <Text style={styles.subtitle}>Free overnight RV stays welcome</Text>
 
-          <View style={styles.locationBox}>
-            <View style={styles.locationHeader}>
-              <Ionicons name="location" size={18} color="#22c55e" />
-              <Text style={styles.locationLabel}>Your Location</Text>
-              <TouchableOpacity onPress={useCurrentLocation} style={styles.refreshLocationBtn} disabled={locationLoading}>
-                {locationLoading ? <ActivityIndicator size="small" color="#22c55e" /> : <Ionicons name="refresh" size={18} color="#22c55e" />}
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.locationCoords}>{locationLoading ? 'Detecting...' : `${latitude}, ${longitude}`}</Text>
-          </View>
+          <LocationSearchBox
+            lat={latitude}
+            lon={longitude}
+            locationLabel={locationLabel}
+            locationLoading={locationLoading}
+            locationQuery={locationQuery}
+            suggestions={suggestions}
+            showSuggestions={showSuggestions}
+            handleLocationQueryChange={handleLocationQueryChange}
+            selectSuggestion={selectSuggestion}
+            clearManualLocation={clearManualLocation}
+            triggerGps={triggerGps}
+            setShowSuggestions={setShowSuggestions}
+            accentColor="#0ea5e9"
+          />
 
           <View style={styles.inputRow}>
             <Text style={styles.label}>Search Radius (miles)</Text>

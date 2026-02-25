@@ -1,66 +1,36 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator, ScrollView, Alert } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator, ScrollView } from 'react-native';
 import axios from 'axios';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import * as Location from 'expo-location';
 import { API_BASE, buildUrl } from '../lib/apiConfig';
+import { useLocationSearch } from '../lib/useLocationSearch';
+import LocationSearchBox from '../lib/components/LocationSearchBox';
 
 export default function WindShelterScreen() {
   const router = useRouter();
-  const [latitude, setLatitude] = useState('34.05');
-  const [longitude, setLongitude] = useState('-111.03');
+
+  // ── Location (manual search + explicit GPS only) ────────────────────
+  const {
+    lat: latitude, lon: longitude,
+    locationLabel, locationLoading,
+    locationQuery, suggestions, showSuggestions,
+    handleLocationQueryChange, selectSuggestion,
+    clearManualLocation, triggerGps, setShowSuggestions,
+  } = useLocationSearch('windShelterLoc');
+
   const [windDirection, setWindDirection] = useState('270'); // degrees (0-360)
   const [gustSpeed, setGustSpeed] = useState('25'); // mph
 
   const [loading, setLoading] = useState(false);
-  const [locationLoading, setLocationLoading] = useState(true);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string>('');
 
-  useEffect(() => {
-    getCurrentLocation();
-  }, []);
 
-  const getCurrentLocation = async () => {
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === 'granted') {
-        const location = await Location.getCurrentPositionAsync({
-          accuracy: Location.Accuracy.Balanced,
-        });
-        setLatitude(location.coords.latitude.toFixed(4));
-        setLongitude(location.coords.longitude.toFixed(4));
-      }
-    } catch (err) {
-      console.log('Could not get current location:', err);
-    } finally {
-      setLocationLoading(false);
-    }
-  };
 
   const refreshLocation = async () => {
-    setLocationLoading(true);
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission Denied', 'Location permission is required.');
-        setLocationLoading(false);
-        return;
-      }
-
-      const location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-      });
-      setLatitude(location.coords.latitude.toFixed(4));
-      setLongitude(location.coords.longitude.toFixed(4));
-      Alert.alert('Location Updated', `Refreshed to: ${location.coords.latitude.toFixed(4)}, ${location.coords.longitude.toFixed(4)}`);
-    } catch (err) {
-      Alert.alert('Error', 'Failed to refresh location');
-    } finally {
-      setLocationLoading(false);
-    }
+    await triggerGps();
   };
 
   const calculate = async () => {
@@ -102,17 +72,21 @@ export default function WindShelterScreen() {
           <Text style={styles.title}>Wind Shelter</Text>
           <Text style={styles.subtitle}>Get RV orientation recommendations for wind protection</Text>
 
-          <View style={styles.locationInfo}>
-            <Ionicons name="location" size={16} color="#06b6d4" />
-            <Text style={styles.locationText}>
-              {locationLoading ? 'Getting location...' : `Location: ${latitude}, ${longitude}`}
-            </Text>
-            {!locationLoading && (
-              <TouchableOpacity onPress={refreshLocation} style={styles.refreshBtn}>
-                <Ionicons name="refresh" size={18} color="#06b6d4" />
-              </TouchableOpacity>
-            )}
-          </View>
+          <LocationSearchBox
+            lat={latitude}
+            lon={longitude}
+            locationLabel={locationLabel}
+            locationLoading={locationLoading}
+            locationQuery={locationQuery}
+            suggestions={suggestions}
+            showSuggestions={showSuggestions}
+            handleLocationQueryChange={handleLocationQueryChange}
+            selectSuggestion={selectSuggestion}
+            clearManualLocation={clearManualLocation}
+            triggerGps={triggerGps}
+            setShowSuggestions={setShowSuggestions}
+            accentColor="#06b6d4"
+          />
 
           <View style={styles.inputRow}>
             <Text style={styles.label}>Wind Direction (0-360°)</Text>
