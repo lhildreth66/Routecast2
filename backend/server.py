@@ -6969,7 +6969,7 @@ async def _search_casino_google_places(request: OvernightSearchRequest) -> List[
         request.longitude,
         request.radius_miles,
     )
-    radius_meters = min(80000.0, float(request.radius_miles * 1609.34))
+    radius_meters = min(float(request.radius_miles * 1609.34), 50000.0)
     url = "https://places.googleapis.com/v1/places:searchNearby"
     body = {
         "locationRestriction": {
