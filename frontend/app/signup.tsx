@@ -12,11 +12,13 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function SignupScreen() {
   const { signup, hasHydrated } = useAuth();
+  const { plan } = useLocalSearchParams<{ plan?: string }>();
+  const selectedPlan = plan === 'yearly' ? 'yearly' : 'monthly';
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -68,7 +70,7 @@ export default function SignupScreen() {
 
     setLoading(true);
 
-    const result = await signup(email.trim(), password, name.trim());
+    const result = await signup(email.trim(), password, name.trim(), selectedPlan);
 
     setLoading(false);
 
@@ -106,7 +108,9 @@ export default function SignupScreen() {
                 <Ionicons name="person-add" size={32} color="#1a1a1a" />
               </View>
               <Text style={styles.title}>Create Account</Text>
-              <Text style={styles.subtitle}>Start your 7-day free trial</Text>
+              <Text style={styles.subtitle}>
+                Start your 7-day free trial — {selectedPlan === 'yearly' ? '$59.99/year' : '$9.99/month'} after trial
+              </Text>
             </View>
 
             {/* Signup Form */}
@@ -225,7 +229,7 @@ export default function SignupScreen() {
               <View style={styles.trialInfo}>
                 <Ionicons name="gift-outline" size={18} color="#22c55e" />
                 <Text style={styles.trialText}>
-                  7-day free trial included. No credit card required.
+                  7-day free trial included. You'll enter payment details on the next step.
                 </Text>
               </View>
 

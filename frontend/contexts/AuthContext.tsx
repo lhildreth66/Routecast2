@@ -92,7 +92,7 @@ interface AuthContextType extends AuthState {
   isAuthenticated: boolean;
   isPremium: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
-  signup: (email: string, password: string, name?: string) => Promise<{ success: boolean; error?: string }>;
+  signup: (email: string, password: string, name?: string, plan?: string) => Promise<{ success: boolean; error?: string }>;
   loginWithTokens: (accessToken: string, refreshToken: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
@@ -261,12 +261,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     email: string,
     password: string,
     name?: string,
+    plan?: string,
   ): Promise<{ success: boolean; error?: string }> => {
     try {
       const response = await fetch(buildUrl('auth/signup'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, name }),
+        body: JSON.stringify({ email, password, name, plan: plan || 'monthly' }),
       });
 
       const data = await response.json().catch(() => ({}));

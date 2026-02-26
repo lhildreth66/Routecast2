@@ -305,7 +305,7 @@ export default function LandingPage() {
 
               <TouchableOpacity 
                 style={styles.pricingButton}
-                onPress={() => router.push('/signup')}
+                onPress={() => router.push('/signup?plan=monthly')}
                 data-testid="pricing-monthly-btn"
               >
                 <Text style={styles.pricingButtonText}>Start Monthly Trial</Text>
@@ -348,7 +348,7 @@ export default function LandingPage() {
 
               <TouchableOpacity 
                 style={[styles.pricingButton, styles.pricingButtonFeatured]}
-                onPress={() => router.push('/signup')}
+                onPress={() => router.push('/signup?plan=yearly')}
                 data-testid="pricing-annual-btn"
               >
                 <Text style={styles.pricingButtonTextFeatured}>Start Annual Trial</Text>

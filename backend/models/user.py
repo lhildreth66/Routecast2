@@ -38,6 +38,7 @@ class UserBase(BaseModel):
 class UserCreate(UserBase):
     password: str = Field(..., min_length=8)
     name: Optional[str] = None
+    plan: Optional[str] = "monthly"  # "monthly" or "yearly"
 
 
 class UserLogin(UserBase):

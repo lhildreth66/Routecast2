@@ -38,6 +38,7 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 # ── Stripe config ────────────────────────────────────────────────────────────
 STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "")
 STRIPE_PRICE_MONTHLY = os.environ.get("STRIPE_PRICE_MONTHLY", "")
+STRIPE_PRICE_YEARLY = os.environ.get("STRIPE_PRICE_YEARLY", "")
 FRONTEND_URL = (
     os.environ.get("FRONTEND_URL")
     or os.environ.get("APP_URL")
@@ -95,7 +96,12 @@ async def signup(
         if existing_user:
             raise HTTPException(status_code=400, detail="Email already registered")
 
-        user = await create_user(db, user_data.email, user_data.password, user_data.name)
+        # Normalize plan to "monthly" or "yearly"
+        plan = (getattr(user_data, 'plan', None) or 'monthly').lower()
+        if plan not in ('monthly', 'yearly'):
+            plan = 'monthly'
+
+        user = await create_user(db, user_data.email, user_data.password, user_data.name, pending_plan=plan)
 
         verification_token = generate_verification_token()
         await store_verification_token(db, user["user_id"], verification_token, "email_verification", 24)
@@ -189,11 +195,13 @@ async def verify_email_get(
 async def _create_stripe_checkout_for_user(db, user_id: str, user: dict):
     """Create a Stripe Customer (if needed) and Checkout Session.
 
+    Reads ``pending_plan`` from the user record to pick the correct price.
     Returns ``(checkout_url, error_message)``.
     """
     email = user["email"]
     name = user.get("name")
     customer_id = user.get("stripe_customer_id")
+    pending_plan = user.get("pending_plan", "monthly")
 
     try:
         # Re-use existing Stripe customer if present (idempotent retry)
@@ -207,10 +215,17 @@ async def _create_stripe_checkout_for_user(db, user_id: str, user: dict):
             await update_user(db, user_id, {"stripe_customer_id": customer_id})
             logger.info(f"[VERIFY] Stripe customer created: {customer_id} for user={user_id}")
 
-        price_id = STRIPE_PRICE_MONTHLY
+        # Pick the correct price based on the user's chosen plan
+        if pending_plan == "yearly" and STRIPE_PRICE_YEARLY:
+            price_id = STRIPE_PRICE_YEARLY
+        else:
+            price_id = STRIPE_PRICE_MONTHLY
+
         if not price_id:
-            logger.error("[VERIFY] STRIPE_PRICE_MONTHLY not configured")
+            logger.error(f"[VERIFY] Stripe price not configured for plan={pending_plan}")
             return None, "Billing is not configured. Please contact support."
+
+        logger.info(f"[VERIFY] Using plan={pending_plan} price_id={price_id} for user={user_id}")
 
         session = stripe_module.checkout.Session.create(
             customer=customer_id,
@@ -429,12 +444,25 @@ async def welcome(body: WelcomeRequest, request: Request):
 
     user_id = user["user_id"]
 
+    # ── Determine the plan from the Stripe session ────────────────────────
+    # Retrieve the subscription to check the price interval
+    actual_plan = user.get("pending_plan", "monthly")
+    if subscription_id:
+        try:
+            sub_obj = stripe_module.Subscription.retrieve(subscription_id)
+            items = sub_obj.get("items", {}).get("data", [])
+            if items:
+                interval = items[0].get("price", {}).get("recurring", {}).get("interval", "")
+                actual_plan = "yearly" if interval == "year" else "monthly"
+        except Exception as e:
+            logger.warning(f"[WELCOME] Could not fetch subscription to determine plan: {e}")
+
     # ── Activate trial subscription (idempotent) ─────────────────────────
     now = datetime.now(timezone.utc)
     update_fields = {
         "is_premium": True,
         "subscription_status": "trialing",
-        "subscription_plan": "monthly",
+        "subscription_plan": actual_plan,
         "subscription_provider": "stripe",
         "stripe_customer_id": customer_id,
         "trial_used": True,
@@ -592,6 +620,31 @@ async def get_me(request: Request, current_user: dict = Depends(get_current_user
         trial_available=trial_available,
         trial_days_remaining=trial_days_remaining
     )
+
+
+@router.post("/customer-portal")
+async def customer_portal(request: Request, current_user: dict = Depends(get_current_user)):
+    """Create a Stripe Customer Portal session so the user can manage/change their plan."""
+    db = get_db(request)
+
+    user_id = current_user.get("sub")
+    user = await get_user_by_id(db, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    customer_id = user.get("stripe_customer_id")
+    if not customer_id:
+        raise HTTPException(status_code=400, detail="No billing account found")
+
+    try:
+        session = stripe_module.billing_portal.Session.create(
+            customer=customer_id,
+            return_url=f"{FRONTEND_URL}/(tabs)",
+        )
+        return {"url": session.url}
+    except Exception as e:
+        logger.error(f"[PORTAL] Error creating portal session: {e}")
+        raise HTTPException(status_code=500, detail="Could not create billing portal")
 
 
 @router.post("/logout")

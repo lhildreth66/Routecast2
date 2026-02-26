@@ -89,7 +89,7 @@ async def get_user_by_id(db: AsyncIOMotorDatabase, user_id: str) -> Optional[dic
     return await db.users.find_one({"user_id": user_id})
 
 
-async def create_user(db: AsyncIOMotorDatabase, email: str, password: str, name: Optional[str] = None) -> dict:
+async def create_user(db: AsyncIOMotorDatabase, email: str, password: str, name: Optional[str] = None, pending_plan: str = "monthly") -> dict:
     """Create a new user in the database"""
     import uuid
 
@@ -100,6 +100,7 @@ async def create_user(db: AsyncIOMotorDatabase, email: str, password: str, name:
         "name": name,
         "hashed_password": get_password_hash(password),
         "email_verified": False,
+        "pending_plan": pending_plan if pending_plan in ("monthly", "yearly") else "monthly",
         "created_at": now,
         "updated_at": now,
         "subscription_status": "inactive",
