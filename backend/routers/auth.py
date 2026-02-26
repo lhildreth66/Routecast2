@@ -181,7 +181,7 @@ async def verify_email_get(
     param so the page can show a friendly message.
     """
     raw = (token or t or "").strip()
-    return await _verify_email_with_token(raw, background_tasks, request, source="GET_query")
+    return await _verify_email_with_token(raw, background_tasks, request)
 
 
 # ── Helper: create Stripe Checkout Session ───────────────────────────────────
