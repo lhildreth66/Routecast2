@@ -5170,115 +5170,66 @@ async def predict_cell_probability(request: ConnectivityCellRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail="Unable to compute cell probability at this time")
 
-@api_router.post("/connectivity/starlink-risk", response_model=ConnectivityStarlinkResponse)
-async def predict_starlink_risk(request: ConnectivityStarlinkRequest):
-    """Starlink obstruction risk prediction (Task A7)."""
-    try:
-        res = obstruction_risk(
-            horizon_south_deg=request.horizonSouthDeg,
-            canopy_pct=request.canopyPct,
-        )
-        return ConnectivityStarlinkResponse(
-            risk_level=res.risk_level,
-            obstruction_score=res.obstruction_score,
-            explanation=res.explanation,
-            reasons=res.reasons,
+@api_router.post("/casinos/search", response_model=OvernightSearchResponse)
+async def search_casinos(request: OvernightSearchRequest):
+    """Casino search — Google Places ONLY (no Overpass fallback)."""
+
+    if not GOOGLE_PLACES_API_KEY:
+        logger.warning("Casino search skipped: GOOGLE_PLACES_API_KEY not configured")
+        return OvernightSearchResponse(
+            spots=[],
             is_premium_locked=False,
+            ok=True,
+            source="google_places_unavailable",
+            error="Google Places API not configured."
         )
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid parameters: {str(e)}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="Unable to compute Starlink risk at this time")
 
-# ==================== Campsite Index Endpoints (A8) ====================
+    cache_key = f"casino:{round(request.latitude, 2)}:{round(request.longitude, 2)}:{round(request.radius_miles / 5) * 5}"
+    cached = _cache_get(_casino_places_cache, cache_key)
+    if cached is not None:
+        logger.info("Casino Places cache hit key=%s", cache_key)
+        return OvernightSearchResponse(**cached)
 
-async def _fetch_wind_data(client: httpx.AsyncClient, lat: float, lon: float) -> float:
-    """Fetch current wind gust from NOAA weather API."""
     try:
-        # Get NOAA grid point
-        point_url = f"https://api.weather.gov/points/{lat},{lon}"
-        point_resp = await client.get(point_url, headers=NOAA_HEADERS, timeout=10.0)
-        if point_resp.status_code != 200:
-            logger.warning(f"NOAA point lookup failed: {point_resp.status_code}")
-            return 10.0  # Default moderate wind
-        
-        point_data = point_resp.json()
-        forecast_url = point_data['properties']['forecast']
-        
-        # Get current forecast
-        forecast_resp = await client.get(forecast_url, headers=NOAA_HEADERS, timeout=10.0)
-        if forecast_resp.status_code != 200:
-            logger.warning(f"NOAA forecast failed: {forecast_resp.status_code}")
-            return 10.0
-        
-        forecast_data = forecast_resp.json()
-        periods = forecast_data['properties']['periods']
-        if not periods:
-            return 10.0
-        
-        # Get wind speed from current period
-        current_period = periods[0]
-        wind_speed_str = current_period.get('windSpeed', '10 mph')
-        
-        # Parse wind speed (format: "10 mph" or "5 to 10 mph")
-        import re
-        matches = re.findall(r'\d+', wind_speed_str)
-        if matches:
-            # Use the higher value if range
-            wind_mph = float(matches[-1])
-            # Estimate gust as 1.3x sustained
-            return wind_mph * 1.3
-        
-        return 10.0
-    except Exception as e:
-        logger.warning(f"Error fetching wind data: {e}")
-        return 10.0  # Default
+        google_stops = await _search_casino_google_places(request)
+        if google_stops:
+            google_stops = _dedupe_and_limit(google_stops)
+            result = OvernightSearchResponse(
+                spots=google_stops,
+                is_premium_locked=False,
+                ok=True,
+                source="google_places",
+            )
+            _cache_set(_casino_places_cache, cache_key, result.model_dump(), ttl=CASINO_PLACES_CACHE_TTL)
+            return result
 
+        # No results from Places: return empty set with clear message
+        return OvernightSearchResponse(
+            spots=[],
+            is_premium_locked=False,
+            ok=True,
+            source="google_places",
+            error="No casinos found nearby via Google Places."
+        )
 
-async def _fetch_terrain_data(client: httpx.AsyncClient, lat: float, lon: float) -> tuple[float, float]:
-    """Fetch terrain slope and shade estimate."""
-    try:
-        # Use Open-Elevation API for elevation data
-        # Get 4 points in a small grid to calculate slope
-        offset = 0.001  # ~100m
-        points = [
-            f"{lat},{lon}",
-            f"{lat+offset},{lon}",
-            f"{lat},{lon+offset}",
-            f"{lat-offset},{lon}",
-            f"{lat},{lon-offset}",
-        ]
-        
-        url = "https://api.open-elevation.com/api/v1/lookup"
-        payload = {"locations": [{"latitude": float(p.split(',')[0]), "longitude": float(p.split(',')[1])} for p in points]}
-        
-        resp = await client.post(url, json=payload, timeout=15.0)
-        if resp.status_code != 200:
-            logger.warning(f"Elevation API failed: {resp.status_code}")
-            return 5.0, 0.3  # Default moderate slope, low shade
-        
-        data = resp.json()
-        elevations = [r['elevation'] for r in data['results']]
-        
-        if len(elevations) >= 5:
-            # Calculate slope as max elevation difference
-            center = elevations[0]
-            diffs = [abs(e - center) for e in elevations[1:]]
-            max_diff = max(diffs)
-            # Convert to percentage (approximate)
-            distance_m = offset * 111000  # degrees to meters (rough)
-            slope_pct = (max_diff / distance_m) * 100
-            slope_pct = min(slope_pct, 50.0)  # Cap at 50%
-        else:
-            slope_pct = 5.0
-        
-        # Shade: use OSM to check for tree coverage
-        shade_score = await _fetch_shade_from_osm(client, lat, lon)
-        
-        return slope_pct, shade_score
-    except Exception as e:
-        logger.warning(f"Error fetching terrain data: {e}")
-        return 5.0, 0.3  # Default
+    except HTTPException as he:
+        logger.warning("Casino Google Places failed with HTTP %s: %s", he.status_code, he.detail)
+        return OvernightSearchResponse(
+            spots=[],
+            is_premium_locked=False,
+            ok=True,
+            source="google_places_error",
+            error=he.detail,
+        )
+    except Exception as exc:
+        logger.warning("Casino Google Places exception: %s", exc)
+        return OvernightSearchResponse(
+            spots=[],
+            is_premium_locked=False,
+            ok=True,
+            source="google_places_error",
+            error="Casino search is temporarily unavailable.",
+        )
 
 
 async def _fetch_shade_from_osm(client: httpx.AsyncClient, lat: float, lon: float) -> float:
