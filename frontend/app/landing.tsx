@@ -89,7 +89,7 @@ export default function LandingPage() {
               <View style={styles.heroCtas}>
                 <TouchableOpacity 
                   style={styles.primaryCta}
-                  onPress={() => router.push('/signup')}
+                  onPress={() => scrollToSection('pricing')}
                   data-testid="hero-start-trial"
                 >
                   <Ionicons name="rocket" size={20} color="#0f0f0f" />
