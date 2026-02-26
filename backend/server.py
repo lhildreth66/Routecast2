@@ -6462,6 +6462,15 @@ def _build_stop(element: Dict[str, Any], request: OvernightSearchRequest, catego
     website = tags.get("website") or tags.get("contact:website") or tags.get("url")
     hours = tags.get("opening_hours")
     address = _build_address(tags)
+
+    # If the name is generic ("casino" or "casino near (...)"), prefer a
+    # human-friendly address instead so the UI doesn't show only "Casino".
+    if name and name.lower() in GENERIC_PLACEHOLDERS and address:
+        name = address
+        label = address
+    elif name and name.lower().startswith(f"{category.lower()} near") and address:
+        name = address
+        label = address
     notes = tags.get("description") or default_notes
 
     return OvernightStop(
