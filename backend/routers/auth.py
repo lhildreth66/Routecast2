@@ -9,7 +9,6 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timedelta, timezone
-from urllib.parse import quote as urlquote
 import logging
 import os
 import stripe as stripe_module
@@ -19,7 +18,7 @@ logger = logging.getLogger(__name__)
 from models.user import (
     UserCreate, UserLogin, UserResponse, UserMeResponse,
     TokenResponse, TokenRefreshRequest, PasswordResetRequest,
-    PasswordResetConfirm, EmailVerificationRequest, ChangePasswordRequest,
+    PasswordResetConfirm, ChangePasswordRequest,
     SubscriptionStatus, SubscriptionPlan,
     get_user_entitlements, user_is_premium
 )
@@ -164,21 +163,6 @@ async def refresh_token(token_data: TokenRefreshRequest, request: Request):
     )
 
 
-@router.post("/verify-email")
-async def verify_email(
-    data: EmailVerificationRequest,
-    background_tasks: BackgroundTasks,
-    request: Request
-):
-    """Verify email via POST (SPA fallback).
-
-    Returns JSON with ``checkout_url`` so the frontend can redirect the user
-    to Stripe Checkout.
-    """
-    token = (data.token or "").strip()
-    return await _verify_email_with_token(token, background_tasks, request, source="POST_body")
-
-
 from fastapi import Query as FastQuery   # avoid shadowing
 
 
@@ -200,7 +184,7 @@ async def verify_email_get(
     return await _verify_email_with_token(raw, background_tasks, request, source="GET_query")
 
 
-# ── Helper: create Stripe Checkout and return 302 or JSON ────────────────────
+# ── Helper: create Stripe Checkout Session ───────────────────────────────────
 
 async def _create_stripe_checkout_for_user(db, user_id: str, user: dict):
     """Create a Stripe Customer (if needed) and Checkout Session.
@@ -248,34 +232,30 @@ async def _create_stripe_checkout_for_user(db, user_id: str, user: dict):
         return None, "Unable to start checkout. Please try again later."
 
 
+# ── Failure-redirect URL ─────────────────────────────────────────────────────
+_ERROR_REDIRECT = f"{FRONTEND_URL}/signup?error=invalid_token"
+
+
 async def _verify_email_with_token(
     token: str,
     background_tasks: BackgroundTasks,
     request: Request,
-    source: str = "unknown",
 ):
-    """Shared verify-email logic used by both GET and POST handlers.
+    """Verify the email token, create a Stripe Checkout Session, and 302-redirect.
 
-    GET requests → ``RedirectResponse`` (302 → Stripe or 302 → error page).
-    POST requests → JSON (``checkout_url`` on success, ``detail`` on error).
+    Only two possible responses:
+      • 302 → Stripe checkout URL  (success)
+      • 302 → /signup?error=invalid_token  (any failure)
+
+    Never returns JSON.
     """
     db = get_db(request)
-    is_get = source == "GET_query"
-
-    def _error(msg: str, status: int = 400):
-        if is_get:
-            return RedirectResponse(
-                url=f"{FRONTEND_URL}/verify-email?error={urlquote(msg)}",
-                status_code=302,
-            )
-        raise HTTPException(status_code=status, detail=msg)
 
     # ── Step 1: diagnostic logging ───────────────────────────────────────
     safe_preview = f"{token[:6]}...{token[-6:]}" if len(token) >= 12 else "<short>"
     logger.info(
-        f"[VERIFY-EMAIL] request path={request.url.path} "
+        f"[VERIFY-EMAIL] path={request.url.path} "
         f"query_keys={list(request.query_params.keys())} "
-        f"source={source} "
         f"token_present={bool(token)} "
         f"token_len={len(token)} "
         f"token_head={token[:6] if token else None} "
@@ -284,7 +264,7 @@ async def _verify_email_with_token(
 
     if not token:
         logger.warning("[VERIFY-EMAIL] FAIL bucket=MISSING — no token supplied")
-        return _error("Verification token is required")
+        return RedirectResponse(url=_ERROR_REDIRECT, status_code=302)
 
     # ── Step 2: consume the token ────────────────────────────────────────
     user_id = await verify_and_consume_token(db, token, "email_verification")
@@ -302,16 +282,13 @@ async def _verify_email_with_token(
                     f"[VERIFY-EMAIL] idempotent retry — already verified "
                     f"user={old_token_doc['user_id']}"
                 )
-                # Already verified — create a new checkout session so the
-                # user can retry if they closed the Stripe tab.
                 checkout_url, err = await _create_stripe_checkout_for_user(
                     db, old_token_doc["user_id"], existing_user,
                 )
                 if err:
-                    return _error(err)
-                if is_get:
-                    return RedirectResponse(url=checkout_url, status_code=302)
-                return {"checkout_url": checkout_url, "message": "Email already verified — redirecting to checkout."}
+                    logger.error(f"[VERIFY-EMAIL] Stripe checkout failed on retry: {err}")
+                    return RedirectResponse(url=_ERROR_REDIRECT, status_code=302)
+                return RedirectResponse(url=checkout_url, status_code=302)
             logger.warning(
                 f"[VERIFY-EMAIL] FAIL bucket=ALREADY_USED "
                 f"user={old_token_doc['user_id']} preview={safe_preview}"
@@ -328,13 +305,13 @@ async def _verify_email_with_token(
                 f"[VERIFY-EMAIL] FAIL bucket=NOT_FOUND "
                 f"preview={safe_preview}"
             )
-        return _error("Invalid or expired verification token. Please request a new one.")
+        return RedirectResponse(url=_ERROR_REDIRECT, status_code=302)
 
     # ── Step 3: mark the user as verified ────────────────────────────────
     user = await get_user_by_id(db, user_id)
     if not user:
         logger.warning(f"[VERIFY-EMAIL] FAIL bucket=USER_MISMATCH user_id={user_id}")
-        return _error("User account not found")
+        return RedirectResponse(url=_ERROR_REDIRECT, status_code=302)
 
     await update_user(db, user_id, {"email_verified": True})
     logger.info(
@@ -345,14 +322,13 @@ async def _verify_email_with_token(
     # ── Step 4: send welcome email ───────────────────────────────────────
     background_tasks.add_task(send_welcome_email, user["email"], user.get("name"))
 
-    # ── Step 5: Stripe Customer + Checkout Session → redirect ────────────
+    # ── Step 5: Stripe Customer + Checkout Session → 302 redirect ────────
     checkout_url, err = await _create_stripe_checkout_for_user(db, user_id, user)
     if err:
-        return _error(err)
+        logger.error(f"[VERIFY-EMAIL] Stripe checkout creation failed: {err}")
+        return RedirectResponse(url=_ERROR_REDIRECT, status_code=302)
 
-    if is_get:
-        return RedirectResponse(url=checkout_url, status_code=302)
-    return {"checkout_url": checkout_url, "message": "Email verified — redirecting to checkout."}
+    return RedirectResponse(url=checkout_url, status_code=302)
 
 
 class ResendVerificationRequest(BaseModel):
