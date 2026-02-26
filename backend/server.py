@@ -4473,10 +4473,18 @@ async def get_route_by_id(route_id: str):
 @geocode_router.post("")
 async def geocode(location: str):
     """Geocode a location string."""
+    logger.info("Geocode request location=%s", location)
     require_mapbox_token()
     coords = await geocode_location(location)
     if not coords:
+        logger.warning("Geocode not found location=%s", location)
         raise HTTPException(status_code=404, detail="Location not found")
+    logger.info(
+        "Geocode success location=%s lat=%.5f lon=%.5f",
+        location,
+        coords.get("lat", 0.0),
+        coords.get("lon", 0.0),
+    )
     return coords
 
 @geocode_router.get("/autocomplete")
@@ -4485,6 +4493,7 @@ async def autocomplete_location(query: str, limit: int = 5):
     if not query or len(query) < 2:
         return []
 
+    logger.info("Autocomplete start query=%s limit=%s", query, limit)
     require_mapbox_token()
     
     try:
@@ -4498,6 +4507,9 @@ async def autocomplete_location(query: str, limit: int = 5):
                 'limit': limit
             }
             response = await client.get(url, params=params)
+            logger.info(
+                "Autocomplete response status=%s query=%s", response.status_code, query
+            )
             response.raise_for_status()
             data = response.json()
             
@@ -4520,7 +4532,13 @@ async def autocomplete_location(query: str, limit: int = 5):
                     'coordinates': feature.get('center', []),
                 })
             
+            logger.info("Autocomplete success query=%s suggestions=%s", query, len(suggestions))
             return suggestions
+    except httpx.HTTPStatusError as exc:  # noqa: BLE001
+        body = exc.response.text[:200] if exc.response is not None else ""
+        status = exc.response.status_code if exc.response is not None else "?"
+        logger.warning("Autocomplete HTTP error status=%s query=%s body=%s", status, query, body)
+        raise
     except HTTPException:
         raise
     except Exception as e:
@@ -5174,6 +5192,13 @@ async def predict_cell_probability(request: ConnectivityCellRequest):
 async def search_casinos(request: OvernightSearchRequest):
     """Casino search — Google Places ONLY (no Overpass fallback)."""
 
+    logger.info(
+        "Casino search start lat=%.4f lon=%.4f radius_miles=%.2f",
+        request.latitude,
+        request.longitude,
+        request.radius_miles,
+    )
+
     if not GOOGLE_PLACES_API_KEY:
         logger.warning("Casino search skipped: GOOGLE_PLACES_API_KEY not configured")
         return OvernightSearchResponse(
@@ -5204,6 +5229,12 @@ async def search_casinos(request: OvernightSearchRequest):
             return result
 
         # No results from Places: return empty set with clear message
+        logger.info(
+            "Casino Places zero results lat=%.4f lon=%.4f radius_miles=%.2f",
+            request.latitude,
+            request.longitude,
+            request.radius_miles,
+        )
         return OvernightSearchResponse(
             spots=[],
             is_premium_locked=False,
@@ -5213,7 +5244,14 @@ async def search_casinos(request: OvernightSearchRequest):
         )
 
     except HTTPException as he:
-        logger.warning("Casino Google Places failed with HTTP %s: %s", he.status_code, he.detail)
+        logger.warning(
+            "Casino Google Places failed with HTTP %s: %s lat=%.4f lon=%.4f radius_miles=%.2f",
+            he.status_code,
+            he.detail,
+            request.latitude,
+            request.longitude,
+            request.radius_miles,
+        )
         return OvernightSearchResponse(
             spots=[],
             is_premium_locked=False,
@@ -5222,7 +5260,13 @@ async def search_casinos(request: OvernightSearchRequest):
             error=he.detail,
         )
     except Exception as exc:
-        logger.warning("Casino Google Places exception: %s", exc)
+        logger.warning(
+            "Casino Google Places exception: %s lat=%.4f lon=%.4f radius_miles=%.2f",
+            exc,
+            request.latitude,
+            request.longitude,
+            request.radius_miles,
+        )
         return OvernightSearchResponse(
             spots=[],
             is_premium_locked=False,
@@ -6917,6 +6961,14 @@ async def _search_casino_google_places(request: OvernightSearchRequest) -> List[
     Returns real casino names, addresses, ratings and open_now status.
     Falls back to empty list on quota / billing errors so Overpass can take over.
     """
+    request_id = uuid.uuid4().hex[:8]
+    logger.info(
+        "Casino Places request id=%s lat=%.4f lon=%.4f radius_miles=%.2f",
+        request_id,
+        request.latitude,
+        request.longitude,
+        request.radius_miles,
+    )
     radius_meters = min(80000.0, float(request.radius_miles * 1609.34))
     url = "https://places.googleapis.com/v1/places:searchNearby"
     body = {
@@ -6941,19 +6993,30 @@ async def _search_casino_google_places(request: OvernightSearchRequest) -> List[
         ),
     }
 
+    logger.info(
+        "Casino Places request body id=%s body=%s",
+        request_id,
+        body,
+    )
+
     try:
         async with httpx.AsyncClient(timeout=12.0) as client:
             resp = await client.post(url, headers=headers, json=body)
+        logger.info(
+            "Casino Places response status=%s id=%s", resp.status_code, request_id
+        )
+        logger.info("Casino Places raw response id=%s body=%s", request_id, resp.text)
     except Exception as exc:
-        logger.warning("Casino Google Places request failed: %s", exc)
+        logger.warning("Casino Google Places request failed id=%s error=%s", request_id, exc)
         raise HTTPException(status_code=503, detail="Casino search temporarily unavailable")
 
     # Quota / billing errors – log with detail so ops can react; return 503
     if resp.status_code in (403, 429):
         body_text = resp.text[:300]
         logger.error(
-            "Casino Google Places quota/billing error status=%s body=%s",
+            "Casino Google Places quota/billing error status=%s id=%s body=%s",
             resp.status_code,
+            request_id,
             body_text,
         )
         raise HTTPException(
@@ -6965,14 +7028,33 @@ async def _search_casino_google_places(request: OvernightSearchRequest) -> List[
             ),
         )
     if resp.status_code >= 400:
-        logger.warning("Casino Google Places HTTP error %s: %s", resp.status_code, resp.text[:200])
+        logger.warning(
+            "Casino Google Places HTTP error %s id=%s body=%s",
+            resp.status_code,
+            request_id,
+            resp.text[:200],
+        )
         raise HTTPException(status_code=503, detail="Casino search service error")
 
     try:
         payload = resp.json()
     except Exception:
-        logger.warning("Casino Google Places bad JSON: %s", resp.text[:200])
+        logger.warning(
+            "Casino Google Places bad JSON id=%s body=%s",
+            request_id,
+            resp.text[:200],
+        )
         raise HTTPException(status_code=503, detail="Casino search service error")
+
+    google_status = payload.get("status") or (payload.get("error") or {}).get("status")
+    error_message = (payload.get("error") or {}).get("message")
+    logger.info(
+        "Casino Places payload id=%s gstatus=%s error=%s places=%s",
+        request_id,
+        google_status or "OK",
+        error_message,
+        len(payload.get("places") or []),
+    )
 
     places = payload.get("places") or []
     stops: List[OvernightStop] = []
@@ -7024,7 +7106,8 @@ async def _search_casino_google_places(request: OvernightSearchRequest) -> List[
 
     stops.sort(key=lambda x: x.distance_miles)
     logger.info(
-        "Casino Google Places ok lat=%.3f lon=%.3f radius_mi=%s results=%d",
+        "Casino Google Places ok id=%s lat=%.3f lon=%.3f radius_mi=%s results=%d",
+        request_id,
         request.latitude,
         request.longitude,
         request.radius_miles,
