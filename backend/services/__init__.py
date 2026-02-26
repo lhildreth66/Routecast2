@@ -11,7 +11,7 @@ from .auth_service import (
 
 from .email_service import (
     send_verification_email, send_password_reset_email,
-    send_welcome_email, send_subscription_confirmation_email
+    send_trial_started_email, send_subscription_confirmation_email
 )
 
 from .subscription_service import (

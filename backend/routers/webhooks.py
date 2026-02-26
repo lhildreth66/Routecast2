@@ -246,6 +246,19 @@ async def handle_checkout_completed(db, data: dict, now: datetime):
         "timestamp": now
     })
 
+    # ── Send "You're All Set" email (idempotent — only once) ─────────────
+    if not user.get("welcome_email_sent_at"):
+        try:
+            from services.email_service import send_trial_started_email
+            send_trial_started_email(user["email"], user.get("name"), plan)
+            await db.users.update_one(
+                {"user_id": user_id},
+                {"$set": {"welcome_email_sent_at": now}}
+            )
+            logger.info(f"[STRIPE] Trial-started email sent for user={user_id}")
+        except Exception as e:
+            logger.error(f"[STRIPE] Failed to send trial-started email for user={user_id}: {e}")
+
 
 async def handle_subscription_created(db, data: dict, now: datetime):
     """Handle customer.subscription.created"""
@@ -283,6 +296,22 @@ async def handle_subscription_created(db, data: dict, now: datetime):
             }}
         )
         logger.info(f"Subscription activated for user {user_id}: {plan}")
+
+        # ── Send "You're All Set" email (idempotent — only once) ─────────
+        # Re-read user to pick up any welcome_email_sent_at set by
+        # handle_checkout_completed which may have already fired.
+        refreshed = await db.users.find_one({"user_id": user_id})
+        if refreshed and not refreshed.get("welcome_email_sent_at"):
+            try:
+                from services.email_service import send_trial_started_email
+                send_trial_started_email(refreshed["email"], refreshed.get("name"), plan)
+                await db.users.update_one(
+                    {"user_id": user_id},
+                    {"$set": {"welcome_email_sent_at": now}}
+                )
+                logger.info(f"[STRIPE] Trial-started email sent (sub_created) for user={user_id}")
+            except Exception as e:
+                logger.error(f"[STRIPE] Failed to send trial-started email (sub_created) for user={user_id}: {e}")
 
 
 async def handle_subscription_updated(db, data: dict, now: datetime):

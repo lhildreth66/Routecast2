@@ -159,9 +159,15 @@ def send_password_reset_email(email: str, token: str, name: Optional[str] = None
     return _send_email(email, "Reset your RouteCast password", html_content)
 
 
-def send_welcome_email(email: str, name: Optional[str] = None) -> bool:
-    """Send welcome email after verification"""
+def send_trial_started_email(email: str, name: Optional[str] = None, plan: str = "monthly") -> bool:
+    """Send 'You're All Set' email ONLY after Stripe confirms trial/subscription.
+
+    This must NOT be called on email verification alone — only when
+    the user has actually completed checkout and has an active or trialing
+    subscription.
+    """
     greeting = f"Hi {name}," if name else "Hi there,"
+    plan_label = "Annual" if plan == "yearly" else "Monthly"
 
     html_content = f"""
     <!DOCTYPE html>
@@ -186,7 +192,7 @@ def send_welcome_email(email: str, name: Optional[str] = None) -> bool:
             </div>
             <div class="content">
                 <p>{greeting}</p>
-                <p>Your email is verified and your RouteCast account is ready to go! Here's what you can do:</p>
+                <p>Your 7-day free trial has started on the <strong>{plan_label}</strong> plan. You have full access to every premium feature — no charges until your trial ends.</p>
 
                 <div class="feature">
                     <span class="feature-icon">🌦️</span>
@@ -207,7 +213,7 @@ def send_welcome_email(email: str, name: Optional[str] = None) -> bool:
                 <div class="feature">
                     <span class="feature-icon">🚛</span>
                     <div>
-                        <strong>Trucker Features</strong>
+                        <strong>Trucker &amp; RV Features</strong>
                         <p style="margin: 5px 0; color: #6b7280;">Bridge clearances, truck stops, and more for commercial drivers.</p>
                     </div>
                 </div>
@@ -215,9 +221,11 @@ def send_welcome_email(email: str, name: Optional[str] = None) -> bool:
                 <p style="text-align: center;">
                     <a href="{FRONTEND_URL}" class="button">Open RouteCast</a>
                 </p>
+
+                <p style="color: #6b7280; font-size: 14px; text-align: center;">Need to change plans? Go to Settings &gt; Manage Subscription in the app.</p>
             </div>
             <div class="footer">
-                <p>© 2025 RouteCast Weather. All rights reserved.</p>
+                <p>&copy; 2025 RouteCast Weather. All rights reserved.</p>
                 <p>Questions? Contact us at support@routecast.com</p>
             </div>
         </div>
@@ -225,7 +233,7 @@ def send_welcome_email(email: str, name: Optional[str] = None) -> bool:
     </html>
     """
 
-    return _send_email(email, "Welcome to RouteCast! 🌦️", html_content)
+    return _send_email(email, "Your RouteCast trial has started! 🚀", html_content)
 
 
 def send_subscription_confirmation_email(email: str, plan: str, name: Optional[str] = None) -> bool:

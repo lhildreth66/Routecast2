@@ -30,7 +30,7 @@ from services.auth_service import (
     authenticate_user
 )
 from services.email_service import (
-    send_verification_email, send_password_reset_email, send_welcome_email
+    send_verification_email, send_password_reset_email
 )
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -334,10 +334,10 @@ async def _verify_email_with_token(
         f"email={user.get('email', 'unknown')}"
     )
 
-    # ── Step 4: send welcome email ───────────────────────────────────────
-    background_tasks.add_task(send_welcome_email, user["email"], user.get("name"))
-
-    # ── Step 5: Stripe Customer + Checkout Session → 302 redirect ────────
+    # ── Step 4: Stripe Customer + Checkout Session → 302 redirect ────────
+    # NOTE: The "You're All Set" welcome email is NOT sent here.
+    # It is sent later by the Stripe webhook (checkout.session.completed)
+    # after the user has actually completed payment/trial signup.
     checkout_url, err = await _create_stripe_checkout_for_user(db, user_id, user)
     if err:
         logger.error(f"[VERIFY-EMAIL] Stripe checkout creation failed: {err}")
