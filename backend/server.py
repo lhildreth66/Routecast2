@@ -6970,18 +6970,16 @@ async def _search_casino_google_places(request: OvernightSearchRequest) -> List[
         request.radius_miles,
     )
     radius_meters = min(float(request.radius_miles * 1609.34), 50000.0)
-    url = "https://places.googleapis.com/v1/places:searchNearby"
+    url = "https://places.googleapis.com/v1/places:searchText"
     body = {
-        "locationRestriction": {
+        "textQuery": "casino",
+        "maxResultCount": 20,
+        "locationBias": {
             "circle": {
                 "center": {"latitude": request.latitude, "longitude": request.longitude},
                 "radius": float(radius_meters),
             }
         },
-        "includedTypes": ["casino"],
-        "maxResultCount": 20,
-        "rankPreference": "DISTANCE",
-        "languageCode": "en",
     }
     headers = {
         "Content-Type": "application/json",
@@ -7066,8 +7064,12 @@ async def _search_casino_google_places(request: OvernightSearchRequest) -> List[
         if lat is None or lon is None:
             continue
 
+        display_name_text = (place.get("displayName") or {}).get("text") or ""
+        if "casino" not in display_name_text.lower():
+            continue
+
         distance_miles = _haversine_meters(request.latitude, request.longitude, lat, lon) * 0.000621371
-        display_name = (place.get("displayName") or {}).get("text") or "Casino"
+        display_name = display_name_text or "Casino"
         address = place.get("formattedAddress")
         phone = place.get("nationalPhoneNumber")
         website = place.get("websiteUri")
