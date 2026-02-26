@@ -58,7 +58,7 @@ export default function WelcomeScreen() {
         await loginWithTokens(access_token, refresh_token);
 
         // Navigate to the main app
-        router.replace('/(tabs)' as any);
+        router.replace('/' as any);
       } catch (err: any) {
         console.error('[welcome] activation error:', err);
         setError(err.message || 'Something went wrong. Please try again.');

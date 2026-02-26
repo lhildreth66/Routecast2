@@ -639,7 +639,7 @@ async def customer_portal(request: Request, current_user: dict = Depends(get_cur
     try:
         session = stripe_module.billing_portal.Session.create(
             customer=customer_id,
-            return_url=f"{FRONTEND_URL}/(tabs)",
+            return_url=f"{FRONTEND_URL}/",
         )
         return {"url": session.url}
     except Exception as e:

@@ -11,6 +11,7 @@ const PAYWALL_OPEN_ROUTES = new Set([
   '/login', '/signup', '/verify-email', '/subscription',
   '/landing', '/terms', '/privacy', '/contact',
   '/forgot-password', '/reset-password',
+  '/welcome',   // post-Stripe activation page (issues JWT before redirect)
   '/account',   // users need account access to manage billing / cancel
 ]);
 
