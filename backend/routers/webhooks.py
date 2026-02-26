@@ -264,7 +264,7 @@ async def handle_subscription_created(db, data: dict, now: datetime):
     
     # Only activate if status is active or trialing
     if status in ["active", "trialing"]:
-        if plan == "annual":
+        if plan == "yearly":
             expiration = now + timedelta(days=365)
         else:
             expiration = now + timedelta(days=30)

@@ -73,7 +73,7 @@ export default function SignupScreen() {
     setLoading(false);
 
     if (result.success) {
-      router.replace('/verify-email');
+      router.replace({ pathname: '/verify-email', params: { email: email.trim() } });
     } else {
       setError(result.error || 'Signup failed');
     }

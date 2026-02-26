@@ -1,13 +1,18 @@
 """
 Authentication Router for RouteCast
-Handles signup, login, email verification, password reset, and user profile
+Handles signup, login, email verification, password reset, and user profile.
+
+Flow:  signup → verify-email (302 → Stripe Checkout) → /welcome (activate + JWT)
 """
 from fastapi import APIRouter, HTTPException, Depends, Header, Request, BackgroundTasks
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
+from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timedelta, timezone
+from urllib.parse import quote as urlquote
 import logging
 import os
+import stripe as stripe_module
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +35,18 @@ from services.email_service import (
 )
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+
+# ── Stripe config ────────────────────────────────────────────────────────────
+STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "")
+STRIPE_PRICE_MONTHLY = os.environ.get("STRIPE_PRICE_MONTHLY", "")
+FRONTEND_URL = (
+    os.environ.get("FRONTEND_URL")
+    or os.environ.get("APP_URL")
+    or "https://routecastweather.com"
+)
+
+if STRIPE_API_KEY:
+    stripe_module.api_key = STRIPE_API_KEY
 
 
 async def get_current_user(authorization: Optional[str] = Header(None)):
@@ -61,13 +78,17 @@ def get_db(request: Request):
     return request.app.state.db
 
 
-@router.post("/signup", response_model=TokenResponse)
+@router.post("/signup")
 async def signup(
     user_data: UserCreate,
     background_tasks: BackgroundTasks,
     request: Request
 ):
-    """Register a new user"""
+    """Register a new user.
+
+    Creates the account as *pending verification* and sends a verification
+    email.  Does **not** log the user in — no JWT tokens are returned.
+    """
     try:
         db = get_db(request)
 
@@ -87,15 +108,9 @@ async def signup(
             user_data.name
         )
 
-        access_token, refresh_token, expires_in = create_tokens(user["user_id"], user["email"])
-
         return JSONResponse(
             status_code=201,
-            content={
-                "access_token": access_token,
-                "refresh_token": refresh_token,
-                "expires_in": expires_in,
-            },
+            content={"message": "Check your email to verify your account."},
         )
     except HTTPException as e:
         return JSONResponse(status_code=e.status_code, content={"detail": e.detail})
@@ -155,7 +170,11 @@ async def verify_email(
     background_tasks: BackgroundTasks,
     request: Request
 ):
-    """Verify email address with token (POST — called by the SPA frontend)."""
+    """Verify email via POST (SPA fallback).
+
+    Returns JSON with ``checkout_url`` so the frontend can redirect the user
+    to Stripe Checkout.
+    """
     token = (data.token or "").strip()
     return await _verify_email_with_token(token, background_tasks, request, source="POST_body")
 
@@ -170,15 +189,63 @@ async def verify_email_get(
     token: Optional[str] = FastQuery(None, alias="token"),
     t: Optional[str] = FastQuery(None, alias="t"),
 ):
-    """Verify email address with token via GET query param.
+    """Verify email via GET — primary path triggered by clicking the link.
 
-    Accepts ``?token=...`` or ``?t=...``.  This route exists so that:
-    - Users who paste the link into a browser bar get verified directly.
-    - Email-security scanners that prefetch links via GET don't break the flow
-      (the token is consumed but the user is already verified).
+    On success: creates a Stripe Customer + Checkout Session and returns
+    an HTTP 302 redirect to the Stripe-hosted checkout page.
+    On failure: 302 redirect back to the frontend with an ``error`` query
+    param so the page can show a friendly message.
     """
     raw = (token or t or "").strip()
     return await _verify_email_with_token(raw, background_tasks, request, source="GET_query")
+
+
+# ── Helper: create Stripe Checkout and return 302 or JSON ────────────────────
+
+async def _create_stripe_checkout_for_user(db, user_id: str, user: dict):
+    """Create a Stripe Customer (if needed) and Checkout Session.
+
+    Returns ``(checkout_url, error_message)``.
+    """
+    email = user["email"]
+    name = user.get("name")
+    customer_id = user.get("stripe_customer_id")
+
+    try:
+        # Re-use existing Stripe customer if present (idempotent retry)
+        if not customer_id:
+            customer = stripe_module.Customer.create(
+                email=email,
+                name=name,
+                metadata={"user_id": user_id, "email": email},
+            )
+            customer_id = customer.id
+            await update_user(db, user_id, {"stripe_customer_id": customer_id})
+            logger.info(f"[VERIFY] Stripe customer created: {customer_id} for user={user_id}")
+
+        price_id = STRIPE_PRICE_MONTHLY
+        if not price_id:
+            logger.error("[VERIFY] STRIPE_PRICE_MONTHLY not configured")
+            return None, "Billing is not configured. Please contact support."
+
+        session = stripe_module.checkout.Session.create(
+            customer=customer_id,
+            mode="subscription",
+            line_items=[{"price": price_id, "quantity": 1}],
+            subscription_data={"trial_period_days": 7},
+            payment_method_collection="always",
+            success_url=f"{FRONTEND_URL}/welcome?session_id={{CHECKOUT_SESSION_ID}}",
+            cancel_url=f"{FRONTEND_URL}/signup",
+        )
+        logger.info(f"[VERIFY] Checkout session created: {session.id} for user={user_id}")
+        return session.url, None
+
+    except stripe_module.error.StripeError as e:
+        logger.error(f"[VERIFY] Stripe error for user={user_id}: {e}")
+        return None, "Unable to start checkout. Please try again later."
+    except Exception as e:
+        logger.error(f"[VERIFY] Unexpected error creating checkout for user={user_id}: {e}")
+        return None, "Unable to start checkout. Please try again later."
 
 
 async def _verify_email_with_token(
@@ -187,10 +254,23 @@ async def _verify_email_with_token(
     request: Request,
     source: str = "unknown",
 ):
-    """Shared verify-email logic used by both GET and POST handlers."""
-    db = get_db(request)
+    """Shared verify-email logic used by both GET and POST handlers.
 
-    # ── Step 1: diagnostic logging (always) ──────────────────────────────
+    GET requests → ``RedirectResponse`` (302 → Stripe or 302 → error page).
+    POST requests → JSON (``checkout_url`` on success, ``detail`` on error).
+    """
+    db = get_db(request)
+    is_get = source == "GET_query"
+
+    def _error(msg: str, status: int = 400):
+        if is_get:
+            return RedirectResponse(
+                url=f"{FRONTEND_URL}/verify-email?error={urlquote(msg)}",
+                status_code=302,
+            )
+        raise HTTPException(status_code=status, detail=msg)
+
+    # ── Step 1: diagnostic logging ───────────────────────────────────────
     safe_preview = f"{token[:6]}...{token[-6:]}" if len(token) >= 12 else "<short>"
     logger.info(
         f"[VERIFY-EMAIL] request path={request.url.path} "
@@ -204,12 +284,13 @@ async def _verify_email_with_token(
 
     if not token:
         logger.warning("[VERIFY-EMAIL] FAIL bucket=MISSING — no token supplied")
-        raise HTTPException(status_code=400, detail="Verification token is required")
+        return _error("Verification token is required")
 
     # ── Step 2: consume the token ────────────────────────────────────────
     user_id = await verify_and_consume_token(db, token, "email_verification")
+
     if not user_id:
-        # ── Idempotency: already-consumed token for an already-verified user ─
+        # ── Idempotency: already-consumed token → retry checkout ─────────
         old_token_doc = await db.verification_tokens.find_one({
             "token": token,
             "token_type": "email_verification",
@@ -218,17 +299,24 @@ async def _verify_email_with_token(
             existing_user = await get_user_by_id(db, old_token_doc["user_id"])
             if existing_user and existing_user.get("email_verified"):
                 logger.info(
-                    f"[VERIFY-EMAIL] idempotent — already verified "
+                    f"[VERIFY-EMAIL] idempotent retry — already verified "
                     f"user={old_token_doc['user_id']}"
                 )
-                return {"message": "Email already verified"}
-            # Token was used but user still isn't verified (edge case): log and reject
+                # Already verified — create a new checkout session so the
+                # user can retry if they closed the Stripe tab.
+                checkout_url, err = await _create_stripe_checkout_for_user(
+                    db, old_token_doc["user_id"], existing_user,
+                )
+                if err:
+                    return _error(err)
+                if is_get:
+                    return RedirectResponse(url=checkout_url, status_code=302)
+                return {"checkout_url": checkout_url, "message": "Email already verified — redirecting to checkout."}
             logger.warning(
                 f"[VERIFY-EMAIL] FAIL bucket=ALREADY_USED "
                 f"user={old_token_doc['user_id']} preview={safe_preview}"
             )
         elif old_token_doc:
-            # Token exists but is expired
             logger.warning(
                 f"[VERIFY-EMAIL] FAIL bucket=EXPIRED "
                 f"user={old_token_doc.get('user_id')} "
@@ -240,13 +328,13 @@ async def _verify_email_with_token(
                 f"[VERIFY-EMAIL] FAIL bucket=NOT_FOUND "
                 f"preview={safe_preview}"
             )
-        raise HTTPException(status_code=400, detail="Invalid or expired verification token")
+        return _error("Invalid or expired verification token. Please request a new one.")
 
     # ── Step 3: mark the user as verified ────────────────────────────────
     user = await get_user_by_id(db, user_id)
     if not user:
-        logger.warning(f"[VERIFY-EMAIL] FAIL bucket=USER_MISMATCH user_id={user_id} — user not found")
-        raise HTTPException(status_code=400, detail="User account not found")
+        logger.warning(f"[VERIFY-EMAIL] FAIL bucket=USER_MISMATCH user_id={user_id}")
+        return _error("User account not found")
 
     await update_user(db, user_id, {"email_verified": True})
     logger.info(
@@ -254,61 +342,153 @@ async def _verify_email_with_token(
         f"email={user.get('email', 'unknown')}"
     )
 
-    # Send welcome email
-    background_tasks.add_task(
-        send_welcome_email,
-        user["email"],
-        user.get("name")
-    )
+    # ── Step 4: send welcome email ───────────────────────────────────────
+    background_tasks.add_task(send_welcome_email, user["email"], user.get("name"))
 
-    return {"message": "Email verified successfully"}
+    # ── Step 5: Stripe Customer + Checkout Session → redirect ────────────
+    checkout_url, err = await _create_stripe_checkout_for_user(db, user_id, user)
+    if err:
+        return _error(err)
+
+    if is_get:
+        return RedirectResponse(url=checkout_url, status_code=302)
+    return {"checkout_url": checkout_url, "message": "Email verified — redirecting to checkout."}
+
+
+class ResendVerificationRequest(BaseModel):
+    email: str
 
 
 @router.post("/resend-verification")
 async def resend_verification(
+    body: ResendVerificationRequest,
     background_tasks: BackgroundTasks,
     request: Request,
-    current_user: dict = Depends(get_current_user)
 ):
-    """Resend email verification link. Invalidates any previous unused tokens
-    so only the freshly-sent link is valid."""
+    """Resend email verification link.
+
+    Does **not** require authentication (the user is not logged in after
+    signup).  Accepts ``email`` in the request body and always returns the
+    same message to prevent email enumeration.
+    """
     db = get_db(request)
+    email = (body.email or "").strip().lower()
 
-    user_id = current_user.get("sub")
-    user = await get_user_by_id(db, user_id)
+    if not email:
+        raise HTTPException(status_code=400, detail="Email is required")
 
+    user = await get_user_by_email(db, email)
+
+    if user and not user.get("email_verified"):
+        user_id = user["user_id"]
+
+        # Invalidate all previous unused verification tokens for this user
+        now = datetime.now(timezone.utc)
+        invalidated = await db.verification_tokens.update_many(
+            {"user_id": user_id, "token_type": "email_verification", "used": False},
+            {"$set": {"used": True, "invalidated_by_resend": True, "invalidated_at": now}},
+        )
+        logger.info(
+            f"[RESEND-VERIFY] user_id={user_id} invalidated {invalidated.modified_count} old token(s)"
+        )
+
+        verification_token = generate_verification_token()
+        await store_verification_token(db, user_id, verification_token, "email_verification", 24)
+
+        background_tasks.add_task(
+            send_verification_email,
+            user["email"],
+            verification_token,
+            user.get("name"),
+        )
+
+    # Always return same message — prevents email enumeration
+    return {
+        "message": "If that email is registered and unverified, a new verification link has been sent.",
+    }
+
+
+# ── Welcome endpoint — post-Stripe activation ───────────────────────────────
+
+
+class WelcomeRequest(BaseModel):
+    session_id: str
+
+
+@router.post("/welcome")
+async def welcome(body: WelcomeRequest, request: Request):
+    """Validate a Stripe Checkout session, activate the user's trial
+    subscription, and return JWT tokens (first login).
+
+    Called by the ``/welcome`` frontend page after Stripe redirects back.
+    """
+    db = get_db(request)
+    session_id = (body.session_id or "").strip()
+
+    if not session_id:
+        raise HTTPException(status_code=400, detail="session_id is required")
+
+    # ── Retrieve checkout session from Stripe ────────────────────────────
+    try:
+        session = stripe_module.checkout.Session.retrieve(session_id)
+    except stripe_module.error.StripeError as e:
+        logger.error(f"[WELCOME] Stripe session retrieve failed: {e}")
+        raise HTTPException(status_code=400, detail="Invalid checkout session")
+
+    customer_id = session.get("customer")
+    subscription_id = session.get("subscription")
+
+    if not customer_id:
+        raise HTTPException(status_code=400, detail="No customer associated with this session")
+
+    # ── Find user by stripe_customer_id ──────────────────────────────────
+    user = await db.users.find_one({"stripe_customer_id": customer_id})
     if not user:
-        raise HTTPException(status_code=404, detail="User not found")
+        # Fallback: try customer_email
+        email = session.get("customer_email") or session.get("customer_details", {}).get("email")
+        if email:
+            user = await get_user_by_email(db, email.lower())
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found for this checkout session")
 
-    if user.get("email_verified"):
-        raise HTTPException(status_code=400, detail="Email already verified")
+    user_id = user["user_id"]
 
-    # Invalidate all previous unused verification tokens for this user so old
-    # links stop working immediately.  The user is warned in the response.
+    # ── Activate trial subscription (idempotent) ─────────────────────────
     now = datetime.now(timezone.utc)
-    invalidated = await db.verification_tokens.update_many(
-        {"user_id": user_id, "token_type": "email_verification", "used": False},
-        {"$set": {"used": True, "invalidated_by_resend": True, "invalidated_at": now}},
-    )
-    logger.info(
-        f"[RESEND-VERIFY] user_id={user_id} invalidated {invalidated.modified_count} old token(s)"
-    )
+    update_fields = {
+        "is_premium": True,
+        "subscription_status": "trialing",
+        "subscription_plan": "monthly",
+        "subscription_provider": "stripe",
+        "stripe_customer_id": customer_id,
+        "trial_used": True,
+        "trial_start": now,
+        "trial_end": now + timedelta(days=7),
+        "subscription_expiration": now + timedelta(days=7),
+    }
+    if subscription_id:
+        update_fields["stripe_subscription_id"] = subscription_id
 
-    # Generate new verification token (24-hour TTL)
-    verification_token = generate_verification_token()
-    await store_verification_token(db, user_id, verification_token, "email_verification", 24)
+    await update_user(db, user_id, update_fields)
+    logger.info(f"[WELCOME] Trial activated for user={user_id} subscription={subscription_id}")
 
-    # Send verification email
-    background_tasks.add_task(
-        send_verification_email,
-        user["email"],
-        verification_token,
-        user.get("name")
-    )
+    # ── Log the activation ───────────────────────────────────────────────
+    await db.subscription_logs.insert_one({
+        "user_id": user_id,
+        "action": "trial_activated_welcome",
+        "provider": "stripe",
+        "stripe_customer_id": customer_id,
+        "stripe_subscription_id": subscription_id,
+        "timestamp": now,
+    })
+
+    # ── Issue JWT tokens (first login) ───────────────────────────────────
+    access_token, refresh_token, expires_in = create_tokens(user_id, user["email"])
 
     return {
-        "message": "Verification email sent",
-        "note": "Only the most recent verification link will work — previous links have been invalidated.",
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "expires_in": expires_in,
     }
 
 

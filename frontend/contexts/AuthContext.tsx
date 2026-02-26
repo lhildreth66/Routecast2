@@ -93,6 +93,7 @@ interface AuthContextType extends AuthState {
   isPremium: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   signup: (email: string, password: string, name?: string) => Promise<{ success: boolean; error?: string }>;
+  loginWithTokens: (accessToken: string, refreshToken: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   refreshAccessToken: () => Promise<boolean>;
@@ -254,6 +255,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   // ── signup ────────────────────────────────────────────────────────────────
+  // Creates user account and sends verification email.
+  // Does NOT log the user in — no tokens are returned from the backend.
   const signup = async (
     email: string,
     password: string,
@@ -279,15 +282,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return { success: false, error: message || 'Signup failed. Please try again.' };
       }
 
-      const { access_token, refresh_token } = data;
-      if (!access_token || !refresh_token) {
-        return { success: false, error: 'Signup failed. Please try again.' };
-      }
-
-      await persistTokens(access_token, refresh_token);
-      setAuthState({ accessToken: access_token, refreshToken: refresh_token });
-      await fetchUserProfile(access_token);
-
+      // Backend returns 201 with a message — no tokens.
+      // User must verify email → Stripe checkout → /welcome before logging in.
       return { success: true };
     } catch (err: any) {
       const message = typeof err?.message === 'string' ? err.message : 'Signup failed. Please try again.';
@@ -304,6 +300,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.warn('[auth] error clearing tokens during logout:', err);
     }
     setAuthState({ user: null, accessToken: null, refreshToken: null });
+  };
+
+  // ── loginWithTokens — used by /welcome after Stripe checkout ──────────────
+  const loginWithTokens = async (at: string, rt: string): Promise<void> => {
+    await persistTokens(at, rt);
+    setAuthState({ accessToken: at, refreshToken: rt });
+    await fetchUserProfile(at);
   };
 
   // ── refreshUser – EXPLICIT call only, never automatic ─────────────────────
@@ -356,6 +359,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     isPremium: user?.is_premium ?? false,
     login,
     signup,
+    loginWithTokens,
     logout,
     refreshUser,
     refreshAccessToken,
