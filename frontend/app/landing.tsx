@@ -195,6 +195,24 @@ export default function LandingPage() {
           </View>
         </View>
 
+        {/* How It Works Video */}
+        <View style={styles.videoSection}>
+          <Text style={styles.videoTitle}>How RouteCast Works</Text>
+          <Text style={styles.videoSubtitle}>
+            Watch this quick walkthrough to see how to use RouteCast and plan safer drives with weather ahead of you.
+          </Text>
+          <View style={styles.videoContainer}>
+            <iframe
+              src="https://www.youtube.com/embed/fS-wJRoVlzc?rel=0"
+              title="How to Use RouteCast"
+              frameBorder="0"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+              style={styles.videoIframe as any}
+            />
+          </View>
+        </View>
+
         {/* Features Section */}
         <View style={styles.featuresSection} nativeID="features">
           <Text style={styles.sectionTitle}>Everything you need for safer drives</Text>
@@ -584,6 +602,45 @@ const styles = StyleSheet.create({
   navLinkMobile: {
     fontSize: 13,
     paddingVertical: 2,
+  },
+  videoSection: {
+    paddingHorizontal: 24,
+    paddingVertical: 40,
+    alignItems: 'center',
+    backgroundColor: '#0f0f0f',
+  },
+  videoTitle: {
+    color: '#ffffff',
+    fontSize: 28,
+    fontWeight: '800',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  videoSubtitle: {
+    color: '#a1a1aa',
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 20,
+    maxWidth: 720,
+  },
+  videoContainer: {
+    position: 'relative',
+    width: '100%',
+    maxWidth: 900,
+    paddingBottom: '56.25%',
+    height: 0,
+    marginTop: 10,
+    marginBottom: 10,
+    overflow: 'hidden',
+  },
+  videoIframe: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: '100%',
+    height: '100%',
+    borderRadius: 12,
+    borderWidth: 0,
   },
   navLoginBtn: {
     backgroundColor: '#27272a',

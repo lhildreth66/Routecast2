@@ -319,6 +319,23 @@ export default function UserGuideScreen() {
       </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        {/* Tutorial Video */}
+        <View style={styles.videoBlock}>
+          <Text style={styles.videoHeading}>Watch: How to Use RouteCast in Minutes</Text>
+          <Text style={styles.videoSubtitle}>Plan your drive with weather & hazard foresight.</Text>
+          <View style={styles.howtoVideoWrapper}>
+            <iframe
+              src="https://www.youtube.com/embed/fS-wJRoVlzc?rel=0"
+              title="RouteCast Tutorial"
+              frameBorder="0"
+              loading="lazy"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+              style={styles.howtoVideoIframe as any}
+            />
+          </View>
+        </View>
+
         {/* Welcome Banner */}
         <View style={styles.welcomeBanner}>
           <View style={styles.welcomeIconRow}>
@@ -509,6 +526,35 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     padding: 16,
+  },
+  videoBlock: {
+    marginBottom: 20,
+  },
+  videoHeading: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '700',
+    marginBottom: 6,
+  },
+  videoSubtitle: {
+    color: '#9ca3af',
+    fontSize: 14,
+    marginBottom: 12,
+  },
+  howtoVideoWrapper: {
+    position: 'relative',
+    paddingBottom: '56.25%',
+    height: 0,
+    marginBottom: 24,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  howtoVideoIframe: {
+    position: 'absolute',
+    width: '100%',
+    height: '100%',
+    borderRadius: 12,
+    borderWidth: 0,
   },
   welcomeBanner: {
     backgroundColor: '#1a1a2e',
