@@ -112,12 +112,6 @@ const guideSections: GuideSection[] = [
         description: 'Receive alerts when weather conditions change significantly along your saved routes. Get warned about severe weather before you hit it.',
         tips: ['Enable notifications when prompted', 'Critical alerts for tornado/flash flood', 'Customize in device settings']
       },
-      {
-        name: 'AI Chat Assistant',
-        icon: 'chatbubbles',
-        description: 'Ask questions about your route, weather, or get travel recommendations. The AI knows your current route context.',
-        tips: ['Ask "What should I watch out for?"', 'Request rest stop recommendations', 'Get advice on best travel times', 'Tap chat bubble in bottom right']
-      }
     ]
   },
   {
@@ -476,7 +470,7 @@ export default function UserGuideScreen() {
           <View style={styles.supportInfo}>
             <Text style={styles.supportTitle}>Need Help?</Text>
             <Text style={styles.supportText}>
-              Contact support or use the AI chat for assistance with any feature.
+              Contact support for assistance with any feature.
             </Text>
           </View>
         </View>

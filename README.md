@@ -1,13 +1,13 @@
 # Routecast - Weather Along Your Route
 
-Plan your road trip with real-time weather forecasts along your route. Get alerts for bad weather and AI-powered driving recommendations.
+Plan your road trip with real-time weather forecasts along your route. Get alerts for bad weather and smarter driving recommendations.
 
 ## Tech Stack
 
 - **Frontend**: Expo (React Native) - iOS, Android, Web
 - **Backend**: FastAPI (Python)
 - **Database**: MongoDB
-- **APIs**: Mapbox (routing), NOAA (weather), Google Gemini (AI chat)
+- **APIs**: Mapbox (routing), NOAA (weather)
 
 ---
 
@@ -82,7 +82,6 @@ Frontend will be available at `http://localhost:3000` (web) or via Expo Go app (
 | `DB_NAME` | Yes | Database name |
 | `MAPBOX_ACCESS_TOKEN` | Yes | Mapbox API key for geocoding/routing |
 | `GOOGLE_PLACES_API_KEY` | Prod | Google Places Nearby for Boondockers/Walmart/Cracker Barrel; optional locally (tests mock, Overpass fallback) |
-| `GOOGLE_API_KEY` | Yes | Google API key for Gemini AI chat |
 | `NOAA_USER_AGENT` | No | User agent for NOAA API requests |
 
 ### Frontend (`/frontend/.env`)
@@ -100,11 +99,6 @@ Frontend will be available at `http://localhost:3000` (web) or via Expo Go app (
 2. Create an account or sign in
 3. Go to Access tokens
 4. Copy your default public token or create a new one
-
-### Google Gemini
-1. Go to https://makersuite.google.com/app/apikey
-2. Create an API key
-3. Copy the key to your `.env` file
 
 ### MongoDB Atlas (Optional - for cloud database)
 1. Go to https://www.mongodb.com/atlas
@@ -213,7 +207,6 @@ routecast/
 - ⚠️ **Alerts**: NWS weather alerts displayed along your route
 - 🛣️ **Road Conditions**: AI-estimated road conditions (dry, wet, icy, snow)
 - 📍 **Turn-by-Turn**: Mile markers with weather for each segment
-- 🤖 **AI Chat**: Ask driving questions powered by Google Gemini
 - 📡 **Weather Radar**: Live radar map with NWS warning overlays
 - 🔔 **Notifications**: Push notifications for severe weather (mobile)
 
@@ -227,7 +220,6 @@ routecast/
 | `/api/geocode/suggestions` | GET | Autocomplete for locations |
 | `/api/routes/history` | GET | Get recent routes |
 | `/api/routes/favorites` | GET | Get favorite routes |
-| `/api/chat` | POST | AI chat for driving questions |
 | `/api/health` | GET | Health check |
 
 ---

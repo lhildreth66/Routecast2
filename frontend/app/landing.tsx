@@ -39,20 +39,20 @@ export default function LandingPage() {
       >
         {/* Navigation Bar */}
         <View style={styles.navbar}>
-          <View style={styles.navContent}>
-            <View style={styles.logoContainer}>
+          <View style={[styles.navContent, !isWideScreen && styles.navContentMobile]}>
+            <View style={[styles.logoContainer, !isWideScreen && styles.logoContainerMobile]}>
               <MaterialCommunityIcons name="weather-lightning-rainy" size={28} color="#eab308" />
-              <Text style={styles.logoText}>RouteCast</Text>
+              <Text style={[styles.logoText, !isWideScreen && styles.logoTextMobile]}>RouteCast</Text>
             </View>
-            <View style={styles.navLinks}>
+            <View style={[styles.navLinks, !isWideScreen && styles.navLinksMobile]}>
               <TouchableOpacity onPress={() => scrollToSection('features')}>
-                <Text style={styles.navLink}>Features</Text>
+                <Text style={[styles.navLink, !isWideScreen && styles.navLinkMobile]}>Features</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={() => scrollToSection('pricing')}>
-                <Text style={styles.navLink}>Pricing</Text>
+                <Text style={[styles.navLink, !isWideScreen && styles.navLinkMobile]}>Pricing</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={() => scrollToSection('faq')}>
-                <Text style={styles.navLink}>FAQ</Text>
+                <Text style={[styles.navLink, !isWideScreen && styles.navLinkMobile]}>FAQ</Text>
               </TouchableOpacity>
               <TouchableOpacity 
                 style={styles.navLoginBtn}
@@ -540,25 +540,50 @@ const styles = StyleSheet.create({
     marginHorizontal: 'auto',
     width: '100%',
   },
+  navContentMobile: {
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
   logoContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+  },
+  logoContainerMobile: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    gap: 10,
   },
   logoText: {
     color: '#ffffff',
     fontSize: 20,
     fontWeight: '700',
   },
+  logoTextMobile: {
+    fontSize: 18,
+  },
   navLinks: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 24,
   },
+  navLinksMobile: {
+    width: '100%',
+    flexWrap: 'wrap',
+    gap: 16,
+    justifyContent: 'flex-start',
+  },
   navLink: {
     color: '#a1a1aa',
     fontSize: 14,
     fontWeight: '500',
+  },
+  navLinkMobile: {
+    fontSize: 13,
+    paddingVertical: 2,
   },
   navLoginBtn: {
     backgroundColor: '#27272a',
