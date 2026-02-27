@@ -4713,6 +4713,9 @@ async def get_checkout_session(session_id: str):
         except Exception:
             sub_status = None
 
+    if sub_status and sub_status not in {"trialing", "active"}:
+        raise HTTPException(status_code=400, detail="Subscription not active or trialing")
+
     return {
         "plan": plan,
         "status": sub_status or status,

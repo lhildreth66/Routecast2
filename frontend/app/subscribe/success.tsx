@@ -34,14 +34,24 @@ export default function SubscribeSuccess() {
         const data: SessionResult = resp.data;
         setResult(data);
 
-        // Fire conversion events only after confirmed Stripe completion (web-only inside trackEvent)
-        if (data.plan) {
+        const key = typeof window !== 'undefined' && session_id
+          ? `conversion_sent_${session_id}`
+          : null;
+        const alreadySent = key && typeof window !== 'undefined'
+          ? window.localStorage.getItem(key)
+          : null;
+
+        // Fire conversion events only once per session_id (web-only inside trackEvent)
+        if (!alreadySent && data.plan) {
           trackEvent('trial_started', { plan: data.plan });
           trackEvent('purchase', {
             plan: data.plan,
             value: data.amount ?? 0,
             currency: data.currency ?? undefined,
           });
+          if (key && typeof window !== 'undefined') {
+            window.localStorage.setItem(key, '1');
+          }
         }
       } catch (err: any) {
         setError(err?.response?.data?.detail || 'Could not verify checkout.');
