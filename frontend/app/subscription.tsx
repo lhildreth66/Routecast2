@@ -77,7 +77,6 @@ export default function SubscriptionScreen() {
         { headers: { Authorization: `Bearer ${accessToken}` } }
       );
       await refreshUser();
-      trackEvent('trial_started');
       router.replace('/');
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to start trial');

@@ -4583,6 +4583,16 @@ def _stripe_price_for_plan(plan: str) -> str:
     return price_id
 
 
+def _plan_for_price_id(price_id: str) -> Optional[str]:
+    if not price_id:
+        return None
+    if price_id == STRIPE_PRICE_MONTHLY:
+        return "monthly"
+    if price_id == STRIPE_PRICE_YEARLY:
+        return "yearly"
+    return None
+
+
 async def _create_checkout_session(plan: str, origin_url: Optional[str]):
     plan = (plan or "monthly").lower()
     logger.info(f"[CHECKOUT] _create_checkout_session: plan={plan!r}")
@@ -4593,8 +4603,8 @@ async def _create_checkout_session(plan: str, origin_url: Optional[str]):
     price_id = _stripe_price_for_plan(plan)
     base_origin = _normalize_origin(origin_url)
 
-    success_url = f"{base_origin}/subscription/success?session_id={{CHECKOUT_SESSION_ID}}"
-    cancel_url = f"{base_origin}/subscription?canceled=1"
+    success_url = f"{base_origin}/subscribe/success?session_id={{CHECKOUT_SESSION_ID}}"
+    cancel_url = f"{base_origin}/subscribe/cancel"
 
     try:
         session = await asyncio.to_thread(
@@ -4653,6 +4663,62 @@ async def subscription_checkout(
 
     session = await _create_checkout_session(request.plan, request.origin_url)
     return SubscriptionCheckoutResponse(checkout_url=session.url, session_id=session.id)
+
+
+@api_router.get("/subscription/checkout-session")
+async def get_checkout_session(session_id: str):
+    """Validate a Stripe Checkout session and return plan/status for client analytics.
+
+    Requires Stripe to confirm the session is completed; otherwise returns 400.
+    """
+    if not STRIPE_API_KEY:
+        raise HTTPException(status_code=500, detail="Stripe API key not configured")
+
+    try:
+        session = await asyncio.to_thread(
+            stripe.checkout.Session.retrieve,
+            session_id,
+            expand=["line_items.data.price", "subscription"],
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("[CHECKOUT] Failed to retrieve session %s: %s", session_id, exc)
+        raise HTTPException(status_code=400, detail="Invalid checkout session")
+
+    status = session.get("status")
+    payment_status = session.get("payment_status")
+    if status != "complete" and payment_status not in {"paid", "no_payment_required"}:
+        raise HTTPException(status_code=400, detail="Checkout not completed")
+
+    line_items = (session.get("line_items") or {}).get("data") or []
+    price_id = None
+    amount_total = session.get("amount_total")
+    currency = session.get("currency")
+    if line_items:
+        price = (line_items[0].get("price") or {})
+        price_id = price.get("id")
+        if amount_total is None:
+            amount_total = line_items[0].get("amount_total")
+        if currency is None:
+            currency = line_items[0].get("currency")
+
+    plan = _plan_for_price_id(price_id)
+    sub_status = None
+    subscription = session.get("subscription")
+    if isinstance(subscription, dict):
+        sub_status = subscription.get("status")
+    elif isinstance(subscription, str):
+        try:
+            sub_obj = await asyncio.to_thread(stripe.Subscription.retrieve, subscription)
+            sub_status = sub_obj.get("status")
+        except Exception:
+            sub_status = None
+
+    return {
+        "plan": plan,
+        "status": sub_status or status,
+        "amount": (amount_total or 0) / 100 if amount_total is not None else None,
+        "currency": currency,
+    }
 
 
 @api_router.post("/billing/verify", response_model=dict)
