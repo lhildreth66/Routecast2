@@ -1,9 +1,10 @@
-import { Stack, router, useRootNavigationState, usePathname } from 'expo-router';
+import { Stack, router, useRootNavigationState, usePathname, useGlobalSearchParams } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useRef } from 'react';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
+import ReactGA from 'react-ga4';
 
 // Routes that unpaid-but-verified users are allowed to visit.
 // Everything else redirects to /subscription (the paywall).
@@ -54,6 +55,46 @@ Notifications.setNotificationHandler({
   }),
 });
 
+const GA_MEASUREMENT_ID = 'G-BDB9KJ1SPX';
+let gaInitialized = false;
+
+function useGaPageViews() {
+  const pathname = usePathname();
+  const searchParams = useGlobalSearchParams();
+
+  // Init once on web
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    if (gaInitialized) return;
+    ReactGA.initialize(GA_MEASUREMENT_ID);
+    gaInitialized = true;
+  }, []);
+
+  // Send pageview on route changes (SPA)
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    if (!gaInitialized) return;
+
+    const usp = new URLSearchParams();
+    Object.entries(searchParams || {}).forEach(([key, value]) => {
+      if (Array.isArray(value)) {
+        value.forEach((v) => usp.append(key, v));
+      } else if (value != null) {
+        usp.set(key, value);
+      }
+    });
+
+    const query = usp.toString();
+    const page = query ? `${pathname}?${query}` : pathname;
+
+    ReactGA.send({
+      hitType: 'pageview',
+      page,
+      title: typeof document !== 'undefined' ? document.title : undefined,
+    });
+  }, [pathname, searchParams]);
+}
+
 export default function RootLayout() {
   useEffect(() => {
     // Request notification permissions
@@ -67,6 +108,8 @@ export default function RootLayout() {
     }
     requestPermissions();
   }, []);
+
+  useGaPageViews();
 
   return (
     <AuthProvider>

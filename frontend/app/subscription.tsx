@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../contexts/AuthContext';
 import axios from 'axios';
+import { trackEvent } from '../lib/analytics';
 
 const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -76,6 +77,7 @@ export default function SubscriptionScreen() {
         { headers: { Authorization: `Bearer ${accessToken}` } }
       );
       await refreshUser();
+      trackEvent('trial_started');
       router.replace('/');
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Failed to start trial');
@@ -93,6 +95,8 @@ export default function SubscriptionScreen() {
     setLaunchingPlan(planId);
     setCheckoutLoading(true);
     setError('');
+
+    trackEvent('checkout_started', { plan: planId });
 
     try {
       const origin = Platform.OS === 'web' && typeof window !== 'undefined'
