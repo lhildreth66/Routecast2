@@ -21,6 +21,7 @@ from services.subscription_service import (
     verify_apple_receipt, verify_google_receipt, handle_stripe_subscription_event,
     SUBSCRIPTION_PRICES
 )
+from services.auth_service import update_user
 from services.email_service import send_subscription_confirmation_email
 from routers.auth import get_current_user, get_db
 
@@ -32,6 +33,7 @@ router = APIRouter(prefix="/subscription", tags=["Subscription"])
 STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY")
 STRIPE_PRICE_MONTHLY = os.environ.get("STRIPE_PRICE_MONTHLY")
 STRIPE_PRICE_YEARLY  = os.environ.get("STRIPE_PRICE_YEARLY")
+FRONTEND_URL = (os.environ.get("FRONTEND_URL") or "https://routecastweather.com").rstrip("/")
 
 
 @router.get("/status", response_model=SubscriptionInfo)
@@ -294,26 +296,88 @@ async def verify_google_purchase(
     )
 
 
-@router.get("/portal")
-async def get_customer_portal(
+@router.post("/portal")
+async def create_customer_portal_session(
     request: Request,
     current_user: dict = Depends(get_current_user)
 ):
-    """Get Stripe customer portal URL for managing subscription"""
+    """Create Stripe customer portal session URL for managing subscription."""
     db = get_db(request)
     user_id = current_user.get("sub")
+    email = current_user.get("email")
+
+    if not STRIPE_API_KEY:
+        raise HTTPException(status_code=500, detail="Stripe API key not configured")
 
     user = await db.users.find_one({"user_id": user_id})
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
 
-    if not user or not user.get("stripe_customer_id"):
-        raise HTTPException(status_code=400, detail="No Stripe subscription found")
+    stripe.api_key = STRIPE_API_KEY  # type: ignore[attr-defined]
 
-    # In production, you would create a Stripe portal session
-    # For now, return a placeholder
-    return {
-        "message": "Customer portal not yet configured",
-        "portal_url": None
-    }
+    stripe_customer_id = user.get("stripe_customer_id")
+    has_stripe_subscription = (
+        user.get("subscription_provider") == "stripe"
+        or bool(user.get("stripe_subscription_id"))
+    )
+
+    if not stripe_customer_id and has_stripe_subscription:
+        try:
+            customer = await asyncio.to_thread(
+                stripe.Customer.create,  # type: ignore[attr-defined]
+                email=email,
+                name=user.get("name"),
+                metadata={"user_id": user_id, "email": email or ""},
+            )
+            stripe_customer_id = customer.id
+            await update_user(db, user_id, {"stripe_customer_id": stripe_customer_id})
+            logger.info(f"[PORTAL] Stripe customer created user={user_id} customer={stripe_customer_id}")
+        except stripe.error.StripeError as e:  # type: ignore[attr-defined]
+            logger.error(f"[PORTAL] Failed to create Stripe customer user={user_id}: {e}")
+            raise HTTPException(status_code=502, detail="Unable to create billing profile")
+
+    if not stripe_customer_id:
+        raise HTTPException(status_code=400, detail="No active subscription found")
+
+    if not user.get("stripe_subscription_id"):
+        try:
+            subs = await asyncio.to_thread(
+                stripe.Subscription.list,  # type: ignore[attr-defined]
+                customer=stripe_customer_id,
+                status="all",
+                limit=10,
+            )
+            has_active_subscription = any(
+                s.get("status") in ("active", "trialing", "past_due", "unpaid")
+                for s in (subs.get("data") or [])
+            )
+            if not has_active_subscription:
+                raise HTTPException(status_code=400, detail="No active subscription found")
+        except HTTPException:
+            raise
+        except stripe.error.StripeError as e:  # type: ignore[attr-defined]
+            logger.error(f"[PORTAL] Failed checking subscriptions user={user_id}: {e}")
+            raise HTTPException(status_code=502, detail="Unable to verify subscription")
+
+    try:
+        session = await asyncio.to_thread(
+            stripe.billing_portal.Session.create,  # type: ignore[attr-defined]
+            customer=stripe_customer_id,
+            return_url=f"{FRONTEND_URL}/account",
+        )
+        return {"url": session.url}
+    except stripe.error.InvalidRequestError as e:  # type: ignore[attr-defined]
+        logger.error(f"[PORTAL] Invalid Stripe portal configuration: {e}")
+        raise HTTPException(
+            status_code=502,
+            detail="Stripe Customer Portal is not enabled. Please contact support.",
+        )
+    except stripe.error.StripeError as e:  # type: ignore[attr-defined]
+        logger.error(f"[PORTAL] Stripe error creating portal session user={user_id}: {e}")
+        raise HTTPException(status_code=502, detail="Unable to open subscription portal")
+    except Exception as e:
+        logger.error(f"[PORTAL] Unexpected error creating portal session user={user_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to open subscription portal")
 
 
 @router.get("/plans")

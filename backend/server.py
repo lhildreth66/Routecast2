@@ -8073,112 +8073,114 @@ class TruckStopResponse(BaseModel):
 
 @api_router.post("/truck-stops/search", response_model=TruckStopResponse)
 async def search_truck_stops(request: TruckStopRequest):
-    """Find truck stops with fuel and amenities using OpenStreetMap."""
-    # TESTING: Paywalls disabled - require_premium(request.subscription_id, TRUCK_STOPS)
+    """Find truck stops using Google Places Text Search with brand-aware filtering."""
+    if not GOOGLE_PLACES_API_KEY:
+        logger.error("GOOGLE_PLACES_API_KEY missing for truck stop search")
+        raise HTTPException(status_code=503, detail="Truck stop search unavailable: missing GOOGLE_PLACES_API_KEY")
+
+    radius_meters = min(50000.0, float(request.radius_miles * 1609.34))
+    brand_keywords: List[Tuple[str, str]] = [
+        ("love's", "Love's"),
+        ("loves", "Love's"),
+        ("pilot", "Pilot"),
+        ("flying j", "Flying J"),
+        ("ta ", "TA"),
+        (" ta", "TA"),
+        ("travelcenters of america", "TA"),
+        ("petro", "Petro"),
+        ("maverik", "Maverik"),
+        ("quiktrip", "QuikTrip"),
+    ]
+    generic_truck_terms = ["truck stop", "truckstop", "travel center", "travel plaza", "travel centre"]
+
+    def detect_brand(name_lower: str) -> Optional[str]:
+        for kw, label in brand_keywords:
+            if kw in name_lower:
+                return label
+        return None
+
+    url = "https://places.googleapis.com/v1/places:searchText"
+    body = {
+        "textQuery": "truck stop",
+        "locationBias": {
+            "circle": {
+                "center": {"latitude": request.latitude, "longitude": request.longitude},
+                "radius": float(radius_meters),
+            }
+        },
+        "maxResultCount": 20,
+        "rankPreference": "DISTANCE",
+        "languageCode": "en",
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": GOOGLE_PLACES_API_KEY,
+        "X-Goog-FieldMask": (
+            "places.id,places.displayName,places.formattedAddress,places.location,"
+            "places.nationalPhoneNumber,places.websiteUri,places.regularOpeningHours,places.rating"
+        ),
+    }
+
     try:
-        radius_meters = int(request.radius_miles * 1609.34)
-        
-        # Query for truck stops, gas stations with HGV fuel, and service areas
-        overpass_query = f"""
-        [out:json][timeout:40];
-        (
-          node["amenity"="fuel"]["hgv"="yes"](around:{radius_meters},{request.latitude},{request.longitude});
-          node["amenity"="fuel"]["hgv:diesel"="yes"](around:{radius_meters},{request.latitude},{request.longitude});
-          node["highway"="services"]["fuel"="yes"](around:{radius_meters},{request.latitude},{request.longitude});
-          way["amenity"="fuel"]["hgv"="yes"](around:{radius_meters},{request.latitude},{request.longitude});
-          way["amenity"="fuel"]["hgv:diesel"="yes"](around:{radius_meters},{request.latitude},{request.longitude});
-          way["highway"="services"]["fuel"="yes"](around:{radius_meters},{request.latitude},{request.longitude});
-        );
-        out center;
-        """
-        
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post("https://overpass-api.de/api/interpreter", data=overpass_query)
-            response.raise_for_status()
-            data = response.json()
-        
-        stops = []
-        for element in data.get('elements', []):
-            tags = element.get('tags', {})
-            
-            # Get coordinates
-            if element['type'] == 'way':
-                lat = element.get('center', {}).get('lat', 0)
-                lon = element.get('center', {}).get('lon', 0)
-            else:
-                lat = element.get('lat', 0)
-                lon = element.get('lon', 0)
-            
-            if not lat or not lon:
-                continue
-            
-            distance = haversine_miles(request.latitude, request.longitude, lat, lon)
-            
-            # Get name and brand
-            name = tags.get('name', tags.get('brand', 'Truck Stop'))
-            brand = tags.get('brand', tags.get('operator', 'Independent'))
-            
-            # Determine amenities
-            amenities = []
-            if tags.get('fuel:diesel') == 'yes' or tags.get('hgv:diesel') == 'yes' or tags.get('hgv') == 'yes':
-                amenities.append('Diesel Fuel')
-            if tags.get('fuel:HGV_diesel') == 'yes':
-                amenities.append('DEF')
-            if tags.get('truck_parking') == 'yes' or tags.get('hgv') == 'yes':
-                amenities.append('Truck Parking')
-            if tags.get('toilets') == 'yes':
-                amenities.append('Restrooms')
-            if tags.get('restaurant') == 'yes' or tags.get('food') == 'yes':
-                amenities.append('Food')
-            if tags.get('shower') == 'yes':
-                amenities.append('Showers')
-            
-            # Fuel types
-            fuel_types = ['Diesel']
-            if tags.get('fuel:HGV_diesel') == 'yes':
-                fuel_types.append('DEF')
-            
-            # Services
-            services = []
-            if tags.get('wifi') == 'yes':
-                services.append('WiFi')
-            if tags.get('car_wash') == 'yes':
-                services.append('Truck Wash')
-            if tags.get('repair') == 'yes':
-                services.append('Repair')
-            
-            # Hours
-            hours = tags.get('opening_hours', '24/7' if tags.get('24/7') == 'yes' else None)
-            
-            stops.append(TruckStop(
-                name=name,
-                brand=brand,
-                distance_miles=round(distance, 1),
-                latitude=lat,
-                longitude=lon,
-                amenities=amenities if amenities else ['Diesel Fuel'],
-                fuel_types=fuel_types,
-                services=services if services else ['WiFi'],
-                phone=tags.get('phone'),
-                website=tags.get('website'),
-                hours=hours,
-            ))
-        
-        stops = _dedupe_items(
-            stops,
-            lambda s: _stable_place_key(s.name, s.latitude, s.longitude, precision=4),
-            lambda cand, curr: cand.distance_miles < curr.distance_miles,
+        async with httpx.AsyncClient(timeout=12.0) as client:
+            resp = await client.post(url, headers=headers, json=body)
+            resp.raise_for_status()
+            payload = resp.json()
+    except httpx.HTTPStatusError as exc:
+        detail = getattr(exc.response, "text", "")[:200]
+        logger.warning("Truck stop Google Places status error %s body=%s", exc.response.status_code, detail)
+        raise HTTPException(status_code=503, detail="Truck stop search service error")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Truck stop Google Places request failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Truck stop search temporarily unavailable")
+
+    places = payload.get("places", []) or []
+    deduped: Dict[str, TruckStop] = {}
+
+    for place in places:
+        loc = place.get("location") or {}
+        lat = loc.get("latitude")
+        lon = loc.get("longitude")
+        if lat is None or lon is None:
+            continue
+
+        display_name = (place.get("displayName") or {}).get("text") or "Truck Stop"
+        name_lower = display_name.lower()
+        brand = detect_brand(name_lower)
+        if not brand and not any(term in name_lower for term in generic_truck_terms):
+            continue
+
+        distance_miles = _haversine_meters(request.latitude, request.longitude, lat, lon) * 0.000621371
+        address = place.get("formattedAddress")
+        phone = place.get("nationalPhoneNumber")
+        website = place.get("websiteUri")
+        hours_desc = place.get("regularOpeningHours", {}).get("weekdayDescriptions")
+        hours = "; ".join(hours_desc) if hours_desc else None
+        rating = place.get("rating")
+
+        stop = TruckStop(
+            name=display_name,
+            brand=brand or display_name,
+            distance_miles=round(distance_miles, 1),
+            latitude=lat,
+            longitude=lon,
+            amenities=["Diesel Fuel", "Truck Parking"],
+            fuel_types=["Diesel"],
+            services=["WiFi"],
+            phone=phone,
+            website=website,
+            hours=hours,
+            rating=rating,
         )
 
-        stops.sort(key=lambda x: x.distance_miles)
-        stops = stops[:30]
-        
-        logger.info(f"✓ Found {len(stops)} truck stops within {request.radius_miles} miles")
-        return TruckStopResponse(stops=stops)
-    
-    except Exception as e:
-        logger.error(f"Error searching truck stops: {e}")
-        raise HTTPException(status_code=500, detail=f"Error searching truck stops: {str(e)}")
+        key = _stable_place_key(display_name, lat, lon, place_id=place.get("id"), precision=4) or uuid.uuid4().hex
+        existing = deduped.get(key)
+        if existing is None or stop.distance_miles < existing.distance_miles:
+            deduped[key] = stop
+
+    stops = sorted(deduped.values(), key=lambda x: x.distance_miles)[:30]
+    logger.info("✓ Found %d truck stops within %s miles", len(stops), request.radius_miles)
+    return TruckStopResponse(stops=stops)
 
 
 # Truck Parking
@@ -8446,73 +8448,91 @@ class WeighStationResponse(BaseModel):
 
 @api_router.post("/weigh-stations/search", response_model=WeighStationResponse)
 async def search_weigh_stations(request: WeighStationRequest):
-    """Find weigh stations along highways."""
+    """Find weigh stations via Google Places Text Search with name filtering."""
+    if not GOOGLE_PLACES_API_KEY:
+        logger.error("GOOGLE_PLACES_API_KEY missing for weigh station search")
+        raise HTTPException(status_code=503, detail="Weigh station search unavailable: missing GOOGLE_PLACES_API_KEY")
+
+    radius_meters = min(50000.0, float(request.radius_miles * 1609.34))
+    name_filters = [
+        "weigh station",
+        "weigh-in-motion",
+        "weigh in motion",
+        "dot inspection",
+        "port of entry",
+    ]
+
+    url = "https://places.googleapis.com/v1/places:searchText"
+    body = {
+        "textQuery": "weigh station",
+        "locationBias": {
+            "circle": {
+                "center": {"latitude": request.latitude, "longitude": request.longitude},
+                "radius": float(radius_meters),
+            }
+        },
+        "maxResultCount": 20,
+        "rankPreference": "DISTANCE",
+        "languageCode": "en",
+    }
+    headers = {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": GOOGLE_PLACES_API_KEY,
+        "X-Goog-FieldMask": (
+            "places.id,places.displayName,places.location,places.nationalPhoneNumber"
+        ),
+    }
+
     try:
-        radius_meters = int(request.radius_miles * 1609.34)
-        
-        overpass_query = f"""
-        [out:json][timeout:40];
-        (
-          node["amenity"="weighbridge"](around:{radius_meters},{request.latitude},{request.longitude});
-          node["amenity"="weigh_station"](around:{radius_meters},{request.latitude},{request.longitude});
-          way["amenity"="weighbridge"](around:{radius_meters},{request.latitude},{request.longitude});
-          way["amenity"="weigh_station"](around:{radius_meters},{request.latitude},{request.longitude});
-        );
-        out body;
-        >;
-        out skel qt;
-        """
-        
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post("https://overpass-api.de/api/interpreter", data=overpass_query)
-            response.raise_for_status()
-            data = response.json()
-        
-        stations = []
-        for element in data.get('elements', []):
-            if element['type'] not in ['node', 'way']:
-                continue
-            
-            tags = element.get('tags', {})
-            if element['type'] == 'way':
-                lat = element.get('center', {}).get('lat') or (element.get('bounds', {}).get('minlat', 0) + element.get('bounds', {}).get('maxlat', 0)) / 2
-                lon = element.get('center', {}).get('lon') or (element.get('bounds', {}).get('minlon', 0) + element.get('bounds', {}).get('maxlon', 0)) / 2
-            else:
-                lat = element.get('lat', 0)
-                lon = element.get('lon', 0)
-            
-            distance = haversine_miles(request.latitude, request.longitude, lat, lon)
-            
-            # Status (would need real-time feed for actual status)
-            status = 'unknown'
-            bypass = tags.get('prepass') == 'yes' or tags.get('bypass') == 'yes'
-            
-            stations.append(WeighStation(
-                name=tags.get('name', 'Weigh Station'),
-                distance_miles=round(distance, 1),
-                latitude=lat,
-                longitude=lon,
-                direction=tags.get('direction'),
-                status=status,
-                bypass_available=bypass,
-                phone=tags.get('phone'),
-            ))
-        
-        stations = _dedupe_items(
-            stations,
-            lambda s: _stable_place_key(s.name, s.latitude, s.longitude, precision=4),
-            lambda cand, curr: cand.distance_miles < curr.distance_miles,
+        async with httpx.AsyncClient(timeout=12.0) as client:
+            resp = await client.post(url, headers=headers, json=body)
+            resp.raise_for_status()
+            payload = resp.json()
+    except httpx.HTTPStatusError as exc:
+        detail = getattr(exc.response, "text", "")[:200]
+        logger.warning("Weigh station Google Places status error %s body=%s", exc.response.status_code, detail)
+        raise HTTPException(status_code=503, detail="Weigh station search service error")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Weigh station Google Places request failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Weigh station search temporarily unavailable")
+
+    places = payload.get("places", []) or []
+    deduped: Dict[str, WeighStation] = {}
+
+    for place in places:
+        loc = place.get("location") or {}
+        lat = loc.get("latitude")
+        lon = loc.get("longitude")
+        if lat is None or lon is None:
+            continue
+
+        display_name = (place.get("displayName") or {}).get("text") or "Weigh Station"
+        name_lower = display_name.lower()
+        if not any(term in name_lower for term in name_filters):
+            continue
+
+        distance_miles = _haversine_meters(request.latitude, request.longitude, lat, lon) * 0.000621371
+        phone = place.get("nationalPhoneNumber")
+
+        station = WeighStation(
+            name=display_name,
+            distance_miles=round(distance_miles, 1),
+            latitude=lat,
+            longitude=lon,
+            direction=None,
+            status="unknown",
+            bypass_available=False,
+            phone=phone,
         )
 
-        stations.sort(key=lambda x: x.distance_miles)
-        stations = stations[:10]
-        
-        logger.info(f"Found {len(stations)} weigh stations within {request.radius_miles} miles")
-        return WeighStationResponse(stations=stations)
-    
-    except Exception as e:
-        logger.error(f"Error searching weigh stations: {e}")
-        raise HTTPException(status_code=500, detail=f"Error searching weigh stations: {str(e)}")
+        key = _stable_place_key(display_name, lat, lon, place_id=place.get("id"), precision=4) or uuid.uuid4().hex
+        existing = deduped.get(key)
+        if existing is None or station.distance_miles < existing.distance_miles:
+            deduped[key] = station
+
+    stations = sorted(deduped.values(), key=lambda x: x.distance_miles)[:10]
+    logger.info("Found %d weigh stations within %s miles", len(stations), request.radius_miles)
+    return WeighStationResponse(stations=stations)
 
 
 # Truck Restrictions

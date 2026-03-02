@@ -6,6 +6,8 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   ScrollView,
+  Alert,
+  ToastAndroid,
   Linking,
   Platform,
 } from 'react-native';
@@ -31,7 +33,7 @@ interface Plan {
 
 export default function SubscriptionScreen() {
   const { user, accessToken, refreshUser, isAuthenticated } = useAuth();
-  const { canceled } = useLocalSearchParams<{ canceled?: string }>();
+  useLocalSearchParams<{ canceled?: string }>();
   const [plans, setPlans] = useState<Plan[]>([]);
   const [loading, setLoading] = useState(true);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
@@ -123,6 +125,66 @@ export default function SubscriptionScreen() {
     }
   };
 
+  const handleManageSubscription = async () => {
+    if (!isAuthenticated) {
+      router.push('/login');
+      return;
+    }
+
+    setCheckoutLoading(true);
+    setError('');
+
+    try {
+      const response = await axios.post(
+        `${API_BASE}/api/subscription/portal`,
+        {},
+        { headers: { Authorization: `Bearer ${accessToken}` } }
+      );
+
+      const portalUrl = response.data?.url;
+      if (!portalUrl) {
+        const message = 'Unable to open subscription portal. Please try again.';
+        if (Platform.OS === 'android') {
+          ToastAndroid.show(message, ToastAndroid.LONG);
+        } else if (Platform.OS === 'web' && typeof window !== 'undefined') {
+          window.alert(message);
+        } else {
+          Alert.alert('Subscription Error', message);
+        }
+        setError(message);
+        return;
+      }
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const isMobileWeb = /Android|iPhone|iPad|iPod|IEMobile|Opera Mini/i.test(
+          window.navigator?.userAgent || ''
+        );
+        if (isMobileWeb) {
+          const popup = window.open(portalUrl, '_blank', 'noopener,noreferrer');
+          if (!popup) {
+            await Linking.openURL(portalUrl);
+          }
+        } else {
+          window.location.href = portalUrl;
+        }
+      } else {
+        await Linking.openURL(portalUrl);
+      }
+    } catch (err: any) {
+      const message = err.response?.data?.detail || 'Failed to open subscription portal';
+      if (Platform.OS === 'android') {
+        ToastAndroid.show(message, ToastAndroid.LONG);
+      } else if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.alert(message);
+      } else {
+        Alert.alert('Subscription Error', message);
+      }
+      setError(message);
+    } finally {
+      setCheckoutLoading(false);
+    }
+  };
+
   if (!mounted) return null;
 
   const isPremium = user?.is_premium;
@@ -177,11 +239,18 @@ export default function SubscriptionScreen() {
             </View>
 
             <TouchableOpacity
-              style={styles.manageButton}
-              onPress={() => router.push('/account')}
+              style={[styles.manageButton, checkoutLoading && styles.buttonDisabled]}
+              onPress={handleManageSubscription}
+              disabled={checkoutLoading}
             >
-              <Ionicons name="settings-outline" size={20} color="#eab308" />
-              <Text style={styles.manageButtonText}>Manage Subscription</Text>
+              {checkoutLoading ? (
+                <ActivityIndicator color="#eab308" size="small" />
+              ) : (
+                <>
+                  <Ionicons name="settings-outline" size={20} color="#eab308" />
+                  <Text style={styles.manageButtonText}>Manage Subscription</Text>
+                </>
+              )}
             </TouchableOpacity>
 
             <TouchableOpacity

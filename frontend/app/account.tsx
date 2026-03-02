@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   ScrollView,
   Alert,
+  ToastAndroid,
   ActionSheetIOS,
   Linking,
   Platform,
@@ -56,25 +57,51 @@ export default function AccountScreen() {
     setError('');
 
     try {
-      const response = await axios.get(
+      const response = await axios.post(
         `${API_BASE}/api/subscription/portal`,
+        {},
         { headers: { Authorization: `Bearer ${accessToken}` } }
       );
+      const portalUrl = response.data?.url;
 
-      if (response.data.portal_url) {
-        if (Platform.OS === 'web') {
-          window.location.href = response.data.portal_url;
+      if (!portalUrl) {
+        const message = 'Unable to open subscription portal. Please try again.';
+        if (Platform.OS === 'android') {
+          ToastAndroid.show(message, ToastAndroid.LONG);
+        } else if (Platform.OS === 'web' && typeof window !== 'undefined') {
+          window.alert(message);
         } else {
-          await Linking.openURL(response.data.portal_url);
+          Alert.alert('Subscription Error', message);
+        }
+        setError(message);
+        return;
+      }
+
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        const isMobileWeb = /Android|iPhone|iPad|iPod|IEMobile|Opera Mini/i.test(
+          window.navigator?.userAgent || ''
+        );
+        if (isMobileWeb) {
+          const popup = window.open(portalUrl, '_blank', 'noopener,noreferrer');
+          if (!popup) {
+            await Linking.openURL(portalUrl);
+          }
+        } else {
+          window.location.href = portalUrl;
         }
       } else {
-        Alert.alert(
-          'Coming Soon',
-          'The customer portal is being configured. Please contact support for subscription changes.'
-        );
+        await Linking.openURL(portalUrl);
       }
     } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to open subscription portal');
+      const message = err.response?.data?.detail || 'Failed to open subscription portal';
+      if (Platform.OS === 'android') {
+        ToastAndroid.show(message, ToastAndroid.LONG);
+      } else if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.alert(message);
+      } else {
+        Alert.alert('Subscription Error', message);
+      }
+      setError(message);
     } finally {
       setLoading(false);
     }
@@ -86,7 +113,7 @@ export default function AccountScreen() {
     try {
       await logout();
       router.replace('/login');
-    } catch (err) {
+    } catch {
       setError('Failed to sign out. Please try again.');
     } finally {
       setLogoutLoading(false);
