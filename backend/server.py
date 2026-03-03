@@ -1,6 +1,6 @@
 from fastapi import FastAPI, APIRouter, HTTPException, Header, Request, status, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, RedirectResponse
 from dotenv import load_dotenv
 from motor.motor_asyncio import AsyncIOMotorClient
 import os
@@ -3396,7 +3396,8 @@ async def send_test_email_endpoint(payload: TestEmailRequest, x_admin_token: Opt
 
 @api_router.get("/")
 async def root():
-    return {"message": "Routecast API", "version": "2.0", "features": ["departure_time", "multi_stop", "favorites", "packing_suggestions", "weather_timeline"]}
+    # Redirect root requests to the public landing page
+    return RedirectResponse(url="/landing", status_code=status.HTTP_307_TEMPORARY_REDIRECT)
 
 
 @api_router.get("/nws/alerts")
@@ -6774,6 +6775,8 @@ async def _search_walmart_google_places(request: OvernightSearchRequest) -> List
             )
         )
 
+    stops = [s for s in stops if s.distance_miles <= request.radius_miles]
+    stops = [s for s in stops if s.distance_miles <= request.radius_miles]
     stops.sort(key=lambda x: x.distance_miles)
     return stops
 
@@ -7175,6 +7178,7 @@ async def _search_casino_google_places(request: OvernightSearchRequest) -> List[
             )
         )
 
+    stops = [s for s in stops if s.distance_miles <= request.radius_miles]
     stops.sort(key=lambda x: x.distance_miles)
     logger.info(
         "Casino Google Places ok id=%s lat=%.3f lon=%.3f radius_mi=%s results=%d",
