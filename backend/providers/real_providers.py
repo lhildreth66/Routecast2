@@ -202,7 +202,7 @@ class MapboxDirectionsProvider(DirectionsProvider):
 class NOAAWeatherProvider(WeatherProvider):
     async def get_weather(self, lat: float, lon: float) -> Optional[Dict[str, Any]]:
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=8.0) as client:
                 point_url = f"https://api.weather.gov/points/{lat:.4f},{lon:.4f}"
                 point_response = await client.get(point_url, headers=NOAA_HEADERS)
                 if point_response.status_code != 200:
@@ -257,7 +257,7 @@ class NOAAAlertsProvider(AlertsProvider):
         status_code: Optional[int] = None
         area_code = (area or "").upper() or "AK"
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=8.0) as client:
                 url = f"https://api.weather.gov/alerts/active?area={area_code}"
                 response = await client.get(url, headers=NOAA_HEADERS)
                 status_code = response.status_code
