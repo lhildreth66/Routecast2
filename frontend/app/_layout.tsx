@@ -70,27 +70,16 @@ function useGaPageViews() {
     gaInitialized = true;
   }, []);
 
-  // Send pageview on route changes (SPA)
+  // Send pageview on route changes (SPA) — intentionally drop query params
+  // to avoid leaking large payloads (e.g., serialized route/alerts data) to GA.
   useEffect(() => {
     if (Platform.OS !== 'web') return;
     if (!gaInitialized) return;
 
-    const usp = new URLSearchParams();
-    Object.entries(searchParams || {}).forEach(([key, value]) => {
-      if (Array.isArray(value)) {
-        value.forEach((v) => usp.append(key, v));
-      } else if (value != null) {
-        usp.set(key, value);
-      }
-    });
-
-    const query = usp.toString();
-    const page = query ? `${pathname}?${query}` : pathname;
-
     ReactGA.send({
-      hitType: 'pageview',
-      page,
-      title: typeof document !== 'undefined' ? document.title : undefined,
+        hitType: 'pageview',
+        page: pathname,
+        title: typeof document !== 'undefined' ? document.title : undefined,
     });
   }, [pathname, searchParams]);
 }
