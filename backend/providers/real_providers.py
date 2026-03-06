@@ -330,7 +330,7 @@ class NOAAAlertsProvider(AlertsProvider):
         fetch_scope = "point"
         logger.info(f"nws_fetch_entered lat={lat} lon={lon}")
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=8.0) as client:
                 url = f"https://api.weather.gov/alerts/active?point={lat:.4f},{lon:.4f}"
                 response = await client.get(url, headers=NOAA_HEADERS)
                 status_code = response.status_code
