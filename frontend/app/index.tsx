@@ -185,21 +185,21 @@ export default function HomeScreen() {
   };
 
   const handleAlertsToggle = async (nextEnabled: boolean) => {
-    console.log('[push-toggle] tapped: next=', nextEnabled, 'prev=', alertsEnabled, 'pushLoading=', pushLoading);
     const authToken = await AsyncStorage.getItem('access_token');
 
     if (IS_WEB) {
+      if (pushLoading) return;
+      const prevEnabled = alertsEnabled;
+      setAlertsEnabled(nextEnabled); // optimistic UI so toggle moves immediately
       setPushLoading(true);
       try {
         if (!authToken) {
-          console.log('[push-toggle] early return: no auth token');
           Alert.alert('Sign In Required', 'Please sign in to manage push notifications.');
-          setPushLoading(false);
+          setAlertsEnabled(prevEnabled);
           return;
         }
 
         if (!nextEnabled) {
-          console.log('[push-toggle] disabling flow start');
           await deleteWebPushSubscription(`${API_BASE}/api`, authToken);
           await axios.post(
             `${API_BASE}/api/push/settings`,
@@ -208,8 +208,6 @@ export default function HomeScreen() {
           );
           await AsyncStorage.removeItem('expoPushToken');
           setAlertsEnabled(false);
-          console.log('[push-toggle] disabled and state updated');
-          setPushLoading(false);
           return;
         }
 
@@ -232,21 +230,17 @@ export default function HomeScreen() {
         }
 
         if (!result.supported) {
-          console.log('[push-toggle] early return: not supported');
           Alert.alert('Notifications Unsupported', 'This browser does not support Web Push.');
           setAlertsEnabled(false);
-          setPushLoading(false);
           return;
         }
 
         if (result.permission !== 'granted') {
-          console.log('[push-toggle] early return: permission not granted', result.permission);
           Alert.alert(
             'Enable Notifications',
             'Please allow notifications. On iPhone/iPad, use Safari, add Routecast to your Home Screen, open it, then allow notifications.',
           );
           setAlertsEnabled(false);
-          setPushLoading(false);
           return;
         }
 
@@ -265,14 +259,12 @@ export default function HomeScreen() {
         }
         const finalState = nextEnabled && !!result.saved;
         setAlertsEnabled(finalState);
-        console.log('[push-toggle] final state enabled=', finalState);
       } catch (err: any) {
         console.warn('[push-toggle] web push error', err?.message ?? err);
+        setAlertsEnabled(prevEnabled);
         Alert.alert('Error', 'Could not enable web push notifications.');
-        setAlertsEnabled(false);
       } finally {
         setPushLoading(false);
-        console.log('[push-toggle] exiting handler pushLoading=false');
       }
       return;
     }
