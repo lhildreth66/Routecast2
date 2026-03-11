@@ -506,6 +506,7 @@ class RouteRequest(BaseModel):
     vehicle_type: Optional[str] = None  # car, suv, truck, semi, rv, motorcycle, trailer
     mode: Optional[str] = None  # standard, boondocker, truck
     trucker_mode: Optional[bool] = False  # Enable trucker-specific warnings
+    bridge_height_alerts_enabled: Optional[bool] = False  # Explicit bridge-height toggle (default off)
     vehicle_height_ft: Optional[float] = None  # Vehicle height in feet for clearance warnings
     vehicle_weight_lbs: Optional[int] = None
     vehicle_length_ft: Optional[float] = None
@@ -3898,11 +3899,11 @@ async def get_route_weather(request: RouteRequest):
         trucker_warnings = generate_trucker_warnings(list(waypoints_weather), request.vehicle_height_ft)
 
     # NEW: Structured bridge / low-clearance alerts via OSM Overpass.
-    # Always computed when polyline is available; not conditional on trucker_mode
-    # because a bridge conflict is safety-critical for any tall vehicle.
+    # Default is off; only compute when explicitly enabled by client settings.
     # Wrapped in try/except so Overpass failures never crash the route endpoint.
     bridge_clearance_alerts: List[Dict[str, Any]] = []
-    if route_geometry:
+    bridge_alerts_enabled = bool(request.bridge_height_alerts_enabled) or bool(request.trucker_mode)
+    if route_geometry and bridge_alerts_enabled:
         vehicle_ht = (request.vehicle_height_ft or 13.5)
         try:
             bridge_clearance_alerts = await _get_bridge_clearances(route_geometry, vehicle_ht)
@@ -4098,14 +4099,55 @@ async def get_route_weather_alerts(
         first_wp = hazard_waypoints_data[0]
         alaska_alerts_cache = await get_noaa_alerts(first_wp.get("lat"), first_wp.get("lon"))
 
-    async def fetch_hazard_wp(wp_dict: Dict[str, Any], index: int, total: int) -> WaypointWeather:
-        wp = Waypoint(**wp_dict)
+    async def fetch_hazard_wp(wp_dict: Dict[str, Any], index: int, total: int) -> Optional[Tuple[int, WaypointWeather]]:
+        try:
+            wp = Waypoint(**wp_dict)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "route_alerts_waypoint_parse_failed",
+                extra={"route_id": route_id, "idx": index, "error": str(exc)},
+            )
+            return None
+
         logger.info(
             "route_alerts_nws_fetch_start",
             extra={"route_id": route_id, "idx": index, "total": total, "lat": wp.lat, "lon": wp.lon},
         )
-        weather = await get_noaa_weather(wp.lat, wp.lon)
-        alerts = alaska_alerts_cache if alaska_alerts_cache is not None else await get_noaa_alerts(wp.lat, wp.lon)
+
+        # Hard cap each NWS call so one slow endpoint cannot block route alerts.
+        try:
+            weather = await asyncio.wait_for(get_noaa_weather(wp.lat, wp.lon), timeout=3.0)
+        except asyncio.TimeoutError:
+            logger.warning(
+                "route_alerts_nws_weather_timeout",
+                extra={"route_id": route_id, "idx": index, "lat": wp.lat, "lon": wp.lon, "timeout_s": 3},
+            )
+            return None
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "route_alerts_nws_weather_failed",
+                extra={"route_id": route_id, "idx": index, "lat": wp.lat, "lon": wp.lon, "error": str(exc)},
+            )
+            return None
+
+        if alaska_alerts_cache is not None:
+            alerts = alaska_alerts_cache
+        else:
+            try:
+                alerts = await asyncio.wait_for(get_noaa_alerts(wp.lat, wp.lon), timeout=3.0)
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "route_alerts_nws_alerts_timeout",
+                    extra={"route_id": route_id, "idx": index, "lat": wp.lat, "lon": wp.lon, "timeout_s": 3},
+                )
+                return None
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "route_alerts_nws_alerts_failed",
+                    extra={"route_id": route_id, "idx": index, "lat": wp.lat, "lon": wp.lon, "error": str(exc)},
+                )
+                return None
+
         logger.info(
             "route_alerts_nws_fetch_done",
             extra={
@@ -4117,15 +4159,40 @@ async def get_route_weather_alerts(
                 "first_event": (alerts[0].event if alerts else None),
             },
         )
-        return WaypointWeather(waypoint=wp, weather=weather, alerts=alerts)
+        return index, WaypointWeather(waypoint=wp, weather=weather, alerts=alerts)
 
     try:
         logger.info(
             "route_alerts_fetch_start",
             extra={"route_id": route_id, "waypoints": hazard_total_waypoints},
         )
-        hazard_tasks = [fetch_hazard_wp(wp, i, hazard_total_waypoints) for i, wp in enumerate(hazard_waypoints_data)]
-        hazard_waypoints_weather = await asyncio.gather(*hazard_tasks)
+        hazard_tasks = [asyncio.create_task(fetch_hazard_wp(wp, i, hazard_total_waypoints)) for i, wp in enumerate(hazard_waypoints_data)]
+        done, pending = await asyncio.wait(hazard_tasks, timeout=15.0)
+
+        if pending:
+            logger.warning(
+                "route_alerts_fetch_timeout",
+                extra={
+                    "route_id": route_id,
+                    "timeout_s": 15,
+                    "completed": len(done),
+                    "timed_out": len(pending),
+                },
+            )
+            for task in pending:
+                task.cancel()
+            with contextlib.suppress(Exception):
+                await asyncio.gather(*pending, return_exceptions=True)
+
+        completed_results: List[Tuple[int, WaypointWeather]] = []
+        for task in done:
+            with contextlib.suppress(Exception):
+                result = task.result()
+                if result is not None:
+                    completed_results.append(result)
+
+        completed_results.sort(key=lambda item: item[0])
+        hazard_waypoints_weather = [item[1] for item in completed_results]
         mark("alerts_fetch")
 
         per_point_features = [
