@@ -48,6 +48,7 @@ import { format } from 'date-fns';
 import { WebView } from 'react-native-webview';
 import { useAuth } from '../contexts/AuthContext';
 import * as Notifications from 'expo-notifications';
+import { registerWebPush, deleteWebPushSubscription } from '../lib/webPush';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -168,13 +169,14 @@ export default function HomeScreen() {
   }, [isAuthenticated]);
 
   const loadPushSettings = async () => {
-    if (!isAuthenticated || (IS_WEB && !isMobileWeb)) return;
+    if (!isAuthenticated) return;
     try {
       const token = await AsyncStorage.getItem('access_token');
       if (!token) return;
       
       const response = await axios.get(`${API_BASE}/api/push/settings`, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { Authorization: `Bearer ${token}` },
+        withCredentials: true,
       });
       setAlertsEnabled(response.data.push_enabled || false);
     } catch (err) {
@@ -184,9 +186,85 @@ export default function HomeScreen() {
 
   const handleAlertsToggle = async (nextEnabled: boolean) => {
     __DEV__ && console.log('[push-toggle] onValueChange fired – next:', nextEnabled, 'prev:', alertsEnabled);
+    const authToken = await AsyncStorage.getItem('access_token');
 
-    if (IS_WEB && !isMobileWeb) {
-      Alert.alert('Mobile Only', 'Push notifications are available on the mobile app.');
+    if (IS_WEB) {
+      setPushLoading(true);
+      try {
+        if (!authToken) {
+          Alert.alert('Sign In Required', 'Please sign in to manage push notifications.');
+          setPushLoading(false);
+          return;
+        }
+
+        if (!nextEnabled) {
+          await deleteWebPushSubscription(`${API_BASE}/api`, authToken);
+          await axios.post(
+            `${API_BASE}/api/push/settings`,
+            { push_enabled: false, push_token: null, platform: 'web' },
+            { headers: { Authorization: `Bearer ${authToken}` }, withCredentials: true },
+          );
+          await AsyncStorage.removeItem('expoPushToken');
+          setAlertsEnabled(false);
+          setPushLoading(false);
+          return;
+        }
+
+        const result = await registerWebPush(`${API_BASE}/api`, authToken);
+        __DEV__ && console.log('[push-toggle] web register result', result);
+
+        // If the initial save failed but we still have a subscription, retry the POST once to ensure it reaches the backend.
+        if (!result.saved && result.subscription) {
+          try {
+            const retry = await registerWebPush(`${API_BASE}/api`, authToken);
+            __DEV__ && console.log('[push-toggle] web register retry result', retry);
+            if (retry.saved) {
+              result.saved = true;
+              result.responseStatus = retry.responseStatus;
+              result.responseBody = retry.responseBody;
+            }
+          } catch (retryErr) {
+            __DEV__ && console.log('[push-toggle] web register retry failed', retryErr);
+          }
+        }
+
+        if (!result.supported) {
+          Alert.alert('Notifications Unsupported', 'This browser does not support Web Push.');
+          setAlertsEnabled(false);
+          setPushLoading(false);
+          return;
+        }
+
+        if (result.permission !== 'granted') {
+          Alert.alert(
+            'Enable Notifications',
+            'Please allow notifications. On iPhone/iPad, use Safari, add Routecast to your Home Screen, open it, then allow notifications.',
+          );
+          setAlertsEnabled(false);
+          setPushLoading(false);
+          return;
+        }
+
+        const pseudoToken = result.subscription?.endpoint
+          ? `web:${result.subscription.endpoint.slice(-24)}`
+          : undefined;
+
+        await axios.post(
+          `${API_BASE}/api/push/settings`,
+          { push_enabled: nextEnabled && !!result.saved, push_token: pseudoToken, platform: 'web' },
+          { headers: { Authorization: `Bearer ${authToken}` }, withCredentials: true },
+        );
+        if (pseudoToken) {
+          await AsyncStorage.setItem('expoPushToken', pseudoToken);
+        }
+        setAlertsEnabled(nextEnabled && !!result.saved);
+      } catch (err: any) {
+        console.warn('[push-toggle] web push error', err?.message ?? err);
+        Alert.alert('Error', 'Could not enable web push notifications.');
+        setAlertsEnabled(false);
+      } finally {
+        setPushLoading(false);
+      }
       return;
     }
 
@@ -242,11 +320,10 @@ export default function HomeScreen() {
       }
 
       // ── 3. Persist preference to backend ─────────────────────────────────
-      const authToken = await AsyncStorage.getItem('access_token');
       await axios.post(
         `${API_BASE}/api/push/settings`,
         { push_enabled: nextEnabled, push_token: pushToken, platform: Platform.OS },
-        { headers: { Authorization: `Bearer ${authToken}` } },
+        { headers: { Authorization: `Bearer ${authToken}` }, withCredentials: true },
       );
       __DEV__ && console.log('[push-toggle] saved to backend – push_enabled:', nextEnabled);
     } catch (err: any) {
