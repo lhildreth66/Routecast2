@@ -28,6 +28,7 @@ async function postSubscription(
   authToken: string | null | undefined,
   subscription: PushSubscription,
 ) {
+  console.log(`${logPrefix} about to POST subscription`);
   const json = subscription.toJSON();
   const body = {
     ...json,
@@ -40,7 +41,9 @@ async function postSubscription(
     headers['Authorization'] = `Bearer ${authToken}`;
   }
 
-  const resp = await fetch(`${backendUrl.replace(/\/$/, '')}/push/web-subscription`, {
+  const url = `${backendUrl.replace(/\/$/, '')}/push/web-subscription`;
+  console.log(`${logPrefix} POST url=${url}`);
+  const resp = await fetch(url, {
     method: 'POST',
     headers,
     credentials: 'include',
@@ -90,6 +93,13 @@ export async function registerWebPush(
     return { supported: true, permission: Notification.permission } as const;
   }
 
+  try {
+    const ready = await navigator.serviceWorker.ready;
+    console.log(`${logPrefix} service worker ready scope=${ready.scope}`);
+  } catch (readyErr) {
+    console.error(`${logPrefix} service worker ready failed`, readyErr);
+  }
+
   const permission = await Notification.requestPermission();
   console.log(`${logPrefix} permission result=${permission}`);
   if (permission !== 'granted') {
@@ -102,6 +112,7 @@ export async function registerWebPush(
   let subscription = existing;
   if (!subscription) {
     try {
+      console.log(`${logPrefix} creating new subscription`);
       subscription = await registration.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: urlBase64ToUint8Array(vapid),

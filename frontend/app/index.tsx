@@ -185,7 +185,7 @@ export default function HomeScreen() {
   };
 
   const handleAlertsToggle = async (nextEnabled: boolean) => {
-    __DEV__ && console.log('[push-toggle] onValueChange fired – next:', nextEnabled, 'prev:', alertsEnabled);
+    console.log('[push-toggle] entered handler next=', nextEnabled, 'prev=', alertsEnabled);
     const authToken = await AsyncStorage.getItem('access_token');
 
     if (IS_WEB) {
@@ -211,7 +211,7 @@ export default function HomeScreen() {
         }
 
         const result = await registerWebPush(`${API_BASE}/api`, authToken);
-        __DEV__ && console.log('[push-toggle] web register result', result);
+        console.log('[push-toggle] web register result', result);
 
         // If the initial save failed but we still have a subscription, retry the POST once to ensure it reaches the backend.
         if (!result.saved && result.subscription) {
@@ -249,6 +249,7 @@ export default function HomeScreen() {
           ? `web:${result.subscription.endpoint.slice(-24)}`
           : undefined;
 
+        console.log('[push-toggle] about to save settings push_enabled=', nextEnabled, 'pseudoToken=', pseudoToken);
         await axios.post(
           `${API_BASE}/api/push/settings`,
           { push_enabled: nextEnabled && !!result.saved, push_token: pseudoToken, platform: 'web' },
@@ -258,6 +259,7 @@ export default function HomeScreen() {
           await AsyncStorage.setItem('expoPushToken', pseudoToken);
         }
         setAlertsEnabled(nextEnabled && !!result.saved);
+        console.log('[push-toggle] final state enabled=', nextEnabled && !!result.saved);
       } catch (err: any) {
         console.warn('[push-toggle] web push error', err?.message ?? err);
         Alert.alert('Error', 'Could not enable web push notifications.');
