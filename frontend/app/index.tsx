@@ -116,7 +116,11 @@ export default function HomeScreen() {
     if (!rootNavState?.key) return; // navigator not yet mounted – skip
     if (Platform.OS === 'web' && hasHydrated && !authLoading && !accessToken) {
       const path = pathname || '/';
-      if (path === '/' || path === '/landing') return;
+      if (path === '/landing') return;
+      if (path === '/') {
+        router.replace('/landing');
+        return;
+      }
       __DEV__ && console.log('[guard] redirecting to /login');
       router.replace('/login');
     }
