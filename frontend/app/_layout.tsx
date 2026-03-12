@@ -83,7 +83,7 @@ export default function RootLayout() {
         }}
       >
         <Stack.Screen name="landing" />
-        <Stack.Screen name="index" />
+        <Stack.Screen name="index" redirect={false} options={{ href: '/landing' }} />
         <Stack.Screen name="route" />
         {/* Auth Screens */}
         <Stack.Screen name="login" />
