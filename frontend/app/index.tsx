@@ -40,7 +40,7 @@ const NoAutofillInput = forwardRef<any, TextInputProps>((props, ref) => {
 });
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { router, useRootNavigationState } from 'expo-router';
+import { router, usePathname, useRootNavigationState } from 'expo-router';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
@@ -93,6 +93,7 @@ interface AutocompleteSuggestion {
 export default function HomeScreen() {
   const { user, isAuthenticated, accessToken, isPremium, isLoading: authLoading, hasHydrated, refreshUser } = useAuth();
   const isMobileWeb = IS_WEB && SCREEN_WIDTH < 768;
+  const pathname = usePathname();
 
   // Gate navigation on the root navigator being mounted.
   // Now that AuthProvider always renders children unconditionally, Stack mounts
@@ -114,10 +115,12 @@ export default function HomeScreen() {
     __DEV__ && console.log('[guard] check – navReady:', !!rootNavState?.key, 'hydrated:', hasHydrated, 'authLoading:', authLoading, 'accessToken:', !!accessToken, 'platform:', Platform.OS);
     if (!rootNavState?.key) return; // navigator not yet mounted – skip
     if (Platform.OS === 'web' && hasHydrated && !authLoading && !accessToken) {
+      const path = pathname || '/';
+      if (path === '/' || path === '/landing') return;
       __DEV__ && console.log('[guard] redirecting to /login');
       router.replace('/login');
     }
-  }, [rootNavState?.key, accessToken, authLoading, hasHydrated]);
+  }, [rootNavState?.key, accessToken, authLoading, hasHydrated, pathname]);
 
   // Subscription gate removed: replaced by global PaywallGuard in _layout.tsx.
   // PaywallGuard handles verified+!premium users on ALL routes, not just /.
@@ -514,6 +517,12 @@ export default function HomeScreen() {
         trucker_mode: truckerMode,
         vehicle_height_ft: truckerMode ? parseFloat(vehicleHeight) || 13.6 : null,
       };
+
+      const savedPushToken = await AsyncStorage.getItem('expoPushToken');
+      if (savedPushToken && alertsEnabled) {
+        requestData.push_token = savedPushToken;
+        requestData.push_alerts_enabled = true;
+      }
       
       if (useCustomTime) {
         requestData.departure_time = departureTime.toISOString();
