@@ -1,3 +1,4 @@
+# STRIPE DISABLED - Google Play submission - do not delete
 """
 Tests: checkout plan → Stripe price_id mapping
 
@@ -109,3 +110,4 @@ class TestPlanToStripePrice:
             )
         except HTTPException as exc:
             assert exc.status_code == 500
+"""

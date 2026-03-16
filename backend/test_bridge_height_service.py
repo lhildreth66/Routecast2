@@ -4,20 +4,20 @@ Deterministic unit + integration tests for bridge_height_service.py.
 These tests mock the Overpass HTTP layer so they run consistently in CI/CD
 without live network access. They prove:
 
-  1. Rounding is ceiling (conservative) — 13.1 ft → 13.5 bucket, never 13.0.
-  2. Full OSM element → alert dict pipeline produces correct shapes.
-  3. Negative margin → warning_level="danger" with correct message.
-  4. Margin 0–0.5 ft → warning_level="danger" (CRITICAL).
-  5. Margin 0.5–1.0 ft → warning_level="caution".
-  6. Margin > 2 ft → warning_level="safe".
-  7. Cache hit returns same object without calling Overpass again.
-  8. Timeout / Overpass outage → returns [], never raises.
-  9. Caller (server.py) reroute flag logic: bridge margin < 0 → reroute_recommended.
+    1. Rounding is ceiling (conservative) — 13.1 ft → 13.5 bucket, never 13.0.
+    2. Full OSM element → alert dict pipeline produces correct shapes.
+    3. Negative margin → warning_level="danger" with correct message.
+    4. Margin 0–0.5 ft → warning_level="danger" (CRITICAL).
+    5. Margin 0.5–1.0 ft → warning_level="caution".
+    6. Margin > 2 ft → warning_level="safe".
+    7. Cache hit returns same object without calling Overpass again.
+    8. Timeout / Overpass outage → returns [], never raises.
+    9. Caller (server.py) reroute flag logic: bridge margin < 0 → reroute_recommended.
 
 Known reference route (north Jersey / NYC — dense OSM bridge tagging):
-  Origin:  40.7128, -74.0060  (NYC)
-  Dest:    40.7580, -73.9855  (Midtown)
-  Use vehicle_height_ft=13.5 for a real QA run against live Overpass.
+    Origin:  40.7128, -74.0060  (NYC)
+    Dest:    40.7580, -73.9855  (Midtown)
+    Use vehicle_height_ft=13.5 for a real QA run against live Overpass.
 """
 
 import asyncio
@@ -32,7 +32,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 from unittest.mock import MagicMock
 _STUB_MODS = [
     "sendgrid", "sendgrid.helpers", "sendgrid.helpers.mail",
-    "stripe",
+    # "stripe",  # STRIPE DISABLED - Google Play submission - do not delete
     "jose", "jose.jwt", "jose.exceptions",
     "passlib", "passlib.context",
     "google.auth", "google.oauth2", "google.oauth2.credentials",
