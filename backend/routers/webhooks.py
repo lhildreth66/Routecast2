@@ -1,3 +1,4 @@
+# STRIPE DISABLED - Google Play submission - do not delete
 """
 Webhook Router for RouteCast
 Handles incoming webhooks from Stripe, Apple, and Google
@@ -8,7 +9,9 @@ from datetime import datetime, timezone, timedelta
 import os
 import json
 import logging
-import stripe
+
+# STRIPE DISABLED - Google Play submission - do not delete
+# import stripe
 
 logger = logging.getLogger(__name__)
 
@@ -640,3 +643,4 @@ async def google_webhook(request: Request):
     except Exception as e:
         logger.error(f"Google webhook error: {e}")
         return {"received": True}
+"""

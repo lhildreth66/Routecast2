@@ -1,3 +1,4 @@
+# STRIPE DISABLED - Google Play submission - do not delete
 """
 Subscription Service for RouteCast
 Handles Stripe subscriptions, Apple/Google receipt verification, and entitlements
@@ -8,7 +9,9 @@ from typing import Optional, Tuple
 from motor.motor_asyncio import AsyncIOMotorDatabase
 import logging
 import httpx
-import stripe
+
+# STRIPE DISABLED - Google Play submission - do not delete
+# import stripe
 
 # Initialise Stripe SDK once
 _STRIPE_API_KEY = os.environ.get('STRIPE_API_KEY', '')
@@ -538,3 +541,4 @@ async def handle_stripe_subscription_event(
         return True
 
     return False
+"""

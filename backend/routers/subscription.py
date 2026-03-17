@@ -1,3 +1,4 @@
+# STRIPE DISABLED - Google Play submission - do not delete
 """
 Subscription Router for RouteCast
 Handles Stripe checkout, webhooks, and subscription management
@@ -9,7 +10,8 @@ import os
 import asyncio
 import logging
 
-import stripe
+# STRIPE DISABLED - Google Play submission - do not delete
+# import stripe
 
 from models.user import (
     CreateCheckoutRequest, CheckoutResponse, SubscriptionInfo,
@@ -418,3 +420,4 @@ async def get_subscription_plans():
         ],
         "trial_days": 7
     }
+"""

@@ -23,7 +23,9 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 import polyline
-import stripe
+
+# STRIPE DISABLED - Google Play submission - do not delete
+# import stripe
 from notifications.route_alerts import sample_route_points
 import asyncio
 from bridge_database import get_bridge_warnings, get_bridge_warnings_near_route
@@ -297,12 +299,15 @@ MAPBOX_ACCESS_TOKEN = os.environ.get('MAPBOX_ACCESS_TOKEN', '')
 ROUTECAST_MODE = os.environ.get('ROUTECAST_MODE', 'prod').lower()
 GEMINI_MODEL = os.environ.get('GEMINI_MODEL', 'gemini-1.5-flash')
 GOOGLE_PLACES_API_KEY = os.environ.get("GOOGLE_PLACES_API_KEY", "")
+# STRIPE DISABLED - Google Play submission - do not delete
+"""
 STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY")
 STRIPE_PRICE_MONTHLY = os.environ.get("STRIPE_PRICE_MONTHLY")
 STRIPE_PRICE_YEARLY = os.environ.get("STRIPE_PRICE_YEARLY")
 
 if STRIPE_API_KEY:
     stripe.api_key = STRIPE_API_KEY
+"""
 BUILD_SHA = os.environ.get("RENDER_GIT_COMMIT") or os.environ.get("BUILD_SHA") or "unknown"
 BUILD_TIME = os.environ.get("BUILD_TIME") or datetime.utcnow().isoformat()
 ALERT_DEBUG = bool(int(os.environ.get("ALERT_DEBUG", "0") or 0))
@@ -4615,6 +4620,8 @@ async def autocomplete_location(query: str, limit: int = 5):
 
 # ==================== Billing ====================
 
+# STRIPE DISABLED - Google Play submission - do not delete
+"""
 class BillingVerifyRequest(BaseModel):
     platform: str  # "android" or "ios"
     product_id: str  # "boondocking_pro_monthly" or "boondocking_pro_yearly"
@@ -4790,6 +4797,7 @@ async def get_checkout_session(session_id: str):
         "amount": (amount_total or 0) / 100 if amount_total is not None else None,
         "currency": currency,
     }
+"""
 
 
 @api_router.post("/billing/verify", response_model=dict)

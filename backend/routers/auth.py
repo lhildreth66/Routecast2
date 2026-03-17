@@ -35,18 +35,18 @@ from services.email_service import (
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
-# ── Stripe config ────────────────────────────────────────────────────────────
-STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "")
-STRIPE_PRICE_MONTHLY = os.environ.get("STRIPE_PRICE_MONTHLY", "")
-STRIPE_PRICE_YEARLY = os.environ.get("STRIPE_PRICE_YEARLY", "")
-FRONTEND_URL = (
-    os.environ.get("FRONTEND_URL")
-    or os.environ.get("APP_URL")
-    or "https://routecastweather.com"
-)
+# STRIPE DISABLED - Google Play submission - do not delete
+# STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "")
+# STRIPE_PRICE_MONTHLY = os.environ.get("STRIPE_PRICE_MONTHLY", "")
+# STRIPE_PRICE_YEARLY = os.environ.get("STRIPE_PRICE_YEARLY", "")
+# FRONTEND_URL = (
+#     os.environ.get("FRONTEND_URL")
+#     or os.environ.get("APP_URL")
+#     or "https://routecastweather.com"
+# )
 
-if STRIPE_API_KEY:
-    stripe_module.api_key = STRIPE_API_KEY
+# if STRIPE_API_KEY:
+#     stripe_module.api_key = STRIPE_API_KEY
 
 
 async def get_current_user(authorization: Optional[str] = Header(None)):
@@ -190,65 +190,66 @@ async def verify_email_get(
     return await _verify_email_with_token(raw, background_tasks, request)
 
 
+# STRIPE DISABLED - Google Play submission - do not delete
 # ── Helper: create Stripe Checkout Session ───────────────────────────────────
 
-async def _create_stripe_checkout_for_user(db, user_id: str, user: dict):
-    """Create a Stripe Customer (if needed) and Checkout Session.
+# async def _create_stripe_checkout_for_user(db, user_id: str, user: dict):
+#     """Create a Stripe Customer (if needed) and Checkout Session.
 
-    Reads ``pending_plan`` from the user record to pick the correct price.
-    Returns ``(checkout_url, error_message)``.
-    """
-    email = user["email"]
-    name = user.get("name")
-    customer_id = user.get("stripe_customer_id")
-    pending_plan = user.get("pending_plan", "monthly")
+#     Reads ``pending_plan`` from the user record to pick the correct price.
+#     Returns ``(checkout_url, error_message)``.
+#     """
+#     email = user["email"]
+#     name = user.get("name")
+#     customer_id = user.get("stripe_customer_id")
+#     pending_plan = user.get("pending_plan", "monthly")
 
-    try:
-        # Re-use existing Stripe customer if present (idempotent retry)
-        if not customer_id:
-            customer = stripe_module.Customer.create(
-                email=email,
-                name=name,
-                metadata={"user_id": user_id, "email": email},
-            )
-            customer_id = customer.id
-            await update_user(db, user_id, {"stripe_customer_id": customer_id})
-            logger.info(f"[VERIFY] Stripe customer created: {customer_id} for user={user_id}")
+#     try:
+#         # Re-use existing Stripe customer if present (idempotent retry)
+#         if not customer_id:
+#             customer = stripe_module.Customer.create(
+#                 email=email,
+#                 name=name,
+#                 metadata={"user_id": user_id, "email": email},
+#             )
+#             customer_id = customer.id
+#             await update_user(db, user_id, {"stripe_customer_id": customer_id})
+#             logger.info(f"[VERIFY] Stripe customer created: {customer_id} for user={user_id}")
 
-        # Pick the correct price based on the user's chosen plan
-        if pending_plan == "yearly" and STRIPE_PRICE_YEARLY:
-            price_id = STRIPE_PRICE_YEARLY
-        else:
-            price_id = STRIPE_PRICE_MONTHLY
+#         # Pick the correct price based on the user's chosen plan
+#         if pending_plan == "yearly" and STRIPE_PRICE_YEARLY:
+#             price_id = STRIPE_PRICE_YEARLY
+#         else:
+#             price_id = STRIPE_PRICE_MONTHLY
 
-        if not price_id:
-            logger.error(f"[VERIFY] Stripe price not configured for plan={pending_plan}")
-            return None, "Billing is not configured. Please contact support."
+#         if not price_id:
+#             logger.error(f"[VERIFY] Stripe price not configured for plan={pending_plan}")
+#             return None, "Billing is not configured. Please contact support."
 
-        logger.info(f"[VERIFY] Using plan={pending_plan} price_id={price_id} for user={user_id}")
+#         logger.info(f"[VERIFY] Using plan={pending_plan} price_id={price_id} for user={user_id}")
 
-        session = stripe_module.checkout.Session.create(
-            customer=customer_id,
-            mode="subscription",
-            line_items=[{"price": price_id, "quantity": 1}],
-            subscription_data={"trial_period_days": 7},
-            payment_method_collection="always",
-            success_url=f"{FRONTEND_URL}/welcome?session_id={{CHECKOUT_SESSION_ID}}",
-            cancel_url=f"{FRONTEND_URL}/signup",
-        )
-        logger.info(f"[VERIFY] Checkout session created: {session.id} for user={user_id}")
-        return session.url, None
+#        session = stripe_module.checkout.Session.create(
+#             customer=customer_id,
+#             mode="subscription",
+#             line_items=[{"price": price_id, "quantity": 1}],
+#             subscription_data={"trial_period_days": 7},
+#             payment_method_collection="always",
+#             success_url=f"{FRONTEND_URL}/welcome?session_id={{CHECKOUT_SESSION_ID}}",
+#             cancel_url=f"{FRONTEND_URL}/signup",
+#         )
+#         logger.info(f"[VERIFY] Checkout session created: {session.id} for user={user_id}")
+#         return session.url, None
 
-    except stripe_module.error.StripeError as e:
-        logger.error(f"[VERIFY] Stripe error for user={user_id}: {e}")
-        return None, "Unable to start checkout. Please try again later."
-    except Exception as e:
-        logger.error(f"[VERIFY] Unexpected error creating checkout for user={user_id}: {e}")
-        return None, "Unable to start checkout. Please try again later."
+#     except stripe_module.error.StripeError as e:
+#         logger.error(f"[VERIFY] Stripe error for user={user_id}: {e}")
+#         return None, "Unable to start checkout. Please try again later."
+#     except Exception as e:
+#         logger.error(f"[VERIFY] Unexpected error creating checkout for user={user_id}: {e}")
+#         return None, "Unable to start checkout. Please try again later."
 
 
 # ── Failure-redirect URL ─────────────────────────────────────────────────────
-_ERROR_REDIRECT = f"{FRONTEND_URL}/signup?error=invalid_token"
+_ERROR_REDIRECT = f"{os.environ.get('FRONTEND_URL', '')}/signup?error=invalid_token"
 
 
 async def _verify_email_with_token(
@@ -297,13 +298,14 @@ async def _verify_email_with_token(
                     f"[VERIFY-EMAIL] idempotent retry — already verified "
                     f"user={old_token_doc['user_id']}"
                 )
-                checkout_url, err = await _create_stripe_checkout_for_user(
-                    db, old_token_doc["user_id"], existing_user,
-                )
-                if err:
-                    logger.error(f"[VERIFY-EMAIL] Stripe checkout failed on retry: {err}")
-                    return RedirectResponse(url=_ERROR_REDIRECT, status_code=302)
-                return RedirectResponse(url=checkout_url, status_code=302)
+                # STRIPE DISABLED - Google Play submission - do not delete
+                # checkout_url, err = await _create_stripe_checkout_for_user(
+                #     db, old_token_doc["user_id"], existing_user,
+                # )
+                # if err:
+                #     logger.error(f"[VERIFY-EMAIL] Stripe checkout failed on retry: {err}")
+                #     return RedirectResponse(url=_ERROR_REDIRECT, status_code=302)
+                return JSONResponse({"message": "Email verified successfully"})
             logger.warning(
                 f"[VERIFY-EMAIL] FAIL bucket=ALREADY_USED "
                 f"user={old_token_doc['user_id']} preview={safe_preview}"
@@ -338,12 +340,13 @@ async def _verify_email_with_token(
     # NOTE: The "You're All Set" welcome email is NOT sent here.
     # It is sent later by the Stripe webhook (checkout.session.completed)
     # after the user has actually completed payment/trial signup.
-    checkout_url, err = await _create_stripe_checkout_for_user(db, user_id, user)
-    if err:
-        logger.error(f"[VERIFY-EMAIL] Stripe checkout creation failed: {err}")
-        return RedirectResponse(url=_ERROR_REDIRECT, status_code=302)
+    # STRIPE DISABLED - Google Play submission - do not delete
+    # checkout_url, err = await _create_stripe_checkout_for_user(db, user_id, user)
+    # if err:
+    #     logger.error(f"[VERIFY-EMAIL] Stripe checkout creation failed: {err}")
+    #     return RedirectResponse(url=_ERROR_REDIRECT, status_code=302)
 
-    return RedirectResponse(url=checkout_url, status_code=302)
+    return JSONResponse({"message": "Email verified successfully"})
 
 
 class ResendVerificationRequest(BaseModel):
