@@ -18,6 +18,8 @@ export default function SubscribeSuccess() {
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<SessionResult | null>(null);
 
+  // STRIPE DISABLED - Google Play submission - do not delete
+  /*
   useEffect(() => {
     async function verify() {
       if (!session_id) {
@@ -41,6 +43,7 @@ export default function SubscribeSuccess() {
 
     verify();
   }, [session_id]);
+  */
 
   const planLabel = result?.plan ? result.plan.charAt(0).toUpperCase() + result.plan.slice(1) : 'Subscription';
 

@@ -5979,223 +5979,100 @@ def _dedupe_camping_spots(spots: List[CampingSpot], precision: int = 3) -> List[
 
 @api_router.post("/free-camping/search", response_model=FreeCampingResponse)
 async def search_free_camping(request: FreeCampingRequest):
-    """Find free camping spots (BLM, National Forest, etc.) near given coordinates using OpenStreetMap data."""
-    # TESTING: Paywalls disabled - require_premium(request.subscription_id, CAMPSITE_INDEX)  # Reuse campsite_index feature for now
-    
+    """Find free camping spots (BLM, National Forest, etc.) near given coordinates using RIDB API."""
     try:
-        # Convert miles to meters for Overpass API
-        radius_meters = int(request.radius_miles * 1609.34)
-        
-        # Query OpenStreetMap via Overpass API for camping sites
-        overpass_query = f"""
-        [out:json][timeout:25];
-        (
-          node["tourism"="camp_site"](around:{radius_meters},{request.latitude},{request.longitude});
-          node["tourism"="caravan_site"](around:{radius_meters},{request.latitude},{request.longitude});
-          way["tourism"="camp_site"](around:{radius_meters},{request.latitude},{request.longitude});
-          way["tourism"="caravan_site"](around:{radius_meters},{request.latitude},{request.longitude});
-        );
-        out body;
-        >;
-        out skel qt;
-        """
-        
-        async with httpx.AsyncClient(timeout=45.0) as client:
-            # Try multiple Overpass API instances
-            overpass_urls = [
-                "https://overpass-api.de/api/interpreter",
-                "https://overpass.kumi.systems/api/interpreter",
-            ]
-            
-            osm_data = None
-            last_error = None
-            
-            for url in overpass_urls:
-                try:
-                    osm_response = await client.post(url, data=overpass_query)
-                    osm_response.raise_for_status()
-                    osm_data = osm_response.json()
-                    break
-                except Exception as e:
-                    last_error = e
-                    logger.warning(f"Free camping - Overpass instance {url} failed: {e}")
-                    continue
-            
-            if osm_data is None:
-                detail = "Camping search unavailable right now. Please try again shortly."
-                logger.warning("Free camping - all Overpass instances failed: %s", last_error)
-                raise HTTPException(status_code=503, detail=detail)
-        
+        RIDB_API_KEY = os.environ.get("RIDB_API_KEY", "")
+        if not RIDB_API_KEY:
+            raise HTTPException(status_code=503, detail="Camping search unavailable - missing API key")
+
+        url = "https://ridb.recreation.gov/api/v1/facilities"
+        params = {
+            "apikey": RIDB_API_KEY,
+            "latitude": request.latitude,
+            "longitude": request.longitude,
+            "radius": request.radius_miles,
+            "activity": "CAMPING",
+            "limit": 50,
+            "full": "true"
+        }
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.get(url, params=params)
+            response.raise_for_status()
+            data = response.json()
+
         spots = []
-        
-        for element in osm_data.get("elements", []):
-            # Get coordinates
-            if element.get("type") == "node":
-                lat = element.get("lat")
-                lon = element.get("lon")
-            elif element.get("type") == "way" and "center" in element:
-                lat = element["center"].get("lat")
-                lon = element["center"].get("lon")
-            else:
-                continue
-            
-            if not lat or not lon:
-                continue
-            
-            # Calculate distance
-            distance_miles = math.sqrt(
-                (lat - request.latitude) ** 2 + (lon - request.longitude) ** 2
-            ) * 69.0  # Rough approximation: 1 degree ≈ 69 miles
-            
-            tags = element.get("tags", {})
-            
-            # Extract name with better fallbacks
-            name_candidates = [
-                tags.get("name"),
-                tags.get("official_name"),
-                tags.get("alt_name"),
-                tags.get("operator"),
-                tags.get("ref"),
-                tags.get("designation"),
-            ]
-            name = next((n for n in name_candidates if n), None)
-            if not name:
-                nearest_place = (
-                    tags.get("addr:place")
-                    or tags.get("addr:city")
-                    or tags.get("addr:county")
-                    or tags.get("addr:state")
-                )
-                if tags.get("backcountry") == "yes":
-                    name = f"Backcountry near {nearest_place}" if nearest_place else "Backcountry Camping"
-                elif tags.get("tourism") == "camp_site":
-                    name = f"Public Campsite near {nearest_place}" if nearest_place else "Public Campsite"
+        for facility in data.get("RECDATA", []):
+            try:
+                lat = float(facility.get("FacilityLatitude", 0))
+                lon = float(facility.get("FacilityLongitude", 0))
+                if lat == 0 and lon == 0:
+                    continue
+
+                # Calculate distance
+                from math import radians, sin, cos, sqrt, atan2
+                R = 3958.8
+                lat1, lon1 = radians(request.latitude), radians(request.longitude)
+                lat2, lon2 = radians(lat), radians(lon)
+                dlat, dlon = lat2 - lat1, lon2 - lon1
+                a = sin(dlat/2)**2 + cos(lat1)*cos(lat2)*sin(dlon/2)**2
+                distance_miles = round(R * 2 * atan2(sqrt(a), sqrt(1-a)), 1)
+
+                name = facility.get("FacilityName", "Unknown Campground").title()
+                description = facility.get("FacilityDescription", "")[:200] if facility.get("FacilityDescription") else ""
+                phone = facility.get("FacilityPhone", "")
+                website = facility.get("FacilityReservationURL", "") or facility.get("FacilityMapURL", "")
+                fee = facility.get("FacilityUseFeeDescription", "")
+                is_free = not fee or fee.strip() == "" or "free" in fee.lower() or fee.strip() == "0"
+                org_name = facility.get("OrgAbbrevName", "")
+
+                if "BLM" in org_name or "Bureau of Land" in name:
+                    camp_type = "BLM"
+                elif "National Forest" in name or "NF" in org_name:
+                    camp_type = "National Forest"
+                elif "National Park" in name:
+                    camp_type = "Campground"
                 else:
-                    name = f"Dispersed Camping near {nearest_place}" if nearest_place else "Dispersed Camping"
-            
-            # Extract contact information
-            phone = tags.get("phone") or tags.get("contact:phone")
-            website = tags.get("website") or tags.get("contact:website") or tags.get("url")
-            email = tags.get("email") or tags.get("contact:email")
-            
-            # Build contact string
-            contact = None
-            if phone or email:
-                contact_parts = []
-                if phone:
-                    contact_parts.append(f"Phone: {phone}")
-                if email:
-                    contact_parts.append(f"Email: {email}")
-                contact = " | ".join(contact_parts)
-            
-            # Determine type
-            camp_type = "Campground"
-            if "camp_site" in tags.get("tourism", ""):
-                camp_type = "Campsite"
-            if tags.get("backcountry") == "yes":
-                camp_type = "Backcountry"
-            if "National Forest" in tags.get("operator", ""):
-                camp_type = "National Forest"
-            if "BLM" in tags.get("operator", ""):
-                camp_type = "BLM Land"
-            
-            # Extract amenities
-            amenities = []
-            if tags.get("toilets") == "yes":
-                amenities.append("Toilets")
-            if tags.get("drinking_water") == "yes":
-                amenities.append("Water")
-            if tags.get("shower") == "yes":
-                amenities.append("Showers")
-            if tags.get("electricity") == "yes":
-                amenities.append("Electricity")
-            if tags.get("tents") == "yes":
-                amenities.append("Tent Sites")
-            if tags.get("caravans") == "yes" or "caravan" in tags.get("tourism", ""):
-                amenities.append("RV Sites")
-            if not amenities:
-                amenities.append("Basic Site")
-            
-            # Determine if free
-            fee = tags.get("fee", "unknown")
-            is_free = fee == "no" or tags.get("backcountry") == "yes"
-            
-            # Estimate access difficulty
-            access = tags.get("access", "")
-            surface = tags.get("surface", "")
-            access_difficulty = "moderate"
-            if surface in ["paved", "asphalt"]:
-                access_difficulty = "easy"
-            elif "4wd" in surface.lower() or tags.get("4wd_only") == "yes":
-                access_difficulty = "4wd-required"
-            elif surface in ["gravel", "dirt"]:
-                access_difficulty = "moderate"
-            
-            # Get description
-            description = tags.get("description", f"Camping area near {name}")
-            
-            # Estimate elevation (would need elevation API for accuracy)
-            elevation_ft = int(tags.get("ele", 5000))  # Default 5000ft if unknown
-            
-            # Default rating (OSM doesn't have ratings)
-            rating = 3.5
-            
-            # Cell coverage estimate (unknown from OSM)
-            cell_coverage = "unknown"
-            
-            # Stay limit
-            stay_limit = tags.get("opening_hours", "Check local regulations")
-            if tags.get("backcountry") == "yes":
-                stay_limit = "14 days (typical)"
-            
-            spots.append(CampingSpot(
-                name=name,
-                type=camp_type,
-                distance_miles=round(distance_miles, 1),
-                latitude=lat,
-                longitude=lon,
-                source_id=str(element.get("id")) if element.get("id") else None,
-                description=description,
-                amenities=amenities,
-                stay_limit=stay_limit,
-                cell_coverage=cell_coverage,
-                access_difficulty=access_difficulty,
-                elevation_ft=elevation_ft,
-                rating=rating,
-                free=is_free,
-                phone=phone,
-                website=website,
-                contact=contact
-            ))
-        
-        # Deduplicate closely clustered points before sorting/limiting
-        spots = _dedupe_camping_spots(spots)
+                    camp_type = "Campground"
 
-        # Sort by distance
+                amenities = []
+                facility_type = facility.get("FacilityTypeDescription", "")
+                if "electric" in description.lower():
+                    amenities.append("Electric Hookups")
+                if "water" in description.lower():
+                    amenities.append("Water")
+                if "restroom" in description.lower() or "toilet" in description.lower():
+                    amenities.append("Restrooms")
+
+                spots.append(CampingSpot(
+                    name=name,
+                    type=camp_type,
+                    distance_miles=distance_miles,
+                    latitude=lat,
+                    longitude=lon,
+                    description=description,
+                    amenities=amenities,
+                    stay_limit="14 days",
+                    cell_coverage="Unknown",
+                    access_difficulty="Unknown",
+                    elevation_ft=0,
+                    rating=0.0,
+                    free=is_free,
+                    phone=phone if phone else None,
+                    website=website if website else None,
+                ))
+            except Exception:
+                continue
+
         spots.sort(key=lambda x: x.distance_miles)
-
-        # Limit to 20 results
         spots = spots[:20]
-        
-        logger.info(f"Free camping search completed: found {len(spots)} spots from OSM within {request.radius_miles} miles")
-        
-        return FreeCampingResponse(
-            spots=spots,
-            is_premium_locked=False,
-        )
-    
-    except httpx.HTTPError as e:
-        logger.error(f"Overpass API error: {e}")
-        raise HTTPException(
-            status_code=503,
-            detail="Camping data service temporarily unavailable"
-        )
+        return FreeCampingResponse(spots=spots, is_premium_locked=False)
+
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error searching free camping: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail="Unable to search for camping spots at this time"
-        )
+        raise HTTPException(status_code=503, detail="Camping search unavailable right now. Please try again shortly.")
 
 
 # ==================== Dump Station Finder Endpoint ====================

@@ -18,6 +18,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const isWideScreen = SCREEN_WIDTH > 768;
 
+// STRIPE DISABLED - Google Play submission - do not delete
 // All pricing CTAs route to /signup - Stripe checkout handled post-signup
 
 export default function LandingPage() {
@@ -374,9 +375,12 @@ export default function LandingPage() {
             </View>
           </View>
 
+          {/* // STRIPE DISABLED - Google Play submission - do not delete */}
+          {/*
           <Text style={styles.pricingDisclaimer}>
             You'll be redirected to Stripe to complete checkout. Premium access activates automatically after payment confirmation.
           </Text>
+          */}
         </View>
 
         {/* Comparison Table */}
@@ -428,7 +432,9 @@ export default function LandingPage() {
           </View>
         </View>
 
+        {/* // STRIPE DISABLED - Google Play submission - do not delete */}
         {/* FAQ Section */}
+        {/*
         <View style={styles.faqSection} nativeID="faq">
           <Text style={styles.sectionTitle}>Frequently Asked Questions</Text>
           
@@ -479,6 +485,7 @@ export default function LandingPage() {
             ))}
           </View>
         </View>
+        */}
 
         {/* Final CTA */}
         <View style={styles.finalCtaSection}>
@@ -519,10 +526,13 @@ export default function LandingPage() {
                 <Text style={styles.footerLink}>Contact</Text>
               </TouchableOpacity>
             </View>
+            {/* // STRIPE DISABLED - Google Play submission - do not delete */}
+            {/*
             <View style={styles.footerStripe}>
               <Ionicons name="lock-closed" size={14} color="#6b7280" />
               <Text style={styles.footerStripeText}>Payments secured by Stripe</Text>
             </View>
+            */}
           </View>
           <Text style={styles.footerCopyright}>
             © {new Date().getFullYear()} RouteCast. All rights reserved.

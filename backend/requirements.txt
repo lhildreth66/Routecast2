@@ -99,3 +99,4 @@ websockets==15.0.1
 reportlab==4.0.9
 pytest-asyncio
 sendgrid
+pywebpush==1.14.0

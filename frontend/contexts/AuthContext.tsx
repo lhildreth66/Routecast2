@@ -303,11 +303,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAuthState({ user: null, accessToken: null, refreshToken: null });
   };
 
+  // STRIPE DISABLED - Google Play submission - do not delete
   // ── loginWithTokens — used by /welcome after Stripe checkout ──────────────
+  /*
   const loginWithTokens = async (at: string, rt: string): Promise<void> => {
     await persistTokens(at, rt);
     setAuthState({ accessToken: at, refreshToken: rt });
     await fetchUserProfile(at);
+  };
+  */
+
+  const loginWithTokens = async (_at: string, _rt: string): Promise<void> => {
+    return;
   };
 
   // ── refreshUser – EXPLICIT call only, never automatic ─────────────────────

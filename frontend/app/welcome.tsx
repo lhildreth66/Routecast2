@@ -31,6 +31,8 @@ export default function WelcomeScreen() {
   const [activating, setActivating] = useState(true);
   const activatedRef = useRef(false);
 
+  // STRIPE DISABLED - Google Play submission - do not delete
+  /*
   useEffect(() => {
     if (!session_id || activatedRef.current) return;
     activatedRef.current = true;
@@ -67,6 +69,7 @@ export default function WelcomeScreen() {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session_id]);
+  */
 
   // ── Error state ────────────────────────────────────────────────────────────
   if (error) {

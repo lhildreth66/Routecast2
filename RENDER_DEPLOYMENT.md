@@ -66,7 +66,7 @@ For mobile apps, skip this and use EAS Build instead.
 |---------|-------|
 | **Name** | `routecast-frontend` |
 | **Root Directory** | `frontend` |
-| **Build Command** | `yarn install && npx expo export --platform web` |
+| **Build Command** | `yarn install && npx expo export --platform web && cp public/push-sw.js dist/push-sw.js` |
 | **Publish Directory** | `dist` |
 
 4. Add Environment Variables:

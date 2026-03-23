@@ -9,6 +9,8 @@ export default function SubscriptionSuccessScreen() {
   const { refreshUser } = useAuth();
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
 
+  // STRIPE DISABLED - Google Play submission - do not delete
+  /*
   useEffect(() => {
     let cancelled = false;
 
@@ -34,6 +36,7 @@ export default function SubscriptionSuccessScreen() {
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session_id]);
+  */
 
   return (
     <View style={styles.container}>

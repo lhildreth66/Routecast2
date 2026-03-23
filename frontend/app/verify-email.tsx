@@ -51,7 +51,9 @@ export default function VerifyEmailScreen() {
   const [countdown, setCountdown] = useState(0);
   const [resendEmail, setResendEmail] = useState(emailParam || '');
 
+  // STRIPE DISABLED - Google Play submission - do not delete
   // ── MODE 1: Token present → redirect to backend for Stripe checkout ────
+  /*
   useEffect(() => {
     if (!token) return;
     // Redirect the browser directly to the backend GET endpoint which will
@@ -61,6 +63,7 @@ export default function VerifyEmailScreen() {
       window.location.href = `${API_BASE}/api/auth/verify-email?token=${encodeURIComponent(token)}`;
     }
   }, [token]);
+  */
 
   // Countdown timer for resend cooldown
   useEffect(() => {

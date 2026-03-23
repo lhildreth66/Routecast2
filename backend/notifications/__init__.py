@@ -191,6 +191,10 @@ async def start_route_monitor(request: StartRouteMonitorRequest):
     push_token = request.push_token or request.expo_push_token
     user_id = request.user_id or push_token
 
+    if not push_token and user_id:
+        # Web Push flows are user-centric; use a stable synthetic token for monitor persistence.
+        push_token = f"web:{user_id}"
+
     if not push_token:
         raise HTTPException(status_code=400, detail="push_token required")
 
@@ -264,7 +268,8 @@ async def start_route_monitor(request: StartRouteMonitorRequest):
 
 
 class RouteMonitorHeartbeatRequest(BaseModel):
-    push_token: str
+    push_token: Optional[str] = None
+    user_id: Optional[str] = None
     monitor_id: Optional[str] = None
 
 
@@ -275,7 +280,16 @@ async def route_monitor_heartbeat(request: RouteMonitorHeartbeatRequest):
     from datetime import datetime, timezone
 
     now = datetime.now(timezone.utc)
-    query: dict = {"active": True, "push_token": request.push_token}
+    query: dict = {"active": True}
+    if request.push_token:
+        query["push_token"] = request.push_token
+    if request.user_id:
+        query.setdefault("$or", [])
+        query["$or"].append({"user_id": request.user_id})
+    if "$or" in query and len(query["$or"]) == 0:
+        query.pop("$or", None)
+    if "push_token" not in query and "$or" not in query:
+        raise HTTPException(status_code=400, detail="push_token or user_id required")
     if request.monitor_id:
         query["monitor_id"] = request.monitor_id
     result = service.db.route_monitors.update_many(query, {"$set": {"last_seen_at": now}})

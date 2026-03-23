@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 import httpx
+from services.web_push_service import WebPushService
 from pymongo.errors import OperationFailure
 
 logger = logging.getLogger(__name__)
@@ -775,6 +776,7 @@ class CriticalRouteAlertWorker:
         self._recent_alert_cache: Dict[str, Dict[str, Any]] = {}
         self._nws_cache_ttl = int(os.environ.get("ROUTE_ALERTS_NWS_CACHE_TTL", "600"))
         self._nws_cache: Dict[str, Dict[str, Any]] = {}
+        self.web_push = WebPushService()
 
     def _recent_cache_key(
         self, monitor_id: str, route_signature: str, route_id: str, alert_id: str, band: str
@@ -1183,6 +1185,25 @@ class CriticalRouteAlertWorker:
             except TypeError:
                 return self.service.push_gateway.send(token, payload["title"], payload["collapsed_body"])
 
+    def _send_webpush(self, subscription: Dict[str, Any], payload: Dict[str, Any], user_id: Optional[str]) -> bool:
+        body = payload.get("collapsed_body") or payload.get("body") or "Routecast alert"
+        data = payload.get("data") or {}
+        send_payload = {
+            "title": payload.get("title") or "Routecast Alert",
+            "body": body,
+            "data": data,
+            "badge": payload.get("badge"),
+            "icon": payload.get("icon"),
+        }
+        result = self.web_push.send(subscription, send_payload)
+        logger.info(
+            "[route-alerts] webpush_send user=%s endpoint=%s success=%s",
+            user_id,
+            (subscription.get("endpoint") or "")[:24] + "…",
+            result.get("success"),
+        )
+        return bool(result.get("success"))
+
     def _process_monitor_with_cache(
         self,
         prepared: Dict[str, Any],
@@ -1217,6 +1238,20 @@ class CriticalRouteAlertWorker:
         monitor_doc = prepared.get("monitor") or {}
         user_id = monitor_doc.get("user_id") or token
         token_suffix = (token or "")[-6:]
+
+        web_sub = None
+        try:
+            web_sub = self.service.db.web_push_subscriptions.find_one({"user_id": user_id}) if user_id else None
+            if web_sub:
+                logger.info(
+                    "[route-alerts] webpush_subscription_found run_id=%s user=%s endpoint=%s",
+                    run_label,
+                    user_id,
+                    (web_sub.get("endpoint") or "")[:18] + "…",
+                )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[route-alerts] webpush lookup failed user=%s err=%s", user_id, exc)
+
         current_route_id = self.service.get_current_route_id(user_id=user_id, push_token=token) or monitor_doc.get("current_route_id")
         if not current_route_id and route_id:
             current_route_id = route_id  # fallback when no state is persisted
@@ -1548,7 +1583,16 @@ class CriticalRouteAlertWorker:
         if eligible_alerts:
             selected_alerts = sorted(eligible_alerts, key=_eligible_sort_key)
             summary_payload = _build_summary_payload(selected_alerts)
-            if self._send_notification(token, summary_payload):
+            delivered = False
+            delivery_channel = None
+            if web_sub:
+                delivered = self._send_webpush(web_sub, summary_payload, user_id)
+                delivery_channel = "webpush"
+            elif token:
+                delivered = self._send_notification(token, summary_payload)
+                delivery_channel = "legacy_token"
+
+            if delivered:
                 for item in selected_alerts:
                     alert_id = item.get("alert_id")
                     band = item.get("band")
@@ -1581,6 +1625,7 @@ class CriticalRouteAlertWorker:
                         "monitor_id": monitor_id,
                         "user_id": user_id,
                         "push_token_suffix": token_suffix,
+                        "delivery_channel": delivery_channel,
                         "route_id": route_id,
                         "alert_ids": sorted(set(sent_alert_ids)),
                         "count": len(selected_alerts),

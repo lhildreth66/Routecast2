@@ -4,7 +4,7 @@ Handles push token registration and route monitoring.
 """
 
 from fastapi import APIRouter, HTTPException, Depends, Header
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional, Dict, List
 from datetime import datetime
 import logging
@@ -107,6 +107,25 @@ class PushSettingsRequest(BaseModel):
     platform: str = "unknown"
 
 
+def _redact_endpoint(endpoint: Optional[str]) -> str:
+    if not endpoint:
+        return ""
+    if len(endpoint) <= 10:
+        return endpoint
+    return f"{endpoint[:16]}…{endpoint[-6:]}"
+
+
+class WebPushSubscription(BaseModel):
+    """Browser Web Push subscription payload (aligned with PushSubscription JSON)."""
+
+    endpoint: str
+    expirationTime: Optional[float] = Field(None, alias="expirationTime")
+    keys: Dict[str, str]
+    user_agent: Optional[str] = None
+    platform: Optional[str] = None
+    title: Optional[str] = None  # optional label from client UI
+
+
 @router.get("/settings")
 async def get_push_settings(
     user: dict = Depends(get_current_user)
@@ -118,14 +137,26 @@ async def get_push_settings(
         {"user_id": user["sub"]},
         {"push_enabled": 1, "push_token": 1, "push_platform": 1}
     )
+
+    web_sub = await db.web_push_subscriptions.find_one({"user_id": user["sub"]})
+    web_subscribed = bool(web_sub and web_sub.get("endpoint"))
+    web_endpoint = _redact_endpoint(web_sub.get("endpoint") if web_sub else None)
     
     if not user_record:
-        return {"push_enabled": False, "push_token": None, "platform": None}
+        return {
+            "push_enabled": False,
+            "push_token": None,
+            "platform": None,
+            "web_subscribed": web_subscribed,
+            "web_endpoint": web_endpoint,
+        }
     
     return {
         "push_enabled": user_record.get("push_enabled", False),
         "push_token": user_record.get("push_token"),
-        "platform": user_record.get("push_platform")
+        "platform": user_record.get("push_platform"),
+        "web_subscribed": web_subscribed,
+        "web_endpoint": web_endpoint,
     }
 
 
@@ -169,6 +200,87 @@ async def update_push_settings(
         "success": True,
         "push_enabled": request.push_enabled
     }
+
+
+@router.get("/web-subscription")
+async def get_web_push_subscription(user: dict = Depends(get_current_user)):
+    """Return the stored Web Push subscription for the authenticated user (redacted endpoint)."""
+    from server import db
+
+    doc = await db.web_push_subscriptions.find_one({"user_id": user["sub"]})
+    if not doc:
+        return {"web_subscribed": False, "subscription": None}
+
+    redacted = _redact_endpoint(doc.get("endpoint"))
+    logger.info(
+        "[push:web] subscription_lookup user=%s endpoint=%s",
+        user["sub"],
+        redacted,
+    )
+
+    doc.pop("_id", None)
+    doc["endpoint"] = redacted
+    return {"web_subscribed": True, "subscription": doc}
+
+
+@router.post("/web-subscription")
+async def save_web_push_subscription(
+    subscription: WebPushSubscription,
+    user_agent: Optional[str] = Header(None),
+    user: dict = Depends(get_current_user),
+):
+    """Save or update a browser Web Push subscription for the current user."""
+    from server import db
+
+    now = datetime.utcnow()
+    endpoint = subscription.endpoint
+    if not endpoint or not subscription.keys.get("p256dh") or not subscription.keys.get("auth"):
+        raise HTTPException(status_code=400, detail="Invalid Web Push subscription payload")
+
+    record = {
+        "user_id": user["sub"],
+        "endpoint": endpoint,
+        "keys": subscription.keys,
+        "expirationTime": subscription.expirationTime,
+        "user_agent": subscription.user_agent or user_agent,
+        "platform": subscription.platform,
+        "title": subscription.title,
+        "updated_at": now,
+    }
+
+    result = await db.web_push_subscriptions.update_one(
+        {"user_id": user["sub"]},
+        {
+            "$set": record,
+            "$setOnInsert": {"created_at": now},
+        },
+        upsert=True,
+    )
+
+    logger.info(
+        "[push:web] subscription_saved user=%s endpoint=%s matched=%s modified=%s upserted=%s",
+        user["sub"],
+        _redact_endpoint(endpoint),
+        result.matched_count,
+        result.modified_count,
+        bool(getattr(result, "upserted_id", None)),
+    )
+
+    return {"success": True, "web_subscribed": True, "endpoint": _redact_endpoint(endpoint)}
+
+
+@router.delete("/web-subscription")
+async def delete_web_push_subscription(user: dict = Depends(get_current_user)):
+    """Delete the stored Web Push subscription for the authenticated user."""
+    from server import db
+
+    result = await db.web_push_subscriptions.delete_one({"user_id": user["sub"]})
+    logger.info(
+        "[push:web] subscription_deleted user=%s deleted=%s",
+        user["sub"],
+        result.deleted_count,
+    )
+    return {"success": True, "web_subscribed": False, "deleted": result.deleted_count}
 
 
 

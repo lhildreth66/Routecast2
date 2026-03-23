@@ -23,6 +23,8 @@ function PaywallGuard() {
   const pathname = usePathname();
   const firedRef = useRef(false);
 
+  // STRIPE DISABLED - Google Play submission - do not delete
+  /*
   useEffect(() => {
     if (!rootNavState?.key) return;
     if (!hasHydrated || authLoading) return;
@@ -39,6 +41,7 @@ function PaywallGuard() {
     __DEV__ && console.log('[paywall] blocking', pathname, '→ /subscription');
     router.replace('/subscription');
   }, [rootNavState?.key, hasHydrated, authLoading, accessToken, user?.is_premium, user?.email_verified, pathname]);
+  */
 
   return null;
 }

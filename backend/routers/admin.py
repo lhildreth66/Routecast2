@@ -270,6 +270,8 @@ async def get_subscription_logs(
     }
 
 
+# STRIPE DISABLED - Google Play submission - do not delete
+"""
 @router.post("/reconcile-subscriptions")
 async def reconcile_subscriptions(
     request: Request,
@@ -541,3 +543,4 @@ async def reconcile_subscriptions(
         "timestamp": now.isoformat(),
         "results": results,
     }
+"""

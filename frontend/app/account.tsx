@@ -44,6 +44,8 @@ export default function AccountScreen() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken]);
 
+  // STRIPE DISABLED - Google Play submission - do not delete
+  /*
   const handleManageSubscription = async () => {
     if (!user?.subscription_provider || user.subscription_provider !== 'stripe') {
       Alert.alert(
@@ -106,6 +108,7 @@ export default function AccountScreen() {
       setLoading(false);
     }
   };
+  */
 
   const performLogout = async () => {
     setError('');
@@ -329,7 +332,9 @@ export default function AccountScreen() {
               )}
             </View>
 
+            {/* // STRIPE DISABLED - Google Play submission - do not delete */}
             {/* Manage Subscription - only for premium Stripe users */}
+            {/**
             {user.is_premium && user.subscription_provider === 'stripe' && (
               <TouchableOpacity
                 style={[styles.manageButton, loading && styles.buttonDisabled]}
@@ -347,6 +352,7 @@ export default function AccountScreen() {
                 )}
               </TouchableOpacity>
             )}
+            */}
           </View>
 
           {/* Account Section */}

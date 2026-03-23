@@ -107,7 +107,9 @@ export default function LoginScreen() {
               </View>
             )}
 
+            {/* // STRIPE DISABLED - Google Play submission - do not delete */}
             {/* Trial-started banner (Stripe success redirect) */}
+            {/*
             {trial === '1' && (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10,
                 backgroundColor: 'rgba(34,197,94,0.12)', borderWidth: 1,
@@ -118,6 +120,7 @@ export default function LoginScreen() {
                 </Text>
               </View>
             )}
+            */}
 
             {/* Login Form */}
             <View style={styles.form}>
