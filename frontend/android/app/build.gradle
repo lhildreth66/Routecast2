@@ -92,8 +92,9 @@ android {
         applicationId 'com.routecast.app'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 164
+        versionCode 167
         versionName "1.0.135"
+        missingDimensionStrategy 'store', 'play'
     }
     signingConfigs {
         debug {
