@@ -110,4 +110,3 @@ class TestPlanToStripePrice:
             )
         except HTTPException as exc:
             assert exc.status_code == 500
-"""

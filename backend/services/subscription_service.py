@@ -16,7 +16,8 @@ import httpx
 # Initialise Stripe SDK once
 _STRIPE_API_KEY = os.environ.get('STRIPE_API_KEY', '')
 if _STRIPE_API_KEY:
-    stripe.api_key = _STRIPE_API_KEY
+    # stripe.api_key = _STRIPE_API_KEY  # STRIPE DISABLED
+    pass
 
 # How often to re-verify subscription status against Stripe (seconds).
 # Set to 0 to disable live checks entirely.

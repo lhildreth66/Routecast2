@@ -137,4 +137,3 @@ async def test_portal_creates_customer_when_missing_for_stripe_user(monkeypatch)
 
     assert result["url"] == "https://billing.stripe.com/session_new"
     update_user_mock.assert_awaited_once_with(db, "user_3", {"stripe_customer_id": "cus_new"})
-"""
