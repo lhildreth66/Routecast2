@@ -5206,6 +5206,7 @@ async def estimate_solar_path(request: TerrainShadeRequest):
             detail=f"Invalid parameters: {str(e)}"
         )
     except Exception as e:
+        logger.exception("[terrain/sun-path] failed", exc_info=e)
         raise HTTPException(
             status_code=500,
             detail="Unable to calculate solar path at this time"
@@ -5230,6 +5231,7 @@ async def estimate_shade_blocking(request: TerrainShadeRequest):
             detail=f"Invalid parameters: {str(e)}"
         )
     except Exception as e:
+        logger.exception("[terrain/shade-blocks] failed", exc_info=e)
         raise HTTPException(
             status_code=500,
             detail="Unable to calculate shade blocking at this time"
@@ -8512,6 +8514,8 @@ class TruckRestriction(BaseModel):
 
 class TruckRestrictionResponse(BaseModel):
     restrictions: List[TruckRestriction]
+    message: Optional[str] = None
+    is_premium_locked: bool = False
 
 @api_router.post("/truck-restrictions/search", response_model=TruckRestrictionResponse)
 async def search_truck_restrictions(request: TruckRestrictionRequest):
@@ -8655,8 +8659,12 @@ async def search_truck_restrictions(request: TruckRestrictionRequest):
         return TruckRestrictionResponse(restrictions=restrictions)
     
     except Exception as e:
-        logger.error(f"Error searching truck restrictions: {e}")
-        raise HTTPException(status_code=500, detail=f"Error searching truck restrictions: {str(e)}")
+        logger.warning(f"Truck restrictions Overpass failed: {e}")
+        return TruckRestrictionResponse(
+            restrictions=[],
+            message="Truck restriction data temporarily unavailable. Please try again shortly.",
+            is_premium_locked=False,
+        )
 
 
 # ===== TRACTOR TRAILER ALERTS (Keep existing synthetic route analysis) =====
