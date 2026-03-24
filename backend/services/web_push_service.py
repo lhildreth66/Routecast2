@@ -12,7 +12,11 @@ import logging
 import os
 from typing import Dict, Optional
 
-from pywebpush import webpush, WebPushException  # type: ignore
+try:
+    from pywebpush import webpush, WebPushException  # type: ignore
+except ImportError:
+    webpush = None
+    WebPushException = None
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +45,9 @@ class WebPushService:
             subscription: dict with endpoint, keys.p256dh, keys.auth
             payload: dict to JSON-encode for the notification
         """
+        if webpush is None:
+            logger.warning("[webpush] pywebpush not installed; skipping send")
+            return {"success": False, "error": "pywebpush not installed"}
         try:
             vapid_args = self._vapid_kwargs()
         except RuntimeError as exc:

@@ -4,9 +4,14 @@ Handles sending verification emails, password resets, etc.
 """
 import os
 from typing import Optional
-from sendgrid import SendGridAPIClient
-from sendgrid.helpers.mail import Mail
 import logging
+
+try:
+    from sendgrid import SendGridAPIClient
+    from sendgrid.helpers.mail import Mail
+except ImportError:  # SendGrid not installed in some environments
+    SendGridAPIClient = None
+    Mail = None
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +34,9 @@ class EmailDeliveryError(Exception):
 
 def _send_email(to: str, subject: str, html_content: str) -> bool:
     """Send an email via SendGrid"""
+    if SendGridAPIClient is None or Mail is None:
+        logger.warning(f"SendGrid SDK not installed. Would send email to {to}: {subject}")
+        return True
     if not SENDGRID_API_KEY:
         logger.warning(f"SendGrid not configured. Would send email to {to}: {subject}")
         return True  # Return True in dev to not block flow

@@ -11,7 +11,14 @@ from typing import Optional
 from datetime import datetime, timedelta, timezone
 import logging
 import os
-import stripe as stripe_module
+
+try:
+    import stripe as stripe_module
+except ImportError:  # Stripe SDK not installed in some environments
+    class _MissingStripe:
+        def __getattr__(self, name):  # pragma: no cover - runtime guard
+            raise ImportError("stripe is not installed")
+    stripe_module = _MissingStripe()
 
 logger = logging.getLogger(__name__)
 

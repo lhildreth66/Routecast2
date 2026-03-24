@@ -4800,34 +4800,35 @@ async def get_checkout_session(session_id: str):
         "currency": currency,
     }
 
-@api_router.post("/billing/verify", response_model=dict)
-async def verify_purchase(request: BillingVerifyRequest):
-    """
-    Verify a purchase token with Google Play or App Store.
-    
-    Returns entitlement status including expiration date.
-    STUB IMPLEMENTATION - returns mock responses for development.
-    """
-    try:
-        logger.info(f"[BILLING] Verifying purchase: platform={request.platform}, product={request.product_id}")
-        
-        verification_request = VerificationRequest(
-            platform=request.platform,
-            product_id=request.product_id,
-            purchase_token=request.purchase_token,
-        )
-        
-        result = await billing_verifier.verify_purchase(verification_request)
-        
-        return {
-            "isPro": result.is_pro,
-            "productId": result.product_id,
-            "expireAt": result.expire_at,
-            "error": result.error,
-        }
-    except Exception as e:
-        logger.error(f"[BILLING] Verification error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+# STRIPE DISABLED - Google Play submission - do not delete
+# @api_router.post("/billing/verify", response_model=dict)
+# async def verify_purchase(request: BillingVerifyRequest):
+#     """
+#     Verify a purchase token with Google Play or App Store.
+#     
+#     Returns entitlement status including expiration date.
+#     STUB IMPLEMENTATION - returns mock responses for development.
+#     """
+#     try:
+#         logger.info(f"[BILLING] Verifying purchase: platform={request.platform}, product={request.product_id}")
+#         
+#         verification_request = VerificationRequest(
+#             platform=request.platform,
+#             product_id=request.product_id,
+#             purchase_token=request.purchase_token,
+#         )
+#         
+#         result = await billing_verifier.verify_purchase(verification_request)
+#         
+#         return {
+#             "isPro": result.is_pro,
+#             "productId": result.product_id,
+#             "expireAt": result.expire_at,
+#             "error": result.error,
+#         }
+#     except Exception as e:
+#         logger.error(f"[BILLING] Verification error: {str(e)}")
+#         raise HTTPException(status_code=500, detail=str(e))
 
 
 # ==================== Subscription/Billing Endpoints ====================
