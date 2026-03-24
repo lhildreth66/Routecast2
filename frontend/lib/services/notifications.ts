@@ -96,7 +96,7 @@ export async function sendPushTokenToBackend(
   userId?: string
 ): Promise<boolean> {
   try {
-    const response = await fetch(`${backendUrl}/api/push-tokens`, {
+    const response = await fetch(`${backendUrl}/api/push/tokens`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -104,8 +104,10 @@ export async function sendPushTokenToBackend(
       body: JSON.stringify({
         token,
         platform: Platform.OS,
-        userId: userId || 'anonymous',
-        timestamp: new Date().toISOString(),
+        device_info: {
+          userId: userId || 'anonymous',
+          timestamp: new Date().toISOString(),
+        },
       }),
     });
 
