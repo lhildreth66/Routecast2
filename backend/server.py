@@ -4799,8 +4799,6 @@ async def get_checkout_session(session_id: str):
         "amount": (amount_total or 0) / 100 if amount_total is not None else None,
         "currency": currency,
     }
-"""
-
 
 @api_router.post("/billing/verify", response_model=dict)
 async def verify_purchase(request: BillingVerifyRequest):
