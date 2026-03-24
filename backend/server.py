@@ -4627,6 +4627,8 @@ class BillingVerifyRequest(BaseModel):
     product_id: str  # "boondocking_pro_monthly" or "boondocking_pro_yearly"
     purchase_token: str
 
+"""
+
 
 DEFAULT_CHECKOUT_ORIGIN = "https://routecastweather.com"
 
