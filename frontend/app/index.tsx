@@ -49,6 +49,7 @@ import { WebView } from 'react-native-webview';
 import { useAuth } from '../contexts/AuthContext';
 import * as Notifications from 'expo-notifications';
 import { registerWebPush, deleteWebPushSubscription } from '../lib/webPush';
+import Constants from 'expo-constants';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -315,7 +316,9 @@ export default function HomeScreen() {
         } else {
           // ── 2. Get device push token (best-effort; never revert on failure) ─
           try {
-            const tokenData = await Notifications.getExpoPushTokenAsync();
+            const tokenData = await Notifications.getExpoPushTokenAsync({
+              projectId: Constants.expoConfig?.extra?.eas?.projectId,
+            });
             pushToken = tokenData.data;
             __DEV__ && console.log('[push-toggle] push token obtained:', pushToken?.slice(0, 20), '...');
           } catch (tokenErr) {
