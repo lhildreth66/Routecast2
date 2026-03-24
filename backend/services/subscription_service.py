@@ -541,4 +541,3 @@ async def handle_stripe_subscription_event(
         return True
 
     return False
-"""

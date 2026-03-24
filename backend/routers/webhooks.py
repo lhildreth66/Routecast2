@@ -643,4 +643,3 @@ async def google_webhook(request: Request):
     except Exception as e:
         logger.error(f"Google webhook error: {e}")
         return {"received": True}
-"""

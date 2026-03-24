@@ -420,4 +420,3 @@ async def get_subscription_plans():
         ],
         "trial_days": 7
     }
-"""
