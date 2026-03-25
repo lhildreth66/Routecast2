@@ -16,7 +16,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const isWideScreen = SCREEN_WIDTH > 768;
-const GOOGLE_PLAY_URL = 'GOOGLE_PLAY_URL';
+const GOOGLE_PLAY_URL = 'https://play.google.com/store/apps/details?id=com.routecast.app';
 
 export default function LandingPage() {
   const [activeFaq, setActiveFaq] = useState<number | null>(null);
