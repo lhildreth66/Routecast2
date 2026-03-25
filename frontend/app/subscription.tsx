@@ -16,22 +16,10 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../contexts/AuthContext';
 import axios from 'axios';
-import {
-  startBillingConnection,
-  teardownBilling,
-  fetchPlaySubscriptions,
-  requestPlayPurchase,
-  attachPurchaseListeners,
-  finalizePurchase,
-  restorePlayPurchases,
-  openPlaySubscriptionManagement,
-  PLAY_SUBSCRIPTION_IDS,
-} from '../lib/services/googlePlayBilling';
 
 const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
-const GOOGLE_PLAY_URL = 'https://play.google.com/store/apps/details?id=com.routecast.app';
+const GOOGLE_PLAY_URL = 'GOOGLE_PLAY_URL';
 const isWeb = Platform.OS === 'web';
-const isAndroid = Platform.OS === 'android';
 
 interface Plan {
   id: string;
@@ -55,65 +43,11 @@ export default function SubscriptionScreen() {
   const [mounted, setMounted] = useState(false);
   // track which plan is currently launching so each card can show its own spinner
   const [launchingPlan, setLaunchingPlan] = useState<string | null>(null);
-  const [iapLoading, setIapLoading] = useState(false);
-  const [iapProducts, setIapProducts] = useState<any[]>([]);
 
   useEffect(() => {
     if (isWeb) return;
     fetchPlans();
   }, [isWeb]);
-
-  useEffect(() => {
-    if (!isAndroid) return;
-
-    let cancelled = false;
-    let detachListeners: (() => void) | undefined;
-
-    (async () => {
-      setIapLoading(true);
-      try {
-        await startBillingConnection();
-        const products = await fetchPlaySubscriptions();
-        if (!cancelled && products) {
-          setIapProducts(products);
-        }
-
-        detachListeners = attachPurchaseListeners(
-          async (purchase) => {
-            if (cancelled) return;
-            setCheckoutLoading(false);
-            setLaunchingPlan(null);
-            try {
-              await finalizePurchase(purchase);
-              await verifyPurchaseWithBackend(purchase);
-              await refreshUser();
-              if (Platform.OS === 'android') {
-                ToastAndroid.show('Purchase completed. Syncing account…', ToastAndroid.LONG);
-              }
-            } catch (err: any) {
-              setError(err?.message || 'Purchase completed but sync failed');
-            }
-          },
-          (err) => {
-            if (cancelled) return;
-            setCheckoutLoading(false);
-            setLaunchingPlan(null);
-            setError(err?.message || 'Purchase failed');
-          },
-        );
-      } catch (err: any) {
-        if (!cancelled) setError(err?.message || 'Google Play Billing unavailable');
-      } finally {
-        if (!cancelled) setIapLoading(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      detachListeners?.();
-      teardownBilling();
-    };
-  }, [isAndroid, refreshUser]);
 
   useEffect(() => {
     setMounted(true);
@@ -163,88 +97,7 @@ export default function SubscriptionScreen() {
     }
   };
 
-  const planIdToSku = (planId: string) => {
-    const normalized = planId?.toLowerCase() || '';
-    if (normalized.includes('year')) return PLAY_SUBSCRIPTION_IDS[1];
-    return PLAY_SUBSCRIPTION_IDS[0];
-  };
-
-  const formatPlanPrice = (plan: Plan) => {
-    if (!isAndroid) return `$${plan.price}`;
-    const sku = planIdToSku(plan.id || plan.interval || '');
-    const product = iapProducts.find((p) => p?.id === sku);
-    return product?.localizedPrice || product?.price || `$${plan.price}`;
-  };
-
-  const verifyPurchaseWithBackend = async (purchase: any) => {
-    const purchaseToken = purchase?.purchaseToken || purchase?.transactionReceipt;
-    if (!purchaseToken || !accessToken) return;
-
-    try {
-      await axios.post(
-        `${API_BASE}/api/subscription/verify/google`,
-        {
-          purchase_token: purchaseToken,
-          product_id: purchase?.productId,
-          package_name: 'com.routecast.app',
-        },
-        { headers: { Authorization: `Bearer ${accessToken}` } }
-      );
-    } catch (err: any) {
-      const message = err?.response?.data?.detail || err?.message || 'Failed to verify purchase';
-      setError(message);
-    }
-  };
-
-  const handlePlayPurchase = async (sku: string, planId?: string) => {
-    if (!isAuthenticated) {
-      router.push('/signup');
-      return;
-    }
-
-    setLaunchingPlan(planId ?? sku);
-    setCheckoutLoading(true);
-    setError('');
-
-    try {
-      await requestPlayPurchase(sku);
-    } catch (err: any) {
-      setCheckoutLoading(false);
-      setLaunchingPlan(null);
-      setError(err?.message || 'Failed to start Google Play purchase');
-    }
-  };
-
-  const handleRestorePurchases = async () => {
-    if (!isAndroid) return;
-    setCheckoutLoading(true);
-    setError('');
-
-    try {
-      const purchases = await restorePlayPurchases();
-      if (Array.isArray(purchases)) {
-        for (const purchase of purchases) {
-          await verifyPurchaseWithBackend(purchase);
-        }
-        await refreshUser();
-      }
-      if (Platform.OS === 'android') {
-        ToastAndroid.show('Restored Google Play purchases', ToastAndroid.LONG);
-      }
-    } catch (err: any) {
-      setError(err?.message || 'Failed to restore purchases');
-    } finally {
-      setCheckoutLoading(false);
-    }
-  };
-
   const handleCheckout = async (planId: string) => {
-    if (isAndroid) {
-      const sku = planIdToSku(planId);
-      await handlePlayPurchase(sku, planId);
-      return;
-    }
-
     if (!isAuthenticated) {
       router.push('/signup');
       return;
@@ -288,18 +141,6 @@ export default function SubscriptionScreen() {
 
     setCheckoutLoading(true);
     setError('');
-
-    if (isAndroid) {
-      try {
-        await openPlaySubscriptionManagement();
-      } catch (err: any) {
-        const message = err?.message || 'Unable to open Google Play subscriptions';
-        setError(message);
-      } finally {
-        setCheckoutLoading(false);
-      }
-      return;
-    }
 
     try {
       const response = await axios.post(
@@ -381,7 +222,7 @@ export default function SubscriptionScreen() {
   const isTrialing = user?.subscription_status === 'trialing';
   const canStartTrial = user?.trial_available && !isPremium && !isTrialing;
 
-  if ((loading || (isAndroid && iapLoading)) && !error) {
+  if (loading && !error) {
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#eab308" />
@@ -541,7 +382,7 @@ export default function SubscriptionScreen() {
                 <View style={styles.planHeader}>
                   <Text style={styles.planName}>{plan.name}</Text>
                   <View style={styles.planPriceContainer}>
-                    <Text style={styles.planPrice}>{formatPlanPrice(plan)}</Text>
+                    <Text style={styles.planPrice}>${plan.price}</Text>
                     <Text style={styles.planInterval}>/{plan.interval}</Text>
                   </View>
                 </View>
@@ -566,27 +407,13 @@ export default function SubscriptionScreen() {
                     <ActivityIndicator color="#1a1a1a" size="small" />
                   ) : (
                     <Text style={styles.planCTAButtonText}>
-                      Start 7-day free trial — {formatPlanPrice(plan)}/{plan.interval === 'year' || plan.id === 'yearly' ? 'yr' : 'mo'}
+                      Start 7-day free trial — {plan.interval === 'year' || plan.id === 'yearly' ? `$${plan.price}/yr` : `$${plan.price}/mo`}
                     </Text>
                   )}
                 </TouchableOpacity>
               </View>
             ))}
           </View>
-
-          {isAndroid && (
-            <TouchableOpacity
-              style={[styles.restoreButton, checkoutLoading && styles.buttonDisabled]}
-              onPress={handleRestorePurchases}
-              disabled={checkoutLoading}
-            >
-              {checkoutLoading ? (
-                <ActivityIndicator color="#0f0f0f" size="small" />
-              ) : (
-                <Text style={styles.restoreButtonText}>Restore Google Play purchases</Text>
-              )}
-            </TouchableOpacity>
-          )}
 
           {/* Error Message */}
           {error && (
@@ -860,18 +687,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '800',
     letterSpacing: 0.2,
-  restoreButton: {
-    marginTop: 8,
-    backgroundColor: '#f3f4f6',
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  restoreButtonText: {
-    color: '#111827',
-    fontSize: 14,
-    fontWeight: '700',
-  },
   },
   errorContainer: {
     flexDirection: 'row',

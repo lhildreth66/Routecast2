@@ -10,18 +10,15 @@ jest.mock('expo-secure-store', () => {
 });
 
 jest.mock('react-native-iap', () => {
-  const makeListener = () => ({ remove: jest.fn() });
   return {
     initConnection: jest.fn(async () => true),
     endConnection: jest.fn(async () => true),
-    fetchProducts: jest.fn(async () => []),
-    requestPurchase: jest.fn(async () => ({})),
-    purchaseUpdatedListener: jest.fn(() => makeListener()),
-    purchaseErrorListener: jest.fn(() => makeListener()),
+    getSubscriptions: jest.fn(async () => []),
+    requestSubscription: jest.fn(async () => ({})),
+    purchaseUpdatedListener: jest.fn(() => ({ remove: jest.fn() })),
+    purchaseErrorListener: jest.fn(() => ({ remove: jest.fn() })),
     finishTransaction: jest.fn(async () => true),
     getAvailablePurchases: jest.fn(async () => []),
-    restorePurchases: jest.fn(async () => []),
-    deepLinkToSubscriptions: jest.fn(async () => undefined),
   };
 });
 
