@@ -10,16 +10,13 @@ import {
   Linking,
   Image,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const isWideScreen = SCREEN_WIDTH > 768;
-
-// STRIPE DISABLED - Google Play submission - do not delete
-// All pricing CTAs route to /signup - Stripe checkout handled post-signup
+const GOOGLE_PLAY_URL = 'GOOGLE_PLAY_URL';
 
 export default function LandingPage() {
   const [activeFaq, setActiveFaq] = useState<number | null>(null);
@@ -49,17 +46,11 @@ export default function LandingPage() {
               <TouchableOpacity onPress={() => scrollToSection('features')}>
                 <Text style={[styles.navLink, !isWideScreen && styles.navLinkMobile]}>Features</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => scrollToSection('pricing')}>
-                <Text style={[styles.navLink, !isWideScreen && styles.navLinkMobile]}>Pricing</Text>
-              </TouchableOpacity>
               <TouchableOpacity onPress={() => scrollToSection('faq')}>
                 <Text style={[styles.navLink, !isWideScreen && styles.navLinkMobile]}>FAQ</Text>
               </TouchableOpacity>
-              <TouchableOpacity 
-                style={styles.navLoginBtn}
-                onPress={() => router.push('/login')}
-              >
-                <Text style={styles.navLoginText}>Log In</Text>
+              <TouchableOpacity onPress={() => router.push('/contact')}>
+                <Text style={[styles.navLink, !isWideScreen && styles.navLinkMobile]}>Contact</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -83,26 +74,26 @@ export default function LandingPage() {
               </Text>
               
               <Text style={styles.heroSubtitle}>
-                See conditions, alerts, and road hazards for your entire journey. 
-                Plan smarter. Arrive safer.
+                See conditions, alerts, and road hazards for your entire journey.
+                Download on Android to manage subscriptions securely through Google Play.
               </Text>
 
               <View style={styles.heroCtas}>
                 <TouchableOpacity 
                   style={styles.primaryCta}
-                  onPress={() => scrollToSection('pricing')}
-                  data-testid="hero-start-trial"
+                  onPress={() => Linking.openURL(GOOGLE_PLAY_URL)}
+                  data-testid="hero-download"
                 >
-                  <Ionicons name="rocket" size={20} color="#0f0f0f" />
-                  <Text style={styles.primaryCtaText}>Start Free Trial</Text>
+                  <Ionicons name="logo-google-playstore" size={20} color="#0f0f0f" />
+                  <Text style={styles.primaryCtaText}>Download on Google Play</Text>
                 </TouchableOpacity>
                 
                 <TouchableOpacity 
                   style={styles.secondaryCta}
-                  onPress={() => scrollToSection('pricing')}
-                  data-testid="hero-view-pricing"
+                  onPress={() => scrollToSection('features')}
+                  data-testid="hero-learn-more"
                 >
-                  <Text style={styles.secondaryCtaText}>View Pricing</Text>
+                  <Text style={styles.secondaryCtaText}>Learn More</Text>
                   <Ionicons name="arrow-down" size={18} color="#eab308" />
                 </TouchableOpacity>
               </View>
@@ -110,15 +101,15 @@ export default function LandingPage() {
               <View style={styles.trustBullets}>
                 <View style={styles.trustBullet}>
                   <Ionicons name="checkmark-circle" size={16} color="#22c55e" />
-                  <Text style={styles.trustBulletText}>7-day free trial</Text>
+                  <Text style={styles.trustBulletText}>Android app on Google Play</Text>
                 </View>
                 <View style={styles.trustBullet}>
                   <Ionicons name="checkmark-circle" size={16} color="#22c55e" />
-                  <Text style={styles.trustBulletText}>Cancel anytime</Text>
+                  <Text style={styles.trustBulletText}>Subscription handled in-app</Text>
                 </View>
                 <View style={styles.trustBullet}>
                   <Ionicons name="checkmark-circle" size={16} color="#22c55e" />
-                  <Text style={styles.trustBulletText}>Premium unlocks instantly</Text>
+                  <Text style={styles.trustBulletText}>Built for safer drives</Text>
                 </View>
               </View>
             </View>
@@ -196,24 +187,6 @@ export default function LandingPage() {
           </View>
         </View>
 
-        {/* How It Works Video */}
-        <View style={styles.videoSection}>
-          <Text style={styles.videoTitle}>How RouteCast Works</Text>
-          <Text style={styles.videoSubtitle}>
-            Watch this quick walkthrough to see how to use RouteCast and plan safer drives with weather ahead of you.
-          </Text>
-          <View style={styles.videoContainer}>
-            <iframe
-              src="https://www.youtube.com/embed/fS-wJRoVlzc?rel=0"
-              title="How to Use RouteCast"
-              frameBorder="0"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-              allowFullScreen
-              style={styles.videoIframe as any}
-            />
-          </View>
-        </View>
-
         {/* Features Section */}
         <View style={styles.featuresSection} nativeID="features">
           <Text style={styles.sectionTitle}>Everything you need for safer drives</Text>
@@ -284,185 +257,27 @@ export default function LandingPage() {
           </View>
         </View>
 
-        {/* Pricing Section */}
-        <View style={styles.pricingSection} nativeID="pricing">
-          <Text style={styles.sectionTitle}>Simple, transparent pricing</Text>
-          <Text style={styles.sectionSubtitle}>
-            Start with a 7-day free trial. Cancel anytime.
-          </Text>
-
-          <View style={styles.pricingGrid}>
-            {/* Monthly Plan */}
-            <View style={styles.pricingCard}>
-              <Text style={styles.pricingPlan}>Monthly</Text>
-              <View style={styles.pricingAmount}>
-                <Text style={styles.pricingDollar}>$</Text>
-                <Text style={styles.pricingPrice}>9</Text>
-                <Text style={styles.pricingCents}>.99</Text>
-                <Text style={styles.pricingPeriod}>/month</Text>
-              </View>
-              <Text style={styles.pricingTrial}>7-day free trial included</Text>
-              
-              <View style={styles.pricingFeatures}>
-                <View style={styles.pricingFeatureRow}>
-                  <Ionicons name="checkmark" size={18} color="#22c55e" />
-                  <Text style={styles.pricingFeatureText}>Unlimited route forecasts</Text>
-                </View>
-                <View style={styles.pricingFeatureRow}>
-                  <Ionicons name="checkmark" size={18} color="#22c55e" />
-                  <Text style={styles.pricingFeatureText}>Real-time weather alerts</Text>
-                </View>
-                <View style={styles.pricingFeatureRow}>
-                  <Ionicons name="checkmark" size={18} color="#22c55e" />
-                  <Text style={styles.pricingFeatureText}>Road condition insights</Text>
-                </View>
-                <View style={styles.pricingFeatureRow}>
-                  <Ionicons name="checkmark" size={18} color="#22c55e" />
-                  <Text style={styles.pricingFeatureText}>Trucker & RV features</Text>
-                </View>
-              </View>
-
-              <TouchableOpacity 
-                style={styles.pricingButton}
-                onPress={() => router.push('/signup?plan=monthly')}
-                data-testid="pricing-monthly-btn"
-              >
-                <Text style={styles.pricingButtonText}>Start Monthly Trial</Text>
-              </TouchableOpacity>
-            </View>
-
-            {/* Annual Plan */}
-            <View style={[styles.pricingCard, styles.pricingCardFeatured]}>
-              <View style={styles.pricingBadge}>
-                <Text style={styles.pricingBadgeText}>BEST VALUE</Text>
-              </View>
-              <Text style={styles.pricingPlan}>Annual</Text>
-              <View style={styles.pricingAmount}>
-                <Text style={styles.pricingDollar}>$</Text>
-                <Text style={styles.pricingPrice}>59</Text>
-                <Text style={styles.pricingCents}>.99</Text>
-                <Text style={styles.pricingPeriod}>/year</Text>
-              </View>
-              <Text style={styles.pricingTrial}>7-day free trial included</Text>
-              <Text style={styles.pricingSavings}>Save $60/year (2 months free)</Text>
-              
-              <View style={styles.pricingFeatures}>
-                <View style={styles.pricingFeatureRow}>
-                  <Ionicons name="checkmark" size={18} color="#22c55e" />
-                  <Text style={styles.pricingFeatureText}>Everything in Monthly</Text>
-                </View>
-                <View style={styles.pricingFeatureRow}>
-                  <Ionicons name="checkmark" size={18} color="#22c55e" />
-                  <Text style={styles.pricingFeatureText}>Priority support</Text>
-                </View>
-                <View style={styles.pricingFeatureRow}>
-                  <Ionicons name="checkmark" size={18} color="#22c55e" />
-                  <Text style={styles.pricingFeatureText}>Extended forecast (7 days)</Text>
-                </View>
-                <View style={styles.pricingFeatureRow}>
-                  <Ionicons name="checkmark" size={18} color="#22c55e" />
-                  <Text style={styles.pricingFeatureText}>Export routes</Text>
-                </View>
-              </View>
-
-              <TouchableOpacity 
-                style={[styles.pricingButton, styles.pricingButtonFeatured]}
-                onPress={() => router.push('/signup?plan=yearly')}
-                data-testid="pricing-annual-btn"
-              >
-                <Text style={styles.pricingButtonTextFeatured}>Start Annual Trial</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* // STRIPE DISABLED - Google Play submission - do not delete */}
-          {/*
-          <Text style={styles.pricingDisclaimer}>
-            You'll be redirected to Stripe to complete checkout. Premium access activates automatically after payment confirmation.
-          </Text>
-          */}
-        </View>
-
-        {/* Comparison Table */}
-        <View style={styles.comparisonSection}>
-          <Text style={styles.sectionTitle}>Free vs Premium</Text>
-          
-          <View style={styles.comparisonTable}>
-            <View style={styles.comparisonHeader}>
-              <Text style={styles.comparisonHeaderText}>Feature</Text>
-              <Text style={styles.comparisonHeaderText}>Free</Text>
-              <Text style={styles.comparisonHeaderText}>Premium</Text>
-            </View>
-            
-            <View style={styles.comparisonRow}>
-              <Text style={styles.comparisonFeature}>Route weather forecast</Text>
-              <Text style={styles.comparisonValue}>Basic</Text>
-              <Text style={styles.comparisonValuePremium}>Extended</Text>
-            </View>
-            
-            <View style={styles.comparisonRow}>
-              <Text style={styles.comparisonFeature}>Weather alerts</Text>
-              <Ionicons name="checkmark-circle" size={18} color="#22c55e" />
-              <Ionicons name="checkmark-circle" size={18} color="#22c55e" />
-            </View>
-            
-            <View style={styles.comparisonRow}>
-              <Text style={styles.comparisonFeature}>Route monitoring</Text>
-              <Text style={styles.comparisonValue}>1 route</Text>
-              <Text style={styles.comparisonValuePremium}>Unlimited</Text>
-            </View>
-            
-            <View style={styles.comparisonRow}>
-              <Text style={styles.comparisonFeature}>Push notifications</Text>
-              <Ionicons name="close-circle" size={18} color="#6b7280" />
-              <Ionicons name="checkmark-circle" size={18} color="#22c55e" />
-            </View>
-            
-            <View style={styles.comparisonRow}>
-              <Text style={styles.comparisonFeature}>Trucker features</Text>
-              <Ionicons name="close-circle" size={18} color="#6b7280" />
-              <Ionicons name="checkmark-circle" size={18} color="#22c55e" />
-            </View>
-            
-            <View style={styles.comparisonRow}>
-              <Text style={styles.comparisonFeature}>Boondocking tools</Text>
-              <Ionicons name="close-circle" size={18} color="#6b7280" />
-              <Ionicons name="checkmark-circle" size={18} color="#22c55e" />
-            </View>
-          </View>
-        </View>
-
-        {/* // STRIPE DISABLED - Google Play submission - do not delete */}
         {/* FAQ Section */}
-        {/*
         <View style={styles.faqSection} nativeID="faq">
           <Text style={styles.sectionTitle}>Frequently Asked Questions</Text>
           
           <View style={styles.faqList}>
             {[
               {
-                q: 'How does the free trial work?',
-                a: 'Start your 7-day free trial by creating an account. You get full access to all premium features. No credit card required to start—you only pay when you choose to subscribe.'
+                q: 'Is RouteCast available on Android?',
+                a: 'Yes. Download the RouteCast app directly from Google Play to get the full experience on Android devices.'
               },
               {
-                q: 'How do I cancel my subscription?',
-                a: 'You can cancel anytime from your account settings or directly through Stripe. Your premium access continues until the end of your billing period.'
+                q: 'How do I subscribe?',
+                a: 'All subscriptions and billing are handled securely in the Android app through Google Play. The website is informational only.'
               },
               {
-                q: 'How do I get premium access after paying?',
-                a: 'Premium access is activated automatically within seconds after Stripe confirms your payment. Just log back in and you\'ll see your premium status updated.'
+                q: 'Can I use RouteCast on the web?',
+                a: 'The web experience is a companion for information and support. For live forecasting and alerts, use the Android app.'
               },
               {
-                q: 'What if I change my email address?',
-                a: 'Your subscription is linked to your account by email. If you need to change your email, please contact support so we can update your records and ensure uninterrupted access.'
-              },
-              {
-                q: 'Is my payment secure?',
-                a: 'Yes! All payments are processed securely through Stripe. We never see or store your credit card details.'
-              },
-              {
-                q: 'What weather data sources do you use?',
-                a: 'We use official NOAA/National Weather Service data for the most accurate forecasts and alerts available for US routes.'
+                q: 'How do I get support?',
+                a: 'Reach out through the Contact link and our team will help with account, billing, or product questions.'
               }
             ].map((faq, index) => (
               <TouchableOpacity 
@@ -485,7 +300,6 @@ export default function LandingPage() {
             ))}
           </View>
         </View>
-        */}
 
         {/* Final CTA */}
         <View style={styles.finalCtaSection}>
@@ -493,17 +307,17 @@ export default function LandingPage() {
             colors={['#1a1a2e', '#16213e', '#0f0f0f']}
             style={styles.finalCtaGradient}
           >
-            <Text style={styles.finalCtaTitle}>Ready to drive smarter?</Text>
+            <Text style={styles.finalCtaTitle}>Get RouteCast on Android</Text>
             <Text style={styles.finalCtaSubtitle}>
-              Join thousands of drivers who plan their trips with confidence.
+              Download on Google Play. Manage billing and subscriptions directly in the app.
             </Text>
             <TouchableOpacity 
               style={styles.finalCtaButton}
-              onPress={() => router.push('/signup')}
+              onPress={() => Linking.openURL(GOOGLE_PLAY_URL)}
               data-testid="final-cta-btn"
             >
-              <Text style={styles.finalCtaButtonText}>Start Your Free Trial</Text>
-              <Ionicons name="arrow-forward" size={20} color="#0f0f0f" />
+              <Text style={styles.finalCtaButtonText}>Download on Google Play</Text>
+              <Ionicons name="logo-google-playstore" size={20} color="#0f0f0f" />
             </TouchableOpacity>
           </LinearGradient>
         </View>
@@ -526,13 +340,6 @@ export default function LandingPage() {
                 <Text style={styles.footerLink}>Contact</Text>
               </TouchableOpacity>
             </View>
-            {/* // STRIPE DISABLED - Google Play submission - do not delete */}
-            {/*
-            <View style={styles.footerStripe}>
-              <Ionicons name="lock-closed" size={14} color="#6b7280" />
-              <Text style={styles.footerStripeText}>Payments secured by Stripe</Text>
-            </View>
-            */}
           </View>
           <Text style={styles.footerCopyright}>
             © {new Date().getFullYear()} RouteCast. All rights reserved.
@@ -612,56 +419,6 @@ const styles = StyleSheet.create({
   navLinkMobile: {
     fontSize: 13,
     paddingVertical: 2,
-  },
-  videoSection: {
-    paddingHorizontal: 24,
-    paddingVertical: 40,
-    alignItems: 'center',
-    backgroundColor: '#0f0f0f',
-  },
-  videoTitle: {
-    color: '#ffffff',
-    fontSize: 28,
-    fontWeight: '800',
-    textAlign: 'center',
-    marginBottom: 8,
-  },
-  videoSubtitle: {
-    color: '#a1a1aa',
-    fontSize: 16,
-    textAlign: 'center',
-    marginBottom: 20,
-    maxWidth: 720,
-  },
-  videoContainer: {
-    position: 'relative',
-    width: '100%',
-    maxWidth: 900,
-    paddingBottom: '56.25%',
-    height: 0,
-    marginTop: 10,
-    marginBottom: 10,
-    overflow: 'hidden',
-  },
-  videoIframe: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    width: '100%',
-    height: '100%',
-    borderRadius: 12,
-    borderWidth: 0,
-  },
-  navLoginBtn: {
-    backgroundColor: '#27272a',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  navLoginText: {
-    color: '#ffffff',
-    fontSize: 14,
-    fontWeight: '600',
   },
 
   // Hero Section
@@ -966,186 +723,6 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
 
-  // Pricing Section
-  pricingSection: {
-    backgroundColor: '#141414',
-    paddingVertical: 80,
-    paddingHorizontal: 24,
-  },
-  pricingGrid: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 24,
-    flexWrap: 'wrap',
-    marginBottom: 32,
-  },
-  pricingCard: {
-    width: 320,
-    backgroundColor: '#1a1a1a',
-    borderRadius: 20,
-    padding: 32,
-    borderWidth: 1,
-    borderColor: '#27272a',
-    position: 'relative',
-  },
-  pricingCardFeatured: {
-    borderColor: '#eab308',
-    borderWidth: 2,
-  },
-  pricingBadge: {
-    position: 'absolute',
-    top: -12,
-    right: 24,
-    backgroundColor: '#eab308',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-  },
-  pricingBadgeText: {
-    color: '#0f0f0f',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  pricingPlan: {
-    color: '#a1a1aa',
-    fontSize: 14,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    marginBottom: 8,
-  },
-  pricingAmount: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    marginBottom: 8,
-  },
-  pricingDollar: {
-    color: '#ffffff',
-    fontSize: 20,
-    fontWeight: '600',
-  },
-  pricingPrice: {
-    color: '#ffffff',
-    fontSize: 48,
-    fontWeight: '700',
-  },
-  pricingCents: {
-    color: '#ffffff',
-    fontSize: 20,
-    fontWeight: '600',
-  },
-  pricingPeriod: {
-    color: '#6b7280',
-    fontSize: 16,
-    marginLeft: 4,
-  },
-  pricingTrial: {
-    color: '#22c55e',
-    fontSize: 13,
-    fontWeight: '500',
-    marginBottom: 4,
-  },
-  pricingSavings: {
-    color: '#eab308',
-    fontSize: 13,
-    fontWeight: '600',
-    marginBottom: 24,
-  },
-  pricingFeatures: {
-    gap: 12,
-    marginBottom: 24,
-  },
-  pricingFeatureRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  pricingFeatureText: {
-    color: '#d4d4d8',
-    fontSize: 14,
-  },
-  pricingButton: {
-    backgroundColor: '#27272a',
-    paddingVertical: 14,
-    borderRadius: 10,
-    alignItems: 'center',
-  },
-  pricingButtonFeatured: {
-    backgroundColor: '#eab308',
-  },
-  pricingButtonText: {
-    color: '#ffffff',
-    fontSize: 15,
-    fontWeight: '600',
-  },
-  pricingButtonTextFeatured: {
-    color: '#0f0f0f',
-    fontSize: 15,
-    fontWeight: '700',
-  },
-  pricingDisclaimer: {
-    color: '#6b7280',
-    fontSize: 12,
-    textAlign: 'center',
-    maxWidth: 500,
-    marginHorizontal: 'auto',
-    lineHeight: 18,
-  },
-
-  // Comparison Section
-  comparisonSection: {
-    paddingVertical: 80,
-    paddingHorizontal: 24,
-  },
-  comparisonTable: {
-    maxWidth: 600,
-    marginHorizontal: 'auto',
-    backgroundColor: '#1a1a1a',
-    borderRadius: 16,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: '#27272a',
-  },
-  comparisonHeader: {
-    flexDirection: 'row',
-    backgroundColor: '#27272a',
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-  },
-  comparisonHeaderText: {
-    flex: 1,
-    color: '#ffffff',
-    fontSize: 13,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  comparisonRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: '#27272a',
-  },
-  comparisonFeature: {
-    flex: 1,
-    color: '#d4d4d8',
-    fontSize: 14,
-  },
-  comparisonValue: {
-    flex: 1,
-    color: '#6b7280',
-    fontSize: 13,
-    textAlign: 'center',
-  },
-  comparisonValuePremium: {
-    flex: 1,
-    color: '#22c55e',
-    fontSize: 13,
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-
   // FAQ Section
   faqSection: {
     backgroundColor: '#141414',
@@ -1257,15 +834,6 @@ const styles = StyleSheet.create({
   footerLink: {
     color: '#6b7280',
     fontSize: 14,
-  },
-  footerStripe: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  footerStripeText: {
-    color: '#6b7280',
-    fontSize: 12,
   },
   footerCopyright: {
     color: '#52525b',

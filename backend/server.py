@@ -3528,6 +3528,16 @@ async def get_route_weather(request: RouteRequest):
     }
     logger.info("route_weather_payload_keys", extra=payload_flags)
 
+    try:
+        raw_request = request.model_dump(mode="json", exclude_none=False)
+        logger.info("route_weather_request_raw", extra={
+            "keys": list(raw_request.keys()),
+            "has_push_token": bool(raw_request.get("push_token")),
+            "push_token_prefix": str(raw_request.get("push_token", ""))[:12],
+        })
+    except Exception as exc:
+        logger.warning("route_weather_request_raw_dump_failed", extra={"error": str(exc)})
+
     missing_flags = {
         "origin_present": bool(request.origin),
         "destination_present": bool(request.destination),
@@ -3802,6 +3812,14 @@ async def get_route_weather(request: RouteRequest):
 
     # Persist active route monitor for alerts if push token provided and DB available
     if request.push_token:
+        logger.info(
+            "route_weather_monitor_start_attempt",
+            extra={
+                "route_id": route_id,
+                "has_token": True,
+                "push_token_prefix": request.push_token[:12] if isinstance(request.push_token, str) else None,
+            },
+        )
         try:
             route_points = [
                 {

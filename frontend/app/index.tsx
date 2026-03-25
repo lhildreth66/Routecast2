@@ -171,6 +171,14 @@ export default function HomeScreen() {
   // Push notification state
   const [pushLoading, setPushLoading] = useState(false);
 
+  const getAuthToken = async (): Promise<string | null> => {
+    // Prefer in-memory context token; fall back to persisted keys for resilience
+    if (isAuthenticated && accessToken) return accessToken;
+    const tokens = await AsyncStorage.multiGet(['accessToken', 'access_token']);
+    const found = tokens.map(([, v]) => v).find((v) => !!v) || null;
+    return found;
+  };
+
   // Load push notification settings on mount
   useEffect(() => {
     loadPushSettings();
@@ -179,7 +187,7 @@ export default function HomeScreen() {
   const loadPushSettings = async () => {
     if (!isAuthenticated) return;
     try {
-      const token = await AsyncStorage.getItem('access_token');
+      const token = await getAuthToken();
       if (!token) return;
       
       const response = await axios.get(`${API_BASE}/api/push/settings`, {
@@ -193,7 +201,7 @@ export default function HomeScreen() {
   };
 
   const handleAlertsToggle = async (nextEnabled: boolean) => {
-    const authToken = await AsyncStorage.getItem('access_token');
+    const authToken = await getAuthToken();
 
     if (IS_WEB) {
       if (pushLoading) return;
@@ -282,16 +290,17 @@ export default function HomeScreen() {
       return;
     }
 
-    // ── 1. Optimistic UI flip (immediate, no revert on token failure) ──────
-    setAlertsEnabled(nextEnabled);
-    __DEV__ && console.log('[push-toggle] state set to', nextEnabled);
-    setPushLoading(true);
+    // Android/mobile path only
+    if (Platform.OS !== 'android') {
+      Alert.alert('Unsupported', 'Push alerts are currently supported on Android mobile only.');
+      return;
+    }
 
+    setPushLoading(true);
     try {
       let pushToken: string | null = null;
 
       if (nextEnabled) {
-        // Check/request permission – permission denial still reverts toggle
         const { status: existingStatus } = await Notifications.getPermissionsAsync();
         let finalStatus = existingStatus;
         __DEV__ && console.log('[push-toggle] existing permission status:', existingStatus);
@@ -303,44 +312,43 @@ export default function HomeScreen() {
         }
 
         if (finalStatus !== 'granted') {
-          // Permission denied: keep toggle ON (preference saved), show Settings nudge.
-          // Do NOT revert – the user's intent is recorded so when they later grant
-          // permission the token will be captured on next app open.
-          __DEV__ && console.log('[push-toggle] permission denied – saving preference anyway, showing settings nudge');
+          setAlertsEnabled(false);
           Alert.alert(
-            'Enable Notifications in Settings',
-            'Notifications are currently disabled for this app. Go to Settings → Notifications → Routecast and turn them on.',
+            'Enable Notifications',
+            'Notifications are currently disabled for this app. Please enable them in Settings to receive route alerts.',
             [{ text: 'OK' }],
           );
-          // Fall through to backend save (pushToken stays null – that is fine)
-        } else {
-          // ── 2. Get device push token (best-effort; never revert on failure) ─
-          try {
-            const tokenData = await Notifications.getExpoPushTokenAsync({
-              projectId: Constants.expoConfig?.extra?.eas?.projectId,
-            });
-            pushToken = tokenData.data;
-            __DEV__ && console.log('[push-toggle] push token obtained:', pushToken?.slice(0, 20), '...');
-          } catch (tokenErr) {
-            // Common in Expo Go / simulators – save preference without a token.
-            // The token will be captured the next time the user opens the app on
-            // a real device with a valid EAS project ID.
-            console.warn('[push-toggle] push token unavailable (Expo Go / sim?):', tokenErr);
-          }
+          return;
         }
+
+        try {
+          const tokenData = await Notifications.getExpoPushTokenAsync({
+            projectId: Constants.expoConfig?.extra?.eas?.projectId,
+          });
+          pushToken = tokenData.data;
+          __DEV__ && console.log('[push-toggle] push token obtained:', pushToken?.slice(0, 20), '...');
+          await AsyncStorage.setItem('expoPushToken', pushToken);
+        } catch (tokenErr) {
+          console.warn('[push-toggle] push token unavailable (Android)', tokenErr);
+          setAlertsEnabled(false);
+          Alert.alert('Push Setup Failed', 'Could not get a push token. Please try again after enabling notifications.');
+          return;
+        }
+      } else {
+        // Disable: clear stored token
+        await AsyncStorage.removeItem('expoPushToken');
       }
 
-      // ── 3. Persist preference to backend ─────────────────────────────────
       await axios.post(
         `${API_BASE}/api/push/settings`,
         { push_enabled: nextEnabled, push_token: pushToken, platform: Platform.OS },
         { headers: { Authorization: `Bearer ${authToken}` }, withCredentials: true },
       );
-      __DEV__ && console.log('[push-toggle] saved to backend – push_enabled:', nextEnabled);
+      setAlertsEnabled(nextEnabled && !!pushToken);
+      __DEV__ && console.log('[push-toggle] saved to backend – push_enabled:', nextEnabled, 'hasToken:', !!pushToken);
     } catch (err: any) {
-      // Backend save failed: revert toggle so UI matches persisted state
       console.warn('[push-toggle] backend save error – reverting:', err?.message ?? err);
-      setAlertsEnabled(!nextEnabled);
+      setAlertsEnabled(false);
       Alert.alert('Error', 'Could not save notification settings. Please try again.');
     } finally {
       setPushLoading(false);
@@ -526,9 +534,11 @@ export default function HomeScreen() {
       };
 
       const savedPushToken = await AsyncStorage.getItem('expoPushToken');
-      if (savedPushToken && alertsEnabled) {
+      const hasSavedPushToken = !!savedPushToken;
+      const pushTokenPrefix = savedPushToken ? savedPushToken.slice(0, 12) : null;
+      if (savedPushToken) {
         requestData.push_token = savedPushToken;
-        requestData.push_alerts_enabled = true;
+        requestData.push_alerts_enabled = !!alertsEnabled;
       }
       
       if (useCustomTime) {
@@ -536,7 +546,13 @@ export default function HomeScreen() {
       }
 
       const routeWeatherUrl = `${API_BASE}/api/route/weather`;
-      console.log('Route request →', { url: routeWeatherUrl, requestData });
+      console.log('[route-request]', {
+        url: routeWeatherUrl,
+        alertsEnabled,
+        hasSavedPushToken,
+        pushTokenPrefix,
+        includesPushToken: Boolean(requestData.push_token),
+      });
 
       const response = await axios.post(routeWeatherUrl, requestData);
       let routeData = response.data ?? {};

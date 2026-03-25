@@ -18,6 +18,8 @@ import { useAuth } from '../contexts/AuthContext';
 import axios from 'axios';
 
 const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
+const GOOGLE_PLAY_URL = 'GOOGLE_PLAY_URL';
+const isWeb = Platform.OS === 'web';
 
 interface Plan {
   id: string;
@@ -43,12 +45,21 @@ export default function SubscriptionScreen() {
   const [launchingPlan, setLaunchingPlan] = useState<string | null>(null);
 
   useEffect(() => {
+    if (isWeb) return;
     fetchPlans();
-  }, []);
+  }, [isWeb]);
 
   useEffect(() => {
     setMounted(true);
   }, []);
+
+  useEffect(() => {
+    if (isWeb) {
+      router.replace('/landing');
+    }
+  }, [isWeb]);
+
+  const openGooglePlay = () => Linking.openURL(GOOGLE_PLAY_URL);
 
   const fetchPlans = async () => {
     try {
@@ -183,6 +194,29 @@ export default function SubscriptionScreen() {
   };
 
   if (!mounted) return null;
+
+  if (isWeb) {
+    return (
+      <View style={styles.webContainer}>
+        <SafeAreaView style={styles.safeArea}>
+          <View style={styles.webContent}>
+            <Text style={styles.webTitle}>Get RouteCast on Android</Text>
+            <Text style={styles.webSubtitle}>
+              Subscriptions are available in the Android app through Google Play. Download to manage billing and premium access securely in-app.
+            </Text>
+            <TouchableOpacity style={styles.webCta} onPress={openGooglePlay}>
+              <Ionicons name="logo-google-playstore" size={22} color="#0f0f0f" />
+              <Text style={styles.webCtaText}>Download on Google Play</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.webSecondary} onPress={() => router.replace('/landing')}>
+              <Text style={styles.webSecondaryText}>Return to Landing</Text>
+              <Ionicons name="arrow-forward" size={18} color="#eab308" />
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      </View>
+    );
+  }
 
   const isPremium = user?.is_premium;
   const isTrialing = user?.subscription_status === 'trialing';
@@ -426,6 +460,57 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 24,
+  },
+  webContainer: {
+    flex: 1,
+    backgroundColor: '#0f0f0f',
+  },
+  webContent: {
+    flex: 1,
+    padding: 24,
+    gap: 16,
+    maxWidth: 520,
+    marginHorizontal: 'auto',
+    justifyContent: 'center',
+  },
+  webTitle: {
+    color: '#ffffff',
+    fontSize: 28,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  webSubtitle: {
+    color: '#a1a1aa',
+    fontSize: 16,
+    textAlign: 'center',
+    lineHeight: 24,
+  },
+  webCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    backgroundColor: '#eab308',
+    paddingVertical: 14,
+    borderRadius: 12,
+  },
+  webCtaText: {
+    color: '#0f0f0f',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  webSecondary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 6,
+    paddingVertical: 12,
+  },
+  webSecondaryText: {
+    color: '#eab308',
+    fontSize: 15,
+    fontWeight: '600',
   },
   header: {
     alignItems: 'center',
