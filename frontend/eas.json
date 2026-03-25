@@ -10,7 +10,7 @@
         "autoIncrement": true
       },
       "env": {
-        "EXPO_PUBLIC_BACKEND_URL": "https://api.routecastweather.com/api",
+        "EXPO_PUBLIC_BACKEND_URL": "https://api.routecastweather.com",
         "EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN": "unset"
       }
     },
