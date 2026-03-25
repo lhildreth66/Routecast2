@@ -79,6 +79,13 @@ class SendNotificationRequest(BaseModel):
     data: Optional[Dict[str, Any]] = None
 
 
+class SendSingleNotificationRequest(BaseModel):
+    to: str
+    title: Optional[str] = "🚛 Routecast Test Alert"
+    body: Optional[str] = "Push notifications are working!"
+    data: Optional[Dict[str, Any]] = None
+
+
 
 class RoutePoint(BaseModel):
     lat: float
@@ -331,6 +338,46 @@ async def register_push_token(request: ExpoRegisterRequest):
     except Exception as exc:
         logger.error("Error registering push token: %s", exc)
         raise HTTPException(status_code=500, detail=f"Error registering token: {exc}")
+
+
+@router.post("/send-one")
+async def send_single_push_notification(request: SendSingleNotificationRequest):
+    """Send a test push notification to one Expo token."""
+    token = request.to
+    if not token.startswith("ExponentPushToken"):
+        raise HTTPException(status_code=400, detail="Invalid Expo push token")
+
+    message = PushMessage(
+        to=token,
+        title=request.title,
+        body=request.body,
+        sound="default",
+        channel_id="default",
+        data=request.data or {"type": "test"},
+    )
+
+    client = PushClient()
+    try:
+        resp = client.publish(message)
+    except Exception as exc:
+        logger.error("Error sending notification: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Error sending notification: {exc}")
+
+    ticket = {
+        "to": token,
+        "status": getattr(resp, "status", None),
+        "id": getattr(resp, "id", None),
+        "message": getattr(resp, "message", None),
+        "details": getattr(resp, "details", None),
+    }
+
+    if ticket.get("status") != "ok":
+        details = ticket.get("details") or {}
+        if details.get("error") == "DeviceNotRegistered":
+            _remove_token(token)
+        logger.error("[notifications] push ticket error", extra={"ticket": ticket})
+
+    return {"ok": ticket.get("status") == "ok", "ticket": ticket}
 
 
 @router.post("/send")
