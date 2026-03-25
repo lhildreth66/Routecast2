@@ -1,6 +1,6 @@
 import Constants from 'expo-constants';
 
-const DEFAULT_API_BASE = 'https://routecast-backend.onrender.com';
+const DEFAULT_API_BASE = 'https://api.routecastweather.com';
 
 const normalize = (value?: string | null): string => (typeof value === 'string' ? value.trim() : '');
 
