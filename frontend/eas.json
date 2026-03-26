@@ -23,5 +23,12 @@
         "EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN": "unset"
       }
     }
+  },
+  "submit": {
+    "production": {
+      "android": {
+        "track": "internal"
+      }
+    }
   }
 }
