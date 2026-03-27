@@ -35,7 +35,7 @@
     "android": {
       "package": "com.routecast.app",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 177,
+      "versionCode": 186,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#0a0a0a"
@@ -83,7 +83,8 @@
           "androidCollapsedTitle": "Routecast Weather Alerts"
         }
       ],
-      "@react-native-community/datetimepicker"
+      "@react-native-community/datetimepicker",
+      "expo-iap"
     ],
     "experiments": {
       "typedRoutes": true

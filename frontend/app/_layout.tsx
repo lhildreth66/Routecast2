@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
+import { useBilling } from './hooks/useBilling';
 
 // Routes that unpaid-but-verified users are allowed to visit.
 // Everything else redirects to /subscription (the paywall).
@@ -46,6 +47,37 @@ function PaywallGuard() {
   return null;
 }
 
+// Native-only auth/subscription guard. No-op during hydration to avoid flicker.
+function NativeAuthGuard() {
+  const { accessToken, hasHydrated, isLoading: authLoading } = useAuth();
+  const { entitlementActive, isLoading: billingLoading } = useBilling();
+  const rootNavState = useRootNavigationState();
+  const pathname = usePathname();
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    if (!rootNavState?.key) return; // navigator not ready
+    if (!hasHydrated || authLoading || billingLoading) return; // still hydrating
+
+    if (!accessToken) {
+      if (pathname !== '/login' && pathname !== '/signup') {
+        router.replace('/login');
+      }
+      return;
+    }
+
+    // Authenticated but not subscribed
+    if (!entitlementActive) {
+      const seg = '/' + (pathname.split('/').filter(Boolean)[0] ?? '');
+      if (seg !== '/subscription' && seg !== '/login' && seg !== '/signup') {
+        router.replace('/subscription');
+      }
+    }
+  }, [accessToken, authLoading, billingLoading, entitlementActive, hasHydrated, pathname, rootNavState?.key]);
+
+  return null;
+}
+
 // Configure notifications
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -74,6 +106,7 @@ export default function RootLayout() {
   return (
     <AuthProvider>
       <StatusBar style="light" />
+      <NativeAuthGuard />
       <PaywallGuard />
       <Stack
         screenOptions={{
