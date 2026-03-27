@@ -25,6 +25,7 @@ type OfferInfo = {
   period?: string;
   trialPeriod?: string;
   offerId?: string;
+  error?: string;
 };
 
 const humanizePeriod = (period?: string) => {
@@ -38,13 +39,28 @@ const humanizePeriod = (period?: string) => {
 };
 
 const selectOfferForBasePlan = (product: IAP.Subscription | undefined, basePlanId: string): OfferInfo | null => {
-  if (!product?.subscriptionOfferDetails?.length) return null;
+  if (!product?.subscriptionOfferDetails?.length) return { error: 'Billing unavailable for this plan' };
+
   const offers = product.subscriptionOfferDetails.filter((offer) => offer.basePlanId === basePlanId);
-  if (!offers.length) return null;
-  const preferred = offers.find((offer) => offer.offerId === 'trial7d') ?? offers[0];
+  if (!offers.length) return { error: `No offers found for ${basePlanId} plan` };
+
+  // Enforce base-plan specific offer preference rules
+  const filtered = basePlanId === 'annual' ? offers.filter((offer) => offer.offerId !== 'trial7d') : offers;
+  if (!filtered.length) {
+    return { error: basePlanId === 'annual' ? 'Annual plan unavailable right now' : `No valid offers for ${basePlanId}` };
+  }
+
+  const preferred = basePlanId === 'monthly'
+    ? filtered.find((offer) => offer.offerId === 'trial7d') ?? filtered[0]
+    : filtered[0];
+
   const phases = preferred.pricingPhases?.pricingPhaseList ?? [];
   const pricePhase = phases.find((phase) => (phase.priceAmountMicros ?? 0) > 0) ?? phases[0];
   const trialPhase = phases.find((phase) => (phase.priceAmountMicros ?? 0) === 0);
+
+  if (!preferred.offerToken || !pricePhase) {
+    return { error: `Offer data incomplete for ${basePlanId} plan` };
+  }
 
   return {
     offerToken: preferred.offerToken,
@@ -63,6 +79,24 @@ export default function SubscriptionScreen() {
   const product = billing.products[0];
   const monthlyOffer = useMemo(() => selectOfferForBasePlan(product, 'monthly'), [product]);
   const annualOffer = useMemo(() => selectOfferForBasePlan(product, 'annual'), [product]);
+
+  useEffect(() => {
+    if (!product) {
+      console.log('[billing] no product loaded');
+      return;
+    }
+    console.log('[billing] render product', {
+      productId: product.productId,
+      offers: product.subscriptionOfferDetails?.map((o) => ({
+        basePlanId: o.basePlanId,
+        offerId: o.offerId,
+        offerToken: o.offerToken,
+        pricing: o.pricingPhases?.pricingPhaseList?.map((ph) => ({ price: ph.formattedPrice, billingPeriod: ph.billingPeriod })),
+      })),
+      monthlyOffer,
+      annualOffer,
+    });
+  }, [product, monthlyOffer, annualOffer]);
 
   useEffect(() => {
     if (isWeb) {
@@ -205,7 +239,15 @@ export default function SubscriptionScreen() {
                 const price = offer?.price || '$—';
                 const interval = offer?.period ? humanizePeriod(offer.period) : basePlanId === 'annual' ? 'year' : 'month';
                 const trial = offer?.trialPeriod ? humanizePeriod(offer.trialPeriod) : null;
-                const disabled = billing.isPurchasing || !offer?.offerToken;
+                const disabled = billing.isPurchasing || !offer?.offerToken || !!offer?.error;
+
+                console.log('[billing] CTA render', {
+                  basePlanId,
+                  price,
+                  interval,
+                  trial,
+                  offerToken: offer?.offerToken,
+                });
 
                 return (
                   <View key={basePlanId} style={styles.planCard} data-testid={`plan-${basePlanId}`}>
@@ -225,8 +267,11 @@ export default function SubscriptionScreen() {
                     )}
 
                     <TouchableOpacity
-                      style={[styles.planButton, (billing.isPurchasing || !offer?.offerToken) && styles.buttonDisabled]}
-                      onPress={() => handlePurchase(offer?.offerToken)}
+                      style={[styles.planButton, disabled && styles.buttonDisabled]}
+                      onPress={() => {
+                        console.log('[billing] purchase tap', { basePlanId, offerToken: offer?.offerToken });
+                        handlePurchase(offer?.offerToken);
+                      }}
                       disabled={disabled}
                       data-testid={`purchase-${basePlanId}`}
                     >
@@ -239,6 +284,13 @@ export default function SubscriptionScreen() {
                         </>
                       )}
                     </TouchableOpacity>
+
+                    {offer?.error && (
+                      <View style={styles.errorContainer}>
+                        <Ionicons name="alert-circle" size={18} color="#ef4444" />
+                        <Text style={styles.errorText}>{offer.error}</Text>
+                      </View>
+                    )}
 
                     <TouchableOpacity
                       style={[styles.restoreButton, billing.isRestoring && styles.buttonDisabled]}

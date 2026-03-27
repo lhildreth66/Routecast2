@@ -72,11 +72,28 @@ export function useBilling(): BillingApi {
   }, []);
 
   const connect = async () => {
+    console.log('IAP initConnection starting...');
     setLoading(true);
     setError(null);
     try {
       await IAP.initConnection();
       const fetched = await IAP.fetchProducts({ skus: [SUBSCRIPTION_SKU], type: 'subs' });
+      console.log('IAP fetchProducts result:', JSON.stringify(fetched));
+      console.log('IAP fetchProducts count:', fetched?.length);
+      console.log('[billing] fetched products', fetched?.map((p) => ({
+        productId: p.productId,
+        title: p.title,
+        type: p.type,
+        subscriptionOfferDetails: p.subscriptionOfferDetails?.map((o) => ({
+          basePlanId: o.basePlanId,
+          offerId: o.offerId,
+          offerToken: o.offerToken,
+          pricing: o.pricingPhases?.pricingPhaseList?.map((ph) => ({
+            price: ph.formattedPrice,
+            billingPeriod: ph.billingPeriod,
+          })),
+        })),
+      })));
       setProducts(fetched ?? []);
 
       // Hydrate active subs to infer entitlement
