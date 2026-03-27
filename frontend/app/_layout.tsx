@@ -59,19 +59,21 @@ function NativeAuthGuard() {
     if (!rootNavState?.key) return; // navigator not ready
     if (!hasHydrated || authLoading || billingLoading) return; // still hydrating
 
+    const seg = '/' + (pathname.split('/').filter(Boolean)[0] ?? '');
+
+    // Allow unauthenticated users to reach subscription and purchase via Play Billing.
     if (!accessToken) {
-      if (pathname !== '/login' && pathname !== '/signup') {
-        router.replace('/login');
+      const allowlist = new Set(['/subscription', '/login', '/signup', '/landing', '/welcome']);
+      if (!entitlementActive && !allowlist.has(pathname) && !allowlist.has(seg)) {
+        router.replace('/subscription');
       }
+      // If entitlement is active (purchased as guest), permit app access without forcing login.
       return;
     }
 
-    // Authenticated but not subscribed
-    if (!entitlementActive) {
-      const seg = '/' + (pathname.split('/').filter(Boolean)[0] ?? '');
-      if (seg !== '/subscription' && seg !== '/login' && seg !== '/signup') {
-        router.replace('/subscription');
-      }
+    // Authenticated but not subscribed: route to subscription.
+    if (!entitlementActive && seg !== '/subscription' && seg !== '/login' && seg !== '/signup') {
+      router.replace('/subscription');
     }
   }, [accessToken, authLoading, billingLoading, entitlementActive, hasHydrated, pathname, rootNavState?.key]);
 

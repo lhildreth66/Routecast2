@@ -73,12 +73,14 @@ export default function SubscriptionScreen() {
   const openGooglePlay = () => Linking.openURL(GOOGLE_PLAY_URL);
 
   const handlePurchase = async (offerToken?: string) => {
-    if (!isAuthenticated) {
-      router.push('/signup');
-      return;
-    }
     await billing.purchase(offerToken);
-    await refreshUser();
+
+    // If the user is already signed in, sync their server profile; otherwise prompt to link/create after purchase.
+    if (isAuthenticated) {
+      await refreshUser();
+    } else {
+      router.replace('/signup?postPurchase=1');
+    }
   };
 
   const handleRestore = async () => {
