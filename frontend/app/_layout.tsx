@@ -50,7 +50,9 @@ function PaywallGuard() {
 // Native-only auth/subscription guard. No-op during hydration to avoid flicker.
 function NativeAuthGuard() {
   const { accessToken, hasHydrated, isLoading: authLoading } = useAuth();
-  const { entitlementActive, isLoading: billingLoading } = useBilling();
+  // Temporarily disable billing hook to test crash source.
+  const entitlementActive = true;
+  const billingLoading = false;
   const rootNavState = useRootNavigationState();
   const pathname = usePathname();
 
