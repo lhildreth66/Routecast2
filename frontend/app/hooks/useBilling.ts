@@ -40,7 +40,7 @@ export function useBilling(): BillingApi {
   useEffect(() => {
     let mounted = true;
 
-    const listener = IAP.setPurchaseListener(async (result) => {
+    const purchaseSub = IAP.purchaseUpdatedListener(async (result) => {
       if (!mounted) return;
       if (result.responseCode === IAP.IAPResponseCode.OK && result.results?.length) {
         setPurchases(result.results);
@@ -59,11 +59,16 @@ export function useBilling(): BillingApi {
       }
     });
 
+    const errorSub = IAP.purchaseErrorListener((error) => {
+      console.error('Purchase error:', error);
+    });
+
     connect();
 
     return () => {
       mounted = false;
-      listener.remove();
+      purchaseSub.remove();
+      errorSub.remove();
       IAP.endConnection?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
