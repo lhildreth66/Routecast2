@@ -27,40 +27,37 @@ export function useBilling(): BillingApi {
   const [isPurchasing, setPurchasing] = useState(false);
   const [isRestoring, setRestoring] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [purchases, setPurchases] = useState<IAP.InAppPurchase[]>([]);
+  const [purchases, setPurchases] = useState<Array<IAP.Purchase | IAP.ActiveSubscription>>([]);
 
   // Entitlement: any completed purchase (state PURCHASED, acknowledged) for our SKUs
   const entitlementActive = useMemo(() => {
-    return purchases.some((p) =>
-      p.productId === SUBSCRIPTION_SKU &&
-      (p.purchaseStateAndroid === IAP.PurchaseState.PURCHASED || p.acknowledged === true)
-    );
+    return purchases.some((p: any) => {
+      // ActiveSubscription uses isActive; Purchase uses purchaseState === 'purchased'
+      if (p.productId !== SUBSCRIPTION_SKU && p.sku !== SUBSCRIPTION_SKU) return false;
+      if (p.isActive === true) return true;
+      if (p.purchaseState === 'purchased') return true;
+      if (p.purchaseStateAndroid === IAP.PurchaseState.PURCHASED) return true;
+      if (p.acknowledged === true) return true;
+      return false;
+    });
   }, [purchases]);
 
   useEffect(() => {
     let mounted = true;
 
-    const purchaseSub = IAP.purchaseUpdatedListener(async (result) => {
-      if (!mounted) return;
-      if (result.responseCode === IAP.IAPResponseCode.OK && result.results?.length) {
-        setPurchases(result.results);
-        // Acknowledge/finish to avoid future blocking
-        for (const purchase of result.results) {
-          try {
-            await IAP.finishTransaction(purchase, false);
-          } catch (e) {
-            // swallow; will retry on next launch
-          }
-        }
-      } else if (result.responseCode === IAP.IAPResponseCode.USER_CANCELED) {
-        setError('Purchase canceled');
-      } else if (result.responseCode !== IAP.IAPResponseCode.OK) {
-        setError(result.errorCode || 'Purchase failed');
+    const purchaseSub = IAP.purchaseUpdatedListener(async (purchase) => {
+      if (!mounted || !purchase) return;
+      setPurchases([purchase]);
+      try {
+        await IAP.finishTransaction({ purchase });
+      } catch (e) {
+        // swallow; retry on next launch
       }
     });
 
-    const errorSub = IAP.purchaseErrorListener((error) => {
-      console.error('Purchase error:', error);
+    const errorSub = IAP.purchaseErrorListener((err) => {
+      console.error('Purchase error:', err);
+      setError(err?.message ?? 'Purchase failed');
     });
 
     connect();
@@ -79,11 +76,12 @@ export function useBilling(): BillingApi {
     setError(null);
     try {
       await IAP.initConnection();
-      const subs = await IAP.getSubscriptions([SUBSCRIPTION_SKU]);
-      setProducts(subs ?? []);
-      // Also hydrate purchase history to infer entitlement
-      const history = await IAP.getPurchaseHistory();
-      setPurchases(history ?? []);
+      const fetched = await IAP.fetchProducts({ skus: [SUBSCRIPTION_SKU], type: 'subs' });
+      setProducts(fetched ?? []);
+
+      // Hydrate active subs to infer entitlement
+      const active = await IAP.getActiveSubscriptions([SUBSCRIPTION_SKU]);
+      if (active) setPurchases(active);
     } catch (e: any) {
       setError(e?.message ?? 'Billing unavailable');
     } finally {
@@ -99,9 +97,14 @@ export function useBilling(): BillingApi {
     setPurchasing(true);
     setError(null);
     try {
-      await IAP.requestSubscription({
-        sku: SUBSCRIPTION_SKU,
-        subscriptionOffers: [{ sku: SUBSCRIPTION_SKU, offerToken }],
+      await IAP.requestPurchase({
+        type: 'subs',
+        request: {
+          google: {
+            skus: [SUBSCRIPTION_SKU],
+            subscriptionOffers: [{ sku: SUBSCRIPTION_SKU, offerToken }],
+          },
+        },
       });
     } catch (e: any) {
       setError(e?.message ?? 'Purchase failed');
@@ -114,8 +117,9 @@ export function useBilling(): BillingApi {
     setRestoring(true);
     setError(null);
     try {
-      const history = await IAP.getPurchaseHistory();
-      setPurchases(history ?? []);
+      await IAP.restorePurchases();
+      const active = await IAP.getActiveSubscriptions([SUBSCRIPTION_SKU]);
+      if (active) setPurchases(active);
     } catch (e: any) {
       setError(e?.message ?? 'Restore failed');
     } finally {
