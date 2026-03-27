@@ -61,13 +61,16 @@ function NativeAuthGuard() {
 
     const seg = '/' + (pathname.split('/').filter(Boolean)[0] ?? '');
 
-    // Allow unauthenticated users to reach subscription and purchase via Play Billing.
-    if (!accessToken) {
-      const allowlist = new Set(['/subscription', '/login', '/signup', '/landing', '/welcome']);
-      if (!entitlementActive && !allowlist.has(pathname) && !allowlist.has(seg)) {
+    // Unauthenticated + not entitled → always start at subscription to trigger Play Billing.
+    if (!accessToken && !entitlementActive) {
+      if (pathname !== '/subscription') {
         router.replace('/subscription');
       }
-      // If entitlement is active (purchased as guest), permit app access without forcing login.
+      return;
+    }
+
+    // Unauthenticated but entitled (guest purchase) → allow access without forcing login.
+    if (!accessToken && entitlementActive) {
       return;
     }
 

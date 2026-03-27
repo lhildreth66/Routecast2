@@ -235,7 +235,7 @@ export default function SubscriptionScreen() {
                       ) : (
                         <>
                           <Ionicons name="cart" size={18} color="#1a1a1a" />
-                          <Text style={styles.planButtonText}>Purchase</Text>
+                          <Text style={styles.planButtonText}>Purchase with Google Play</Text>
                         </>
                       )}
                     </TouchableOpacity>
@@ -263,6 +263,23 @@ export default function SubscriptionScreen() {
               <Text style={styles.errorText}>{billing.error}</Text>
             </View>
           )}
+
+          {!billing.error && !billing.products.length && !billing.isLoading && (
+            <View style={styles.errorContainer}>
+              <Ionicons name="alert-circle" size={18} color="#ef4444" />
+              <Text style={styles.errorText}>
+                Unable to load Google Play products. Please ensure Play Store is available and try again.
+              </Text>
+            </View>
+          )}
+
+          <TouchableOpacity
+            style={[styles.loginLinkContainer, billing.isPurchasing && styles.buttonDisabled]}
+            onPress={() => router.push('/login')}
+            disabled={billing.isPurchasing}
+          >
+            <Text style={styles.loginLinkText}>Already subscribed? Sign in to link</Text>
+          </TouchableOpacity>
 
           <Text style={styles.termsText}>
             Billing handled securely via Google Play. Subscriptions auto-renew unless canceled.
@@ -360,6 +377,12 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   errorText: { color: '#fca5a5' },
+  loginLinkContainer: {
+    marginTop: 12,
+    alignItems: 'center',
+    paddingVertical: 10,
+  },
+  loginLinkText: { color: '#eab308', fontWeight: '700' },
   termsText: { color: '#71717a', fontSize: 12, marginTop: 16, lineHeight: 18 },
   premiumContent: { flex: 1, padding: 20, gap: 20 },
   premiumIconContainer: {
