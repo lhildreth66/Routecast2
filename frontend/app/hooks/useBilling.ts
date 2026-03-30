@@ -77,7 +77,7 @@ export function useBilling(): BillingApi {
     setError(null);
     try {
       await IAP.initConnection();
-      const fetched = await IAP.getSubscriptions({ skus: [SUBSCRIPTION_SKU] });
+      const fetched = await IAP.fetchProducts({ skus: [SUBSCRIPTION_SKU], type: 'subs' });
       console.log('IAP fetchProducts result:', JSON.stringify(fetched));
       console.log('IAP fetchProducts count:', fetched?.length);
       console.log('[billing] fetched products', fetched?.map((p) => ({
