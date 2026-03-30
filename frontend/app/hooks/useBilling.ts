@@ -77,7 +77,7 @@ export function useBilling(): BillingApi {
     setError(null);
     try {
       await IAP.initConnection();
-      const fetched = await IAP.fetchProducts({ skus: [SUBSCRIPTION_SKU], type: 'subs' });
+      const fetched = await IAP.getSubscriptions({ skus: [SUBSCRIPTION_SKU] });
       console.log('IAP fetchProducts result:', JSON.stringify(fetched));
       console.log('IAP fetchProducts count:', fetched?.length);
       console.log('[billing] fetched products', fetched?.map((p) => ({
@@ -97,7 +97,7 @@ export function useBilling(): BillingApi {
       setProducts(fetched ?? []);
 
       // Hydrate active subs to infer entitlement
-      const active = await IAP.getActiveSubscriptions([SUBSCRIPTION_SKU]);
+      const active = await IAP.getAvailablePurchases();
       if (active) setPurchases(active);
     } catch (e: any) {
       setError(e?.message ?? 'Billing unavailable');
@@ -135,7 +135,7 @@ export function useBilling(): BillingApi {
     setError(null);
     try {
       await IAP.restorePurchases();
-      const active = await IAP.getActiveSubscriptions([SUBSCRIPTION_SKU]);
+      const active = await IAP.getAvailablePurchases();
       if (active) setPurchases(active);
     } catch (e: any) {
       setError(e?.message ?? 'Restore failed');
