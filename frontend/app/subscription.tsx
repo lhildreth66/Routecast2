@@ -39,9 +39,9 @@ const humanizePeriod = (period?: string) => {
 };
 
 const selectOfferForBasePlan = (product: IAP.Subscription | undefined, basePlanId: string): OfferInfo | null => {
-  if (!product?.subscriptionOfferDetails?.length) return { error: 'Billing unavailable for this plan' };
+  if (!product?.subscriptionOfferDetailsAndroid?.length) return { error: 'Billing unavailable for this plan' };
 
-  const offers = product.subscriptionOfferDetails.filter((offer) => offer.basePlanId === basePlanId);
+  const offers = product.subscriptionOfferDetailsAndroid.filter((offer) => offer.basePlanId === basePlanId);
   if (!offers.length) return { error: `No offers found for ${basePlanId} plan` };
 
   // Enforce base-plan specific offer preference rules
@@ -54,18 +54,18 @@ const selectOfferForBasePlan = (product: IAP.Subscription | undefined, basePlanI
     ? filtered.find((offer) => offer.offerId === 'trial7d') ?? filtered[0]
     : filtered[0];
 
-  const phases = preferred.pricingPhases?.pricingPhaseList ?? [];
-  const pricePhase = phases.find((phase) => (phase.priceAmountMicros ?? 0) > 0) ?? phases[0];
-  const trialPhase = phases.find((phase) => (phase.priceAmountMicros ?? 0) === 0);
+  const pricingPhases = preferred.pricingPhases?.pricingPhaseList ?? [];
+  const recurringPhase = pricingPhases[pricingPhases.length - 1];
+  const trialPhase = pricingPhases.find((phase) => (phase.priceAmountMicros ?? 0) === 0);
 
-  if (!preferred.offerToken || !pricePhase) {
+  if (!preferred.offerToken || !recurringPhase) {
     return { error: `Offer data incomplete for ${basePlanId} plan` };
   }
 
   return {
     offerToken: preferred.offerToken,
-    price: pricePhase?.formattedPrice || pricePhase?.price,
-    period: pricePhase?.billingPeriod,
+    price: recurringPhase.formattedPrice,
+    period: recurringPhase.billingPeriod,
     trialPeriod: trialPhase?.billingPeriod,
     offerId: preferred.offerId,
   };
@@ -86,8 +86,8 @@ export default function SubscriptionScreen() {
       return;
     }
     console.log('[billing] render product', {
-      productId: product.productId,
-      offers: product.subscriptionOfferDetails?.map((o) => ({
+      productId: product.id,
+      offers: product.subscriptionOfferDetailsAndroid?.map((o) => ({
         basePlanId: o.basePlanId,
         offerId: o.offerId,
         offerToken: o.offerToken,

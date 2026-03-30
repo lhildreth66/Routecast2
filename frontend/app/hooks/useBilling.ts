@@ -33,7 +33,7 @@ export function useBilling(): BillingApi {
   const entitlementActive = useMemo(() => {
     return purchases.some((p: any) => {
       // ActiveSubscription uses isActive; Purchase uses purchaseState === 'purchased'
-      if (p.productId !== SUBSCRIPTION_SKU && p.sku !== SUBSCRIPTION_SKU) return false;
+      if (p.id !== SUBSCRIPTION_SKU && p.sku !== SUBSCRIPTION_SKU) return false;
       if (p.isActive === true) return true;
       if (p.purchaseState === 'purchased') return true;
       if (p.purchaseStateAndroid === IAP.PurchaseState.PURCHASED) return true;
@@ -81,10 +81,10 @@ export function useBilling(): BillingApi {
       console.log('IAP fetchProducts result:', JSON.stringify(fetched));
       console.log('IAP fetchProducts count:', fetched?.length);
       console.log('[billing] fetched products', fetched?.map((p) => ({
-        productId: p.productId,
+        productId: p.id,
         title: p.title,
         type: p.type,
-        subscriptionOfferDetails: p.subscriptionOfferDetails?.map((o) => ({
+        subscriptionOfferDetails: p.subscriptionOfferDetailsAndroid?.map((o) => ({
           basePlanId: o.basePlanId,
           offerId: o.offerId,
           offerToken: o.offerToken,
