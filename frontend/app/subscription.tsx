@@ -39,9 +39,10 @@ const humanizePeriod = (period?: string) => {
 };
 
 const selectOfferForBasePlan = (product: IAP.Subscription | undefined, basePlanId: string): OfferInfo | null => {
-  if (!product?.subscriptionOfferDetailsAndroid?.length) return { error: 'Billing unavailable for this plan' };
+  const offerDetails = (product as any)?.subscriptionOfferDetailsAndroid ?? (product as any)?.subscriptionOfferDetails;
+  if (!offerDetails?.length) return { error: 'Billing unavailable for this plan' };
 
-  const offers = product.subscriptionOfferDetailsAndroid.filter((offer) => offer.basePlanId === basePlanId);
+  const offers = offerDetails.filter((offer: any) => offer.basePlanId === basePlanId);
   if (!offers.length) return { error: `No offers found for ${basePlanId} plan` };
 
   // Enforce base-plan specific offer preference rules
@@ -56,7 +57,7 @@ const selectOfferForBasePlan = (product: IAP.Subscription | undefined, basePlanI
 
   const pricingPhases = preferred.pricingPhases?.pricingPhaseList ?? [];
   const recurringPhase = pricingPhases[pricingPhases.length - 1];
-  const trialPhase = pricingPhases.find((phase) => (phase.priceAmountMicros ?? 0) === 0);
+  const trialPhase = pricingPhases.find((phase: any) => (phase.priceAmountMicros ?? 0) === 0);
 
   if (!preferred.offerToken || !recurringPhase) {
     return { error: `Offer data incomplete for ${basePlanId} plan` };
@@ -85,17 +86,14 @@ export default function SubscriptionScreen() {
       console.log('[billing] no product loaded');
       return;
     }
-    console.log('[billing] render product', {
-      productId: product.id,
-      offers: product.subscriptionOfferDetailsAndroid?.map((o) => ({
-        basePlanId: o.basePlanId,
-        offerId: o.offerId,
-        offerToken: o.offerToken,
-        pricing: o.pricingPhases?.pricingPhaseList?.map((ph) => ({ price: ph.formattedPrice, billingPeriod: ph.billingPeriod })),
-      })),
-      monthlyOffer,
-      annualOffer,
-    });
+    const productId = product.id ?? (product as any).productId;
+    const offers = (product as any).subscriptionOfferDetailsAndroid?.map((o: any) => ({
+      basePlanId: o.basePlanId,
+      offerId: o.offerId,
+      offerToken: o.offerToken,
+      pricing: o.pricingPhases?.pricingPhaseList?.map((ph) => ({ price: ph.formattedPrice, billingPeriod: ph.billingPeriod })),
+    }));
+    console.log('[billing] render product', { productId, offers, monthlyOffer, annualOffer });
   }, [product, monthlyOffer, annualOffer]);
 
   useEffect(() => {
@@ -106,7 +104,9 @@ export default function SubscriptionScreen() {
 
   const openGooglePlay = () => Linking.openURL(GOOGLE_PLAY_URL);
 
-  const handlePurchase = async (offerToken?: string) => {
+  const handlePurchase = async (basePlanId: string, offerToken?: string) => {
+    const productId = product?.id ?? (product as any)?.productId;
+    console.log('[billing] CTA payload', { productId, basePlanId, offerToken });
     await billing.purchase(offerToken);
 
     // If the user is already signed in, sync their server profile; otherwise prompt to link/create after purchase.
@@ -270,7 +270,7 @@ export default function SubscriptionScreen() {
                       style={[styles.planButton, disabled && styles.buttonDisabled]}
                       onPress={() => {
                         console.log('[billing] purchase tap', { basePlanId, offerToken: offer?.offerToken });
-                        handlePurchase(offer?.offerToken);
+                        handlePurchase(basePlanId, offer?.offerToken);
                       }}
                       disabled={disabled}
                       data-testid={`purchase-${basePlanId}`}

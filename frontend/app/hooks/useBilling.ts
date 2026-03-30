@@ -32,8 +32,9 @@ export function useBilling(): BillingApi {
   // Entitlement: any completed purchase (state PURCHASED, acknowledged) for our SKUs
   const entitlementActive = useMemo(() => {
     return purchases.some((p: any) => {
+      const pid = p.id ?? p.productId ?? p.sku;
       // ActiveSubscription uses isActive; Purchase uses purchaseState === 'purchased'
-      if (p.id !== SUBSCRIPTION_SKU && p.sku !== SUBSCRIPTION_SKU) return false;
+      if (pid !== SUBSCRIPTION_SKU && p.sku !== SUBSCRIPTION_SKU) return false;
       if (p.isActive === true) return true;
       if (p.purchaseState === 'purchased') return true;
       if (p.purchaseStateAndroid === IAP.PurchaseState.PURCHASED) return true;
@@ -78,23 +79,29 @@ export function useBilling(): BillingApi {
     try {
       await IAP.initConnection();
       const fetched = await IAP.fetchProducts({ skus: [SUBSCRIPTION_SKU], type: 'subs' });
-      console.log('IAP fetchProducts result:', JSON.stringify(fetched));
-      console.log('IAP fetchProducts count:', fetched?.length);
-      console.log('[billing] fetched products', fetched?.map((p) => ({
+      console.log('[billing] raw fetchProducts result', fetched);
+      const normalized = (fetched ?? []).map((p: any) => ({
+        ...p,
+        id: p.id ?? p.productId,
+        subscriptionOfferDetailsAndroid: p.subscriptionOfferDetailsAndroid ?? p.subscriptionOfferDetails,
+      }));
+      console.log('IAP fetchProducts result:', JSON.stringify(normalized));
+      console.log('IAP fetchProducts count:', normalized?.length);
+      console.log('[billing] fetched products', normalized?.map((p) => ({
         productId: p.id,
         title: p.title,
         type: p.type,
-        subscriptionOfferDetails: p.subscriptionOfferDetailsAndroid?.map((o) => ({
+        subscriptionOfferDetails: p.subscriptionOfferDetailsAndroid?.map((o: any) => ({
           basePlanId: o.basePlanId,
           offerId: o.offerId,
           offerToken: o.offerToken,
-          pricing: o.pricingPhases?.pricingPhaseList?.map((ph) => ({
+          pricing: o.pricingPhases?.pricingPhaseList?.map((ph: any) => ({
             price: ph.formattedPrice,
             billingPeriod: ph.billingPeriod,
           })),
         })),
       })));
-      setProducts(fetched ?? []);
+      setProducts(normalized ?? []);
 
       // Hydrate active subs to infer entitlement
       const active = await IAP.getAvailablePurchases();
