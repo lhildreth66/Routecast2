@@ -57,7 +57,7 @@ const selectOfferForBasePlan = (product: IAP.Subscription | undefined, basePlanI
 
   const pricingPhases = preferred.pricingPhases?.pricingPhaseList ?? [];
   const recurringPhase = pricingPhases[pricingPhases.length - 1];
-  const trialPhase = pricingPhases.find((phase: any) => (phase.priceAmountMicros ?? 0) === 0);
+  const trialPhase = pricingPhases.find((phase: any) => Number(phase.priceAmountMicros ?? 0) === 0);
 
   if (!preferred.offerToken || !recurringPhase) {
     return { error: `Offer data incomplete for ${basePlanId} plan` };
