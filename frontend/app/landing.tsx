@@ -81,11 +81,11 @@ export default function LandingPage() {
               <View style={styles.heroCtas}>
                 <TouchableOpacity 
                   style={styles.primaryCta}
-                  onPress={() => Linking.openURL(GOOGLE_PLAY_URL)}
-                  data-testid="hero-download"
+                  onPress={() => router.push('/signup')}
+                  data-testid="hero-start-trial"
                 >
-                  <Ionicons name="logo-google-playstore" size={20} color="#0f0f0f" />
-                  <Text style={styles.primaryCtaText}>Download on Google Play</Text>
+                  <Ionicons name="rocket" size={20} color="#0f0f0f" />
+                  <Text style={styles.primaryCtaText}>Start Free Trial</Text>
                 </TouchableOpacity>
                 
                 <TouchableOpacity 

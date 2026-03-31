@@ -56,7 +56,7 @@ function NativeAuthGuard() {
 
   // Allowlist routes for unauthenticated, not-entitled users (first launch / marketing).
   const allowUnauthed = new Set([
-    '/', '/landing', '/welcome', '/contact', '/privacy', '/terms', '/login', '/signup', '/forgot-password', '/reset-password',
+    '/landing', '/welcome', '/contact', '/privacy', '/terms', '/login', '/signup', '/forgot-password', '/reset-password',
   ]);
 
   useEffect(() => {
@@ -66,9 +66,9 @@ function NativeAuthGuard() {
 
     const seg = '/' + (pathname.split('/').filter(Boolean)[0] ?? '');
 
-    // Unauthenticated + not entitled: keep them on marketing/welcome; otherwise send to landing.
+    // Unauthenticated + not entitled: force landing unless already on an allowlisted marketing/auth route.
     if (!accessToken && !entitlementActive) {
-      if (!allowUnauthed.has(pathname) && !allowUnauthed.has(seg)) {
+      if (pathname === '/' || (!allowUnauthed.has(pathname) && !allowUnauthed.has(seg))) {
         router.replace('/landing');
       }
       return;
