@@ -79,26 +79,19 @@ export function useBilling(): BillingApi {
     try {
       await IAP.initConnection();
       const fetched = await IAP.fetchProducts({ skus: [SUBSCRIPTION_SKU], type: 'subs' });
-      console.log('[billing] raw fetchProducts result', fetched);
       const normalized = (fetched ?? []).map((p: any) => ({
         ...p,
         id: p.id ?? p.productId,
         subscriptionOfferDetailsAndroid: p.subscriptionOfferDetailsAndroid ?? p.subscriptionOfferDetails,
       }));
-      console.log('IAP fetchProducts result:', JSON.stringify(normalized));
-      console.log('IAP fetchProducts count:', normalized?.length);
-      console.log('[billing] fetched products', normalized?.map((p) => ({
+      console.log('[billing] fetched products summary', normalized?.map((p) => ({
         productId: p.id,
         title: p.title,
-        type: p.type,
-        subscriptionOfferDetails: p.subscriptionOfferDetailsAndroid?.map((o: any) => ({
+        offers: p.subscriptionOfferDetailsAndroid?.map((o: any) => ({
           basePlanId: o.basePlanId,
           offerId: o.offerId,
-          offerToken: o.offerToken,
-          pricing: o.pricingPhases?.pricingPhaseList?.map((ph: any) => ({
-            price: ph.formattedPrice,
-            billingPeriod: ph.billingPeriod,
-          })),
+          hasToken: Boolean(o.offerToken),
+          pricingPhases: o.pricingPhases?.pricingPhaseList?.length,
         })),
       })));
       setProducts(normalized ?? []);

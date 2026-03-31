@@ -239,6 +239,7 @@ export default function SubscriptionScreen() {
                 const price = offer?.price || '$—';
                 const interval = offer?.period ? humanizePeriod(offer.period) : basePlanId === 'annual' ? 'year' : 'month';
                 const trial = offer?.trialPeriod ? humanizePeriod(offer.trialPeriod) : null;
+                const trialLine = trial && price ? `${trial} free trial, then ${price}/${interval}` : trial ? `Free trial: ${trial}` : null;
                 const disabled = billing.isPurchasing || !offer?.offerToken || !!offer?.error;
 
                 console.log('[billing] CTA render', {
@@ -262,7 +263,7 @@ export default function SubscriptionScreen() {
                     {trial && (
                       <View style={styles.trialBannerInline}>
                         <Ionicons name="gift" size={18} color="#22c55e" />
-                        <Text style={styles.trialBannerInlineText}>Free trial: {trial}</Text>
+                        <Text style={styles.trialBannerInlineText}>{trialLine}</Text>
                       </View>
                     )}
 
