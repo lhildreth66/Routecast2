@@ -38,6 +38,13 @@ const humanizePeriod = (period?: string) => {
   return value === 1 ? unit : `${value} ${unit}s`;
 };
 
+const formatTrialPeriod = (period?: string) => {
+  if (!period) return '';
+  // Play often returns P1W for a 7-day trial; show explicit 7-day copy.
+  if (period === 'P1W' || period === 'P7D') return '7-day';
+  return humanizePeriod(period);
+};
+
 const selectOfferForBasePlan = (product: IAP.Subscription | undefined, basePlanId: string): OfferInfo | null => {
   const offerDetails = (product as any)?.subscriptionOfferDetailsAndroid ?? (product as any)?.subscriptionOfferDetails;
   if (!offerDetails?.length) return { error: 'Billing unavailable for this plan' };
@@ -238,7 +245,7 @@ export default function SubscriptionScreen() {
               ({ label, basePlanId, offer }) => {
                 const price = offer?.price || '$—';
                 const interval = offer?.period ? humanizePeriod(offer.period) : basePlanId === 'annual' ? 'year' : 'month';
-                const trial = offer?.trialPeriod ? humanizePeriod(offer.trialPeriod) : null;
+                const trial = offer?.trialPeriod ? formatTrialPeriod(offer.trialPeriod) : null;
                 const trialLine = trial && price ? `${trial} free trial, then ${price}/${interval}` : trial ? `Free trial: ${trial}` : null;
                 const disabled = billing.isPurchasing || !offer?.offerToken || !!offer?.error;
 
