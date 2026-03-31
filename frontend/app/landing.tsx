@@ -16,7 +16,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const isWideScreen = SCREEN_WIDTH > 768;
-const GOOGLE_PLAY_URL = 'GOOGLE_PLAY_URL';
+const GOOGLE_PLAY_URL = 'https://play.google.com/store/apps/details?id=com.routecast.app';
 
 export default function LandingPage() {
   const [activeFaq, setActiveFaq] = useState<number | null>(null);
@@ -81,11 +81,17 @@ export default function LandingPage() {
               <View style={styles.heroCtas}>
                 <TouchableOpacity 
                   style={styles.primaryCta}
-                  onPress={() => router.push('/signup')}
+                  onPress={() => {
+                    if (Platform.OS === 'web') {
+                      Linking.openURL(GOOGLE_PLAY_URL);
+                      return;
+                    }
+                    router.push('/signup');
+                  }}
                   data-testid="hero-start-trial"
                 >
                   <Ionicons name="rocket" size={20} color="#0f0f0f" />
-                  <Text style={styles.primaryCtaText}>Start Free Trial</Text>
+                  <Text style={styles.primaryCtaText}>{Platform.OS === 'web' ? 'Get it on Google Play' : 'Start Free Trial'}</Text>
                 </TouchableOpacity>
                 
                 <TouchableOpacity 

@@ -12,7 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import * as IAP from 'expo-iap';
+import type * as IAP from 'expo-iap';
 import { useAuth } from '../contexts/AuthContext';
 import { useBilling } from './hooks/useBilling';
 

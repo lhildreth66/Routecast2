@@ -1,8 +1,15 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Platform } from 'react-native';
-import * as IAP from 'expo-iap';
+import type * as IapTypes from 'expo-iap';
 
-type BillingProduct = IAP.Subscription;
+type BillingProduct = IapTypes.Subscription;
+
+// Dynamically require expo-iap only on native to avoid web bundle crashes.
+let IAP: typeof import('expo-iap') | null = null;
+if (Platform.OS !== 'web') {
+  // eslint-disable-next-line global-require
+  IAP = require('expo-iap');
+}
 
 export interface BillingState {
   products: BillingProduct[];
@@ -53,7 +60,7 @@ export function useBilling(): BillingApi {
       if (pid !== SUBSCRIPTION_SKU && p.sku !== SUBSCRIPTION_SKU) return false;
       if (p.isActive === true) return true;
       if (p.purchaseState === 'purchased') return true;
-      if (p.purchaseStateAndroid === IAP.PurchaseState.PURCHASED) return true;
+      if (p.purchaseStateAndroid === IAP!.PurchaseState.PURCHASED) return true;
       if (p.acknowledged === true) return true;
       return false;
     });
@@ -62,17 +69,17 @@ export function useBilling(): BillingApi {
   useEffect(() => {
     let mounted = true;
 
-    const purchaseSub = IAP.purchaseUpdatedListener(async (purchase) => {
+    const purchaseSub = IAP!.purchaseUpdatedListener(async (purchase) => {
       if (!mounted || !purchase) return;
       setPurchases([purchase]);
       try {
-        await IAP.finishTransaction({ purchase });
+        await IAP!.finishTransaction({ purchase });
       } catch (e) {
         // swallow; retry on next launch
       }
     });
 
-    const errorSub = IAP.purchaseErrorListener((err) => {
+    const errorSub = IAP!.purchaseErrorListener((err) => {
       console.error('Purchase error:', err);
       setError(err?.message ?? 'Purchase failed');
     });
@@ -93,8 +100,8 @@ export function useBilling(): BillingApi {
     setLoading(true);
     setError(null);
     try {
-      await IAP.initConnection();
-      const fetched = await IAP.fetchProducts({ skus: [SUBSCRIPTION_SKU], type: 'subs' });
+    await IAP!.initConnection();
+    const fetched = await IAP!.fetchProducts({ skus: [SUBSCRIPTION_SKU], type: 'subs' });
       const normalized = (fetched ?? []).map((p: any) => ({
         ...p,
         id: p.id ?? p.productId,
@@ -113,7 +120,7 @@ export function useBilling(): BillingApi {
       setProducts(normalized ?? []);
 
       // Hydrate active subs to infer entitlement
-      const active = await IAP.getAvailablePurchases();
+        const active = await IAP!.getAvailablePurchases();
       if (active) setPurchases(active);
     } catch (e: any) {
       setError(e?.message ?? 'Billing unavailable');
@@ -130,7 +137,7 @@ export function useBilling(): BillingApi {
     setPurchasing(true);
     setError(null);
     try {
-      await IAP.requestPurchase({
+      await IAP!.requestPurchase({
         type: 'subs',
         request: {
           google: {
