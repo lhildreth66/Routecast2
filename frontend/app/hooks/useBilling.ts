@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Platform } from 'react-native';
 import * as IAP from 'expo-iap';
 
 type BillingProduct = IAP.Subscription;
@@ -28,6 +29,21 @@ export function useBilling(): BillingApi {
   const [isRestoring, setRestoring] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [purchases, setPurchases] = useState<Array<IAP.Purchase | IAP.ActiveSubscription>>([]);
+
+  // Web: do not touch expo-iap. Provide a safe no-op implementation.
+  if (Platform.OS === 'web') {
+    return {
+      products: [],
+      isLoading: false,
+      isPurchasing: false,
+      isRestoring: false,
+      error: null,
+      entitlementActive: false,
+      connect: async () => {},
+      purchase: async () => {},
+      restore: async () => {},
+    };
+  }
 
   // Entitlement: any completed purchase (state PURCHASED, acknowledged) for our SKUs
   const entitlementActive = useMemo(() => {

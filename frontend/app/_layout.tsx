@@ -54,6 +54,11 @@ function NativeAuthGuard() {
   const rootNavState = useRootNavigationState();
   const pathname = usePathname();
 
+  // Allowlist routes for unauthenticated, not-entitled users (first launch / marketing).
+  const allowUnauthed = new Set([
+    '/', '/landing', '/welcome', '/contact', '/privacy', '/terms', '/login', '/signup', '/forgot-password', '/reset-password',
+  ]);
+
   useEffect(() => {
     if (Platform.OS === 'web') return;
     if (!rootNavState?.key) return; // navigator not ready
@@ -61,10 +66,10 @@ function NativeAuthGuard() {
 
     const seg = '/' + (pathname.split('/').filter(Boolean)[0] ?? '');
 
-    // Unauthenticated + not entitled → always start at subscription to trigger Play Billing.
+    // Unauthenticated + not entitled: keep them on marketing/welcome; otherwise send to landing.
     if (!accessToken && !entitlementActive) {
-      if (pathname !== '/subscription') {
-        router.replace('/subscription');
+      if (!allowUnauthed.has(pathname) && !allowUnauthed.has(seg)) {
+        router.replace('/landing');
       }
       return;
     }
