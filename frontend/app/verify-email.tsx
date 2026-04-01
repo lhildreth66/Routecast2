@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, router } from 'expo-router';
 import axios from 'axios';
 
 const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
@@ -18,16 +18,10 @@ const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
  * Verify-email screen.
  *
  * Three modes:
- * 1. **Token present** (`?token=...`): Immediately redirects the browser to
- *    the backend GET `/api/auth/verify-email?token=...` which validates the
- *    token, creates a Stripe Customer + Checkout Session, and 302-redirects
- *    the user to the Stripe-hosted checkout page.
- *
- * 2. **Error present** (`?error=...`): Shows a friendly error message after
- *    the backend redirected back because the token was invalid / expired.
- *
- * 3. **No params** (arrived from signup): Shows "Check your email"
- *    instructions with a resend button.
+ * 1. **Token present** (`?token=...`): Call backend verification endpoint and
+ *    redirect to login on success; show error + resend on failure.
+ * 2. **Error present** (`?error=...`): Friendly error message (from backend redirect).
+ * 3. **No params** (arrived from signup): "Check your email" instructions + resend.
  */
 export default function VerifyEmailScreen() {
   const {
@@ -44,6 +38,11 @@ export default function VerifyEmailScreen() {
 
   const token = tokenParam || tParam;
 
+  const [verifying, setVerifying] = useState(!!token);
+  const [verifySuccess, setVerifySuccess] = useState(false);
+  const [verifyError, setVerifyError] = useState('');
+  const [verifiedEmail, setVerifiedEmail] = useState(emailParam || '');
+
   // Resend state
   const [resending, setResending] = useState(false);
   const [resendSuccess, setResendSuccess] = useState(false);
@@ -51,19 +50,45 @@ export default function VerifyEmailScreen() {
   const [countdown, setCountdown] = useState(0);
   const [resendEmail, setResendEmail] = useState(emailParam || '');
 
-  // STRIPE DISABLED - Google Play submission - do not delete
-  // ── MODE 1: Token present → redirect to backend for Stripe checkout ────
-  /*
+  // ── MODE 1: Token present → call backend verify endpoint directly ──────
   useEffect(() => {
     if (!token) return;
-    // Redirect the browser directly to the backend GET endpoint which will
-    // validate the token, create the Stripe Checkout Session, and 302 to
-    // Stripe.  This keeps the flow in a single page-navigation chain.
-    if (typeof window !== 'undefined') {
-      window.location.href = `${API_BASE}/api/auth/verify-email?token=${encodeURIComponent(token)}`;
-    }
-  }, [token]);
-  */
+
+    let cancelled = false;
+
+    const run = async () => {
+      setVerifying(true);
+      setVerifyError('');
+      try {
+        const response = await axios.get(`${API_BASE}/api/auth/verify-email`, {
+          params: { token },
+        });
+        if (cancelled) return;
+        setVerifySuccess(true);
+        setVerifiedEmail(response.data?.email || emailParam || '');
+        // Let the user see the success state, then route them to login.
+        setTimeout(() => {
+          if (!cancelled) {
+            router.replace('/login?verified=1');
+          }
+        }, 1200);
+      } catch (err: any) {
+        if (cancelled) return;
+        const msg = err?.response?.data?.detail || 'Verification failed. The link may be expired.';
+        setVerifyError(msg);
+      } finally {
+        if (!cancelled) {
+          setVerifying(false);
+        }
+      }
+    };
+
+    run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token, emailParam]);
 
   // Countdown timer for resend cooldown
   useEffect(() => {
@@ -93,14 +118,84 @@ export default function VerifyEmailScreen() {
     }
   };
 
-  // ── MODE 1 loading state: redirecting to backend ───────────────────────
+  // ── MODE 1: Token present — render verify status ───────────────────────
   if (token) {
     return (
-      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
-        <ActivityIndicator size="large" color="#22c55e" />
-        <Text style={{ color: '#a1a1aa', marginTop: 16, fontSize: 15 }}>
-          Verifying your email…
-        </Text>
+      <View style={styles.container}>
+        <SafeAreaView style={styles.safeArea}>
+          <View style={styles.content}>
+            {verifying && !verifyError && !verifySuccess && (
+              <>
+                <ActivityIndicator size="large" color="#22c55e" />
+                <Text style={{ color: '#a1a1aa', marginTop: 16, fontSize: 15 }}>
+                  Verifying your email…
+                </Text>
+              </>
+            )}
+
+            {verifySuccess && (
+              <>
+                <View style={styles.iconContainer}>
+                  <Ionicons name="checkmark-circle" size={48} color="#22c55e" />
+                </View>
+                <Text style={styles.title}>Verification Successful</Text>
+                <Text style={styles.subtitle}>
+                  {verifiedEmail ? `You're verified as ${verifiedEmail}.` : 'Your email is verified.'} You can sign in to continue.
+                </Text>
+                <TouchableOpacity style={styles.resendButton} onPress={() => router.replace('/login?verified=1')}>
+                  <Text style={styles.resendButtonText}>Continue to Login</Text>
+                </TouchableOpacity>
+              </>
+            )}
+
+            {!!verifyError && (
+              <>
+                <View style={styles.iconContainer}>
+                  <Ionicons name="alert-circle" size={48} color="#ef4444" />
+                </View>
+                <Text style={styles.title}>Verification Failed</Text>
+                <Text style={styles.subtitle}>{verifyError}</Text>
+
+                {/* Resend section */}
+                <TextInput
+                  style={styles.emailInput}
+                  placeholder="Enter your email to resend"
+                  placeholderTextColor="#71717a"
+                  value={resendEmail}
+                  onChangeText={setResendEmail}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                />
+                <TouchableOpacity
+                  style={[styles.resendButton, countdown > 0 && styles.resendButtonDisabled]}
+                  onPress={handleResendEmail}
+                  disabled={resending || countdown > 0 || !resendEmail.trim()}
+                >
+                  {resending ? (
+                    <ActivityIndicator color="#eab308" size="small" />
+                  ) : (
+                    <Text style={styles.resendButtonText}>
+                      {countdown > 0 ? `Resend in ${countdown}s` : 'Resend Verification Email'}
+                    </Text>
+                  )}
+                </TouchableOpacity>
+
+                {resendSuccess && (
+                  <View style={styles.successContainer}>
+                    <Ionicons name="checkmark-circle" size={18} color="#22c55e" />
+                    <Text style={styles.successText}>Verification email sent!</Text>
+                  </View>
+                )}
+                {!!resendError && (
+                  <View style={styles.errorContainer}>
+                    <Ionicons name="alert-circle" size={18} color="#ef4444" />
+                    <Text style={styles.errorText}>{resendError}</Text>
+                  </View>
+                )}
+              </>
+            )}
+          </View>
+        </SafeAreaView>
       </View>
     );
   }
@@ -174,7 +269,7 @@ export default function VerifyEmailScreen() {
           {/* Title */}
           <Text style={styles.title}>Check Your Email</Text>
           <Text style={styles.subtitle}>
-            We've sent a verification link to
+            Sign-up successful. We've sent a verification link to
           </Text>
           {emailParam ? (
             <Text style={styles.email}>{emailParam}</Text>

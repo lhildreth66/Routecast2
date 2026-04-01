@@ -56,7 +56,7 @@ function NativeAuthGuard() {
 
   // Allowlist routes for unauthenticated, not-entitled users (first launch / marketing).
   const allowUnauthed = new Set([
-    '/landing', '/welcome', '/contact', '/privacy', '/terms', '/login', '/signup', '/forgot-password', '/reset-password',
+    '/landing', '/welcome', '/contact', '/privacy', '/terms', '/login', '/signup', '/forgot-password', '/reset-password', '/verify-email',
   ]);
 
   useEffect(() => {

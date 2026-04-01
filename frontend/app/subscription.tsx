@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -87,6 +87,10 @@ export default function SubscriptionScreen() {
   const product = billing.products[0];
   const monthlyOffer = useMemo(() => selectOfferForBasePlan(product, 'monthly'), [product]);
   const annualOffer = useMemo(() => selectOfferForBasePlan(product, 'annual'), [product]);
+  const [selectedPlan, setSelectedPlan] = useState<'monthly' | 'annual'>('monthly');
+  const selectedOffer = selectedPlan === 'monthly' ? monthlyOffer : annualOffer;
+  const mainCtaText = selectedPlan === 'monthly' ? 'Start 7-Day Free Trial' : 'Subscribe Annually';
+  const helperText = selectedPlan === 'monthly' ? 'Then $9.99/month unless canceled' : null;
 
   useEffect(() => {
     if (!product) {
@@ -241,81 +245,82 @@ export default function SubscriptionScreen() {
           <Text style={styles.sectionTitle}>Choose Your Plan</Text>
 
           <View style={styles.plansContainer}>
-            {[{ label: 'Monthly', basePlanId: 'monthly', offer: monthlyOffer }, { label: 'Annual', basePlanId: 'annual', offer: annualOffer }].map(
-              ({ label, basePlanId, offer }) => {
-                const price = offer?.price || '$—';
-                const interval = offer?.period ? humanizePeriod(offer.period) : basePlanId === 'annual' ? 'year' : 'month';
-                const trial = offer?.trialPeriod ? formatTrialPeriod(offer.trialPeriod) : null;
-                const trialLine = trial && price ? `${trial} free trial, then ${price}/${interval}` : trial ? `Free trial: ${trial}` : null;
-                const disabled = billing.isPurchasing || !offer?.offerToken || !!offer?.error;
+            {[
+              { label: 'Monthly', basePlanId: 'monthly', offer: monthlyOffer, subtitle: '7-day free trial, then $9.99/month', badge: 'Recommended' },
+              { label: 'Annual', basePlanId: 'annual', offer: annualOffer, subtitle: '$59.99/year' },
+            ].map(({ label, basePlanId, offer, subtitle, badge }) => {
+              const price = offer?.price ?? (basePlanId === 'annual' ? '$59.99' : '$9.99');
+              const interval = basePlanId === 'annual' ? 'year' : 'month';
+              const selected = selectedPlan === basePlanId;
 
-                console.log('[billing] CTA render', {
-                  basePlanId,
-                  price,
-                  interval,
-                  trial,
-                  offerToken: offer?.offerToken,
-                });
-
-                return (
-                  <View key={basePlanId} style={styles.planCard} data-testid={`plan-${basePlanId}`}>
-                    <View style={styles.planHeader}>
+              return (
+                <TouchableOpacity
+                  key={basePlanId}
+                  style={[styles.planCard, selected && styles.planCardSelected]}
+                  onPress={() => setSelectedPlan(basePlanId as 'monthly' | 'annual')}
+                  activeOpacity={0.9}
+                  data-testid={`plan-${basePlanId}`}
+                >
+                  <View style={styles.planHeader}>
+                    <View style={styles.planNameRow}>
                       <Text style={styles.planName}>{label}</Text>
-                      <View style={styles.planPriceContainer}>
-                        <Text style={styles.planPrice}>{price}</Text>
-                        <Text style={styles.planInterval}>/{interval}</Text>
-                      </View>
+                      {badge && basePlanId === 'monthly' && <View style={styles.planBadge}><Text style={styles.planBadgeText}>{badge}</Text></View>}
                     </View>
-
-                    {trial && (
-                      <View style={styles.trialBannerInline}>
-                        <Ionicons name="gift" size={18} color="#22c55e" />
-                        <Text style={styles.trialBannerInlineText}>{trialLine}</Text>
-                      </View>
-                    )}
-
-                    <TouchableOpacity
-                      style={[styles.planButton, disabled && styles.buttonDisabled]}
-                      onPress={() => {
-                        console.log('[billing] purchase tap', { basePlanId, offerToken: offer?.offerToken });
-                        handlePurchase(basePlanId, offer?.offerToken);
-                      }}
-                      disabled={disabled}
-                      data-testid={`purchase-${basePlanId}`}
-                    >
-                      {billing.isPurchasing ? (
-                        <ActivityIndicator color="#1a1a1a" size="small" />
-                      ) : (
-                        <>
-                          <Ionicons name="cart" size={18} color="#1a1a1a" />
-                          <Text style={styles.planButtonText}>Purchase with Google Play</Text>
-                        </>
-                      )}
-                    </TouchableOpacity>
-
-                    {offer?.error && (
-                      <View style={styles.errorContainer}>
-                        <Ionicons name="alert-circle" size={18} color="#ef4444" />
-                        <Text style={styles.errorText}>{offer.error}</Text>
-                      </View>
-                    )}
-
-                    <TouchableOpacity
-                      style={[styles.restoreButton, billing.isRestoring && styles.buttonDisabled]}
-                      onPress={handleRestore}
-                      disabled={billing.isRestoring}
-                    >
-                      {billing.isRestoring ? (
-                        <ActivityIndicator color="#eab308" size="small" />
-                      ) : (
-                        <Text style={styles.restoreText}>Restore purchases</Text>
-                      )}
-                    </TouchableOpacity>
+                    <View style={styles.planPriceContainer}>
+                      <Text style={styles.planPrice}>{price}</Text>
+                      <Text style={styles.planInterval}>/{interval}</Text>
+                    </View>
                   </View>
-                );
-              }
-            )}
+
+                  <Text style={styles.planSubtitle}>{subtitle}</Text>
+
+                  <View style={styles.planSelectRow}>
+                    <View style={[styles.radioOuter, selected && styles.radioOuterSelected]}>
+                      {selected && <View style={styles.radioInner} />}
+                    </View>
+                    <Text style={styles.radioLabel}>{selected ? 'Selected' : 'Tap to select'}</Text>
+                  </View>
+
+                  {offer?.error && (
+                    <View style={styles.errorContainer}>
+                      <Ionicons name="alert-circle" size={18} color="#ef4444" />
+                      <Text style={styles.errorText}>{offer.error}</Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
           </View>
+
+          <TouchableOpacity
+            style={[styles.planButton, (!selectedOffer?.offerToken || !!selectedOffer?.error || billing.isPurchasing) && styles.buttonDisabled, styles.mainCta]}
+            onPress={() => handlePurchase(selectedPlan, selectedOffer?.offerToken)}
+            disabled={billing.isPurchasing || !selectedOffer?.offerToken || !!selectedOffer?.error}
+            data-testid="purchase-selected"
+          >
+            {billing.isPurchasing ? (
+              <ActivityIndicator color="#1a1a1a" size="small" />
+            ) : (
+              <>
+                <Ionicons name="cart" size={18} color="#1a1a1a" />
+                <Text style={styles.planButtonText}>{mainCtaText}</Text>
+              </>
+            )}
+          </TouchableOpacity>
+
+          {helperText && <Text style={styles.ctaHelper}>{helperText}</Text>}
+
+          <TouchableOpacity
+            style={[styles.restoreButton, billing.isRestoring && styles.buttonDisabled]}
+            onPress={handleRestore}
+            disabled={billing.isRestoring}
+          >
+            {billing.isRestoring ? (
+              <ActivityIndicator color="#eab308" size="small" />
+            ) : (
+              <Text style={styles.restoreText}>Restore purchases</Text>
+            )}
+          </TouchableOpacity>
 
           {billing.error && (
             <View style={styles.errorContainer}>
@@ -402,12 +407,20 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   planHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  planNameRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   planName: { color: '#fff', fontSize: 18, fontWeight: '700' },
   planPriceContainer: { flexDirection: 'row', alignItems: 'flex-end', gap: 4 },
   planPrice: { color: '#fff', fontSize: 22, fontWeight: '800' },
   planInterval: { color: '#a1a1aa', fontSize: 14 },
-  trialBannerInline: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, backgroundColor: '#122b19', borderRadius: 12 },
-  trialBannerInlineText: { color: '#c3e7d4', fontSize: 14 },
+  planSubtitle: { color: '#d4d4d8', fontSize: 14, lineHeight: 20 },
+  planSelectRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10 },
+  planBadge: { backgroundColor: '#eab308', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 4 },
+  planBadgeText: { color: '#0f0f0f', fontWeight: '800', fontSize: 12 },
+  planCardSelected: { borderColor: '#eab308', shadowColor: '#eab308', shadowOpacity: 0.25, shadowRadius: 8, shadowOffset: { width: 0, height: 4 } },
+  radioOuter: { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: '#3f3f46', alignItems: 'center', justifyContent: 'center' },
+  radioOuterSelected: { borderColor: '#eab308' },
+  radioInner: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#eab308' },
+  radioLabel: { color: '#e4e4e7', fontWeight: '600' },
   planButton: {
     backgroundColor: '#eab308',
     borderRadius: 12,
@@ -417,6 +430,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
   },
+  mainCta: { marginTop: 12 },
   planButtonText: { color: '#0f0f0f', fontWeight: '700' },
   restoreButton: {
     marginTop: 8,
@@ -442,6 +456,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 10,
   },
+  ctaHelper: { color: '#d4d4d8', marginTop: 8, textAlign: 'center', fontSize: 13 },
   loginLinkText: { color: '#eab308', fontWeight: '700' },
   termsText: { color: '#71717a', fontSize: 12, marginTop: 16, lineHeight: 18 },
   premiumContent: { flex: 1, padding: 20, gap: 20 },

@@ -32,8 +32,9 @@ export default function LandingPage() {
 
   return (
     <View style={styles.container}>
-      <ScrollView 
+      <ScrollView
         style={styles.scrollView}
+        contentContainerStyle={[styles.scrollContent, isMobile && styles.scrollContentMobile]}
         showsVerticalScrollIndicator={false}
       >
         {/* Navigation Bar */}
@@ -199,14 +200,14 @@ export default function LandingPage() {
         </View>
 
         {/* Features Section */}
-        <View style={styles.featuresSection} nativeID="features">
+          <View style={[styles.featuresSection, isMobile && styles.featuresSectionMobile]} nativeID="features">
           <Text style={styles.sectionTitle}>Everything you need for safer drives</Text>
           <Text style={styles.sectionSubtitle}>
             From departure to destination, we've got you covered
           </Text>
           
-          <View style={styles.featuresGrid}>
-            <View style={styles.featureCard}>
+          <View style={[styles.featuresGrid, isMobile && styles.featuresGridMobile]}>
+            <View style={[styles.featureCard, !isWideScreen && styles.featureCardMobile]}>
               <View style={[styles.featureIcon, { backgroundColor: '#422006' }]}>
                 <Ionicons name="map" size={24} color="#eab308" />
               </View>
@@ -216,7 +217,7 @@ export default function LandingPage() {
               </Text>
             </View>
 
-            <View style={styles.featureCard}>
+            <View style={[styles.featureCard, !isWideScreen && styles.featureCardMobile]}>
               <View style={[styles.featureIcon, { backgroundColor: '#14532d' }]}>
                 <Ionicons name="warning" size={24} color="#22c55e" />
               </View>
@@ -226,7 +227,7 @@ export default function LandingPage() {
               </Text>
             </View>
 
-            <View style={styles.featureCard}>
+            <View style={[styles.featureCard, !isWideScreen && styles.featureCardMobile]}>
               <View style={[styles.featureIcon, { backgroundColor: '#1e3a5f' }]}>
                 <Ionicons name="speedometer" size={24} color="#3b82f6" />
               </View>
@@ -236,7 +237,7 @@ export default function LandingPage() {
               </Text>
             </View>
 
-            <View style={styles.featureCard}>
+            <View style={[styles.featureCard, !isWideScreen && styles.featureCardMobile]}>
               <View style={[styles.featureIcon, { backgroundColor: '#4a1d6a' }]}>
                 <Ionicons name="time" size={24} color="#a855f7" />
               </View>
@@ -246,7 +247,7 @@ export default function LandingPage() {
               </Text>
             </View>
 
-            <View style={styles.featureCard}>
+            <View style={[styles.featureCard, !isWideScreen && styles.featureCardMobile]}>
               <View style={[styles.featureIcon, { backgroundColor: '#7c2d12' }]}>
                 <Ionicons name="star" size={24} color="#f97316" />
               </View>
@@ -256,7 +257,7 @@ export default function LandingPage() {
               </Text>
             </View>
 
-            <View style={styles.featureCard}>
+            <View style={[styles.featureCard, !isWideScreen && styles.featureCardMobile]}>
               <View style={[styles.featureIcon, { backgroundColor: '#134e4a' }]}>
                 <Ionicons name="shield-checkmark" size={24} color="#14b8a6" />
               </View>
@@ -368,6 +369,12 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 48,
+  },
+  scrollContentMobile: {
+    paddingBottom: 72,
   },
 
   // Navbar
@@ -484,8 +491,8 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   heroTitleMobile: {
-    fontSize: 32,
-    lineHeight: 40,
+    fontSize: 30,
+    lineHeight: 38,
   },
   heroTitleAccent: {
     color: '#eab308',
@@ -501,7 +508,7 @@ const styles = StyleSheet.create({
   heroSubtitleMobile: {
     fontSize: 15,
     lineHeight: 24,
-    marginBottom: 24,
+    marginBottom: 20,
   },
   heroCtas: {
     flexDirection: 'row',
@@ -512,6 +519,8 @@ const styles = StyleSheet.create({
   },
   heroCtasMobile: {
     gap: 12,
+    width: '100%',
+    justifyContent: 'center',
   },
   primaryCta: {
     flexDirection: 'row',
@@ -550,7 +559,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   trustBulletsMobile: {
-    gap: 12,
+    gap: 10,
   },
   trustBullet: {
     flexDirection: 'row',
@@ -568,7 +577,7 @@ const styles = StyleSheet.create({
     marginTop: 48,
   },
   heroVisualMobile: {
-    marginTop: 28,
+    marginTop: 20,
   },
   phoneFrame: {
     width: 280,
@@ -581,9 +590,9 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   phoneFrameMobile: {
-    width: 220,
-    height: 320,
-    borderRadius: 26,
+    width: 210,
+    height: 300,
+    borderRadius: 24,
     padding: 10,
   },
   phoneScreen: {
@@ -727,6 +736,10 @@ const styles = StyleSheet.create({
     paddingVertical: 80,
     paddingHorizontal: 24,
   },
+  featuresSectionMobile: {
+    paddingVertical: 56,
+    paddingHorizontal: 16,
+  },
   sectionTitle: {
     color: '#ffffff',
     fontSize: 32,
@@ -748,6 +761,9 @@ const styles = StyleSheet.create({
     maxWidth: 1000,
     marginHorizontal: 'auto',
   },
+  featuresGridMobile: {
+    gap: 16,
+  },
   featureCard: {
     width: 300,
     backgroundColor: '#1a1a1a',
@@ -755,6 +771,10 @@ const styles = StyleSheet.create({
     padding: 24,
     borderWidth: 1,
     borderColor: '#27272a',
+  },
+  featureCardMobile: {
+    width: '100%',
+    maxWidth: 360,
   },
   featureIcon: {
     width: 48,
