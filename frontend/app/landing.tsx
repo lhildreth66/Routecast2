@@ -6,20 +6,21 @@ import {
   TouchableOpacity,
   ScrollView,
   Platform,
-  Dimensions,
   Linking,
   Image,
+  useWindowDimensions,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const isWideScreen = SCREEN_WIDTH > 768;
 const GOOGLE_PLAY_URL = 'https://play.google.com/store/apps/details?id=com.routecast.app';
 
 export default function LandingPage() {
   const [activeFaq, setActiveFaq] = useState<number | null>(null);
+  const { width } = useWindowDimensions();
+  const isWideScreen = width > 768;
+  const isMobile = width <= 480;
 
   const scrollToSection = (sectionId: string) => {
     // For web, use anchor scrolling
@@ -57,28 +58,28 @@ export default function LandingPage() {
         </View>
 
         {/* Hero Section */}
-        <View style={styles.heroSection}>
+        <View style={[styles.heroSection, isMobile && styles.heroSectionMobile]}>
           <LinearGradient
             colors={['#0f0f0f', '#1a1a2e', '#16213e']}
-            style={styles.heroGradient}
+            style={[styles.heroGradient, isMobile && styles.heroGradientMobile]}
           >
-            <View style={styles.heroContent}>
+            <View style={[styles.heroContent, isMobile && styles.heroContentMobile]}>
               <View style={styles.heroBadge}>
                 <Ionicons name="shield-checkmark" size={14} color="#22c55e" />
                 <Text style={styles.heroBadgeText}>Drive with confidence</Text>
               </View>
               
-              <Text style={styles.heroTitle}>
+              <Text style={[styles.heroTitle, isMobile && styles.heroTitleMobile]}>
                 Weather along your route—{'\n'}
                 <Text style={styles.heroTitleAccent}>before you drive.</Text>
               </Text>
               
-              <Text style={styles.heroSubtitle}>
+              <Text style={[styles.heroSubtitle, isMobile && styles.heroSubtitleMobile]}>
                 See conditions, alerts, and road hazards for your entire journey.
                 Download on Android to manage subscriptions securely through Google Play.
               </Text>
 
-              <View style={styles.heroCtas}>
+              <View style={[styles.heroCtas, isMobile && styles.heroCtasMobile]}>
                 <TouchableOpacity 
                   style={styles.primaryCta}
                   onPress={() => {
@@ -104,7 +105,7 @@ export default function LandingPage() {
                 </TouchableOpacity>
               </View>
 
-              <View style={styles.trustBullets}>
+              <View style={[styles.trustBullets, isMobile && styles.trustBulletsMobile]}>
                 <View style={styles.trustBullet}>
                   <Ionicons name="checkmark-circle" size={16} color="#22c55e" />
                   <Text style={styles.trustBulletText}>Android app on Google Play</Text>
@@ -121,9 +122,9 @@ export default function LandingPage() {
             </View>
 
             {/* Hero Visual */}
-            <View style={styles.heroVisual}>
-              <View style={styles.phoneFrame}>
-                <View style={styles.phoneScreen}>
+            <View style={[styles.heroVisual, isMobile && styles.heroVisualMobile]}>
+              <View style={[styles.phoneFrame, isMobile && styles.phoneFrameMobile]}>
+                <View style={[styles.phoneScreen, isMobile && styles.phoneScreenMobile]}>
                   <View style={styles.mockHeader}>
                     <Text style={styles.mockHeaderText}>Denver → Las Vegas</Text>
                     <View style={styles.mockSafetyBadge}>
@@ -157,14 +158,18 @@ export default function LandingPage() {
                   </View>
                 </View>
                 {/* Callout bubbles */}
-                <View style={[styles.calloutBubble, styles.calloutLeft]}>
-                  <Ionicons name="alert-circle" size={14} color="#ef4444" />
-                  <Text style={styles.calloutText}>Severe weather alerts</Text>
-                </View>
-                <View style={[styles.calloutBubble, styles.calloutRight]}>
-                  <Ionicons name="time" size={14} color="#eab308" />
-                  <Text style={styles.calloutText}>Hour-by-hour timeline</Text>
-                </View>
+                {!isMobile && (
+                  <>
+                    <View style={[styles.calloutBubble, styles.calloutLeft]}>
+                      <Ionicons name="alert-circle" size={14} color="#ef4444" />
+                      <Text style={styles.calloutText}>Severe weather alerts</Text>
+                    </View>
+                    <View style={[styles.calloutBubble, styles.calloutRight]}>
+                      <Ionicons name="time" size={14} color="#eab308" />
+                      <Text style={styles.calloutText}>Hour-by-hour timeline</Text>
+                    </View>
+                  </>
+                )}
               </View>
             </View>
           </LinearGradient>
@@ -430,16 +435,30 @@ const styles = StyleSheet.create({
   // Hero Section
   heroSection: {
     minHeight: 600,
+    marginBottom: 32,
+  },
+  heroSectionMobile: {
+    minHeight: 0,
+    marginBottom: 24,
   },
   heroGradient: {
     paddingTop: 40,
     paddingBottom: 60,
     paddingHorizontal: 24,
+    overflow: 'hidden',
+  },
+  heroGradientMobile: {
+    paddingTop: 32,
+    paddingBottom: 44,
+    paddingHorizontal: 16,
   },
   heroContent: {
     maxWidth: 600,
     marginHorizontal: 'auto',
     alignItems: 'center',
+  },
+  heroContentMobile: {
+    maxWidth: 500,
   },
   heroBadge: {
     flexDirection: 'row',
@@ -464,6 +483,10 @@ const styles = StyleSheet.create({
     lineHeight: 52,
     marginBottom: 20,
   },
+  heroTitleMobile: {
+    fontSize: 32,
+    lineHeight: 40,
+  },
   heroTitleAccent: {
     color: '#eab308',
   },
@@ -475,12 +498,20 @@ const styles = StyleSheet.create({
     marginBottom: 32,
     maxWidth: 500,
   },
+  heroSubtitleMobile: {
+    fontSize: 15,
+    lineHeight: 24,
+    marginBottom: 24,
+  },
   heroCtas: {
     flexDirection: 'row',
     gap: 16,
     marginBottom: 32,
     flexWrap: 'wrap',
     justifyContent: 'center',
+  },
+  heroCtasMobile: {
+    gap: 12,
   },
   primaryCta: {
     flexDirection: 'row',
@@ -518,6 +549,9 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     justifyContent: 'center',
   },
+  trustBulletsMobile: {
+    gap: 12,
+  },
   trustBullet: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -533,6 +567,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 48,
   },
+  heroVisualMobile: {
+    marginTop: 28,
+  },
   phoneFrame: {
     width: 280,
     height: 400,
@@ -543,11 +580,21 @@ const styles = StyleSheet.create({
     borderColor: '#333',
     position: 'relative',
   },
+  phoneFrameMobile: {
+    width: 220,
+    height: 320,
+    borderRadius: 26,
+    padding: 10,
+  },
   phoneScreen: {
     flex: 1,
     backgroundColor: '#0f0f0f',
     borderRadius: 24,
     padding: 16,
+  },
+  phoneScreenMobile: {
+    borderRadius: 20,
+    padding: 12,
   },
   mockHeader: {
     flexDirection: 'row',
