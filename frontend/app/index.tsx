@@ -349,7 +349,9 @@ export default function HomeScreen() {
     } catch (err: any) {
       console.warn('[push-toggle] backend save error – reverting:', err?.message ?? err);
       setAlertsEnabled(false);
-      Alert.alert('Error', 'Could not save notification settings. Please try again.');
+      const detail = err?.response?.data?.detail;
+      const message = typeof detail === 'string' ? detail : 'Could not save notification settings. Please try again.';
+      Alert.alert('Push Setup Failed', message);
     } finally {
       setPushLoading(false);
     }

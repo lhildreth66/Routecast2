@@ -92,7 +92,7 @@ export default function SubscriptionScreen() {
   const annualOffer = useMemo(() => selectOfferForBasePlan(product, 'annual'), [product]);
   const [selectedPlan, setSelectedPlan] = useState<'monthly' | 'annual'>('monthly');
   const selectedOffer = selectedPlan === 'monthly' ? monthlyOffer : annualOffer;
-  const mainCtaText = selectedPlan === 'monthly' ? 'Start 7-Day Free Trial' : 'Subscribe Annually';
+  const mainCtaText = selectedPlan === 'monthly' ? 'Start Subscription (7-Day Trial Included)' : 'Subscribe Annually';
   const helperText = selectedPlan === 'monthly' ? 'Then $9.99/month unless canceled' : null;
 
   useEffect(() => {
@@ -246,9 +246,9 @@ export default function SubscriptionScreen() {
               <Ionicons name="star" size={48} color="#eab308" />
             </View>
 
-            <Text style={styles.premiumTitle}>You're Premium!</Text>
+            <Text style={styles.premiumTitle}>{isTrialing ? 'Trial Active' : 'Subscription Active'}</Text>
             <Text style={styles.premiumSubtitle}>
-              You have full access to all Routecast features
+              You have full access to all RouteCast features
             </Text>
 
             <View style={styles.premiumInfoBox}>
@@ -333,15 +333,15 @@ export default function SubscriptionScreen() {
             <View style={styles.iconContainer}>
               <Ionicons name="rocket" size={32} color="#1a1a1a" />
             </View>
-            <Text style={styles.title}>Upgrade to Premium</Text>
-            <Text style={styles.subtitle}>Unlock all features and drive with confidence</Text>
+            <Text style={styles.title}>Continue Full Access</Text>
+            <Text style={styles.subtitle}>Every signup gets 7 days of full access. Subscribe to keep access after day 7.</Text>
           </View>
 
           <Text style={styles.sectionTitle}>Choose Your Plan</Text>
 
           <View style={styles.plansContainer}>
             {[
-              { label: 'Monthly', basePlanId: 'monthly', offer: monthlyOffer, subtitle: '7-day free trial, then $9.99/month', badge: 'Recommended' },
+              { label: 'Monthly', basePlanId: 'monthly', offer: monthlyOffer, subtitle: 'Keeps access after your included 7-day full-access period', badge: 'Recommended' },
               { label: 'Annual', basePlanId: 'annual', offer: annualOffer, subtitle: '$59.99/year' },
             ].map(({ label, basePlanId, offer, subtitle, badge }) => {
               const price = offer?.price ?? (basePlanId === 'annual' ? '$59.99' : '$9.99');

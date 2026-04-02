@@ -271,6 +271,45 @@ async def verify_email_get(
 _ERROR_REDIRECT = f"{os.environ.get('FRONTEND_URL', '')}/signup?error=invalid_token"
 
 
+def _normalize_utc(dt_value: Optional[datetime]) -> datetime:
+    if not isinstance(dt_value, datetime):
+        return datetime.now(timezone.utc)
+    if dt_value.tzinfo is None:
+        return dt_value.replace(tzinfo=timezone.utc)
+    return dt_value
+
+
+def _build_signup_trial_update(user: dict) -> dict:
+    """Grant full-access 7-day trial from signup time if no paid entitlement exists."""
+    now = datetime.now(timezone.utc)
+    created_at = _normalize_utc(user.get("created_at"))
+    trial_start = _normalize_utc(user.get("trial_start")) if user.get("trial_start") else created_at
+    trial_end = trial_start + timedelta(days=7)
+    pending_plan = (user.get("pending_plan") or "monthly").lower()
+    trial_plan = pending_plan if pending_plan in ("monthly", "yearly") else "monthly"
+
+    if trial_end > now:
+        return {
+            "is_premium": True,
+            "subscription_status": "trialing",
+            "subscription_plan": trial_plan,
+            "subscription_expiration": trial_end,
+            "trial_used": True,
+            "trial_start": trial_start,
+            "trial_end": trial_end,
+        }
+
+    return {
+        "is_premium": False,
+        "subscription_status": "expired",
+        "subscription_plan": "free",
+        "subscription_expiration": trial_end,
+        "trial_used": True,
+        "trial_start": trial_start,
+        "trial_end": trial_end,
+    }
+
+
 def _build_native_verify_success_response(email: str = "") -> HTMLResponse:
         safe_email = html_escape(email or "")
         encoded_email = urlquote(email or "", safe="")
@@ -351,6 +390,10 @@ async def _verify_email_with_token(
         if old_token_doc and old_token_doc.get("used"):
             existing_user = await get_user_by_id(db, old_token_doc["user_id"])
             if existing_user and existing_user.get("email_verified"):
+                if existing_user.get("subscription_status") in (None, "inactive") and not existing_user.get("is_premium"):
+                    trial_update = _build_signup_trial_update(existing_user)
+                    await update_user(db, old_token_doc["user_id"], trial_update)
+                    existing_user = await get_user_by_id(db, old_token_doc["user_id"]) or existing_user
                 logger.info(
                     f"[VERIFY-EMAIL] idempotent retry — already verified "
                     f"user={old_token_doc['user_id']}"
@@ -397,9 +440,12 @@ async def _verify_email_with_token(
         return RedirectResponse(url=_ERROR_REDIRECT, status_code=302)
 
     await update_user(db, user_id, {"email_verified": True})
+    trial_update = _build_signup_trial_update(user)
+    await update_user(db, user_id, trial_update)
     logger.info(
         f"[VERIFY-EMAIL] SUCCESS user_id={user_id} "
-        f"email={user.get('email', 'unknown')}"
+        f"email={user.get('email', 'unknown')} "
+        f"status={trial_update.get('subscription_status')}"
     )
 
     # ── Step 4: Stripe Customer + Checkout Session → 302 redirect ────────

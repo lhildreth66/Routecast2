@@ -182,10 +182,10 @@ export default function AccountScreen() {
     if (!user) {
       return {
         state: 'FREE_TIER',
-        planLabel: 'Free',
-        statusLabel: 'Active',
-        featuresLabel: 'Limited free features',
-        statusColor: '#6b7280',
+        planLabel: 'No Active Access',
+        statusLabel: 'Blocked',
+        featuresLabel: 'Subscribe to use RouteCast features',
+        statusColor: '#f97316',
       };
     }
 
@@ -193,9 +193,9 @@ export default function AccountScreen() {
     if (state === 'TRIAL_ACTIVE') {
       return {
         state,
-        planLabel: 'Premium Trial',
+        planLabel: '7-Day Full Access Trial',
         statusLabel: 'Active',
-        featuresLabel: 'Full premium access',
+        featuresLabel: 'All RouteCast features enabled',
         statusColor: '#eab308',
       };
     }
@@ -206,7 +206,7 @@ export default function AccountScreen() {
         state,
         planLabel: isYearly ? 'Premium Annual' : 'Premium Monthly',
         statusLabel: 'Active',
-        featuresLabel: 'Full premium access',
+        featuresLabel: 'All RouteCast features enabled',
         statusColor: '#22c55e',
       };
     }
@@ -214,19 +214,19 @@ export default function AccountScreen() {
     if (state === 'EXPIRED') {
       return {
         state,
-        planLabel: 'Expired',
-        statusLabel: 'Inactive',
-        featuresLabel: 'Limited free features',
+        planLabel: 'Trial/Subscription Ended',
+        statusLabel: 'Blocked',
+        featuresLabel: 'Subscribe to restore full feature access',
         statusColor: '#f97316',
       };
     }
 
     return {
       state,
-      planLabel: 'Free',
-      statusLabel: 'Active',
-      featuresLabel: 'Limited free features',
-      statusColor: '#6b7280',
+      planLabel: 'No Active Access',
+      statusLabel: 'Blocked',
+      featuresLabel: 'Subscribe to use RouteCast features',
+      statusColor: '#f97316',
     };
   };
 

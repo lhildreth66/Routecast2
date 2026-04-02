@@ -180,16 +180,26 @@ async def update_push_settings(
     push_service = PushNotificationService(db)
     
     if request.push_enabled and request.push_token:
-        await push_service.register_push_token(
+        saved = await push_service.register_push_token(
             user_id=user["sub"],
             push_token=request.push_token,
             platform=request.platform
         )
+        if not saved:
+            raise HTTPException(
+                status_code=400,
+                detail="Push token registration failed. Confirm notifications are enabled and try again.",
+            )
     elif not request.push_enabled and request.push_token:
-        await push_service.unregister_push_token(
+        removed = await push_service.unregister_push_token(
             user_id=user["sub"],
             push_token=request.push_token
         )
+        if not removed:
+            raise HTTPException(
+                status_code=400,
+                detail="Could not disable push notifications right now. Please try again.",
+            )
     
     await db.users.update_one(
         {"user_id": user["sub"]},
