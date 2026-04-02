@@ -5,6 +5,14 @@ import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 
+const UNAUTHED_OPEN_ROUTES = new Set([
+  '/landing', '/welcome', '/contact', '/privacy', '/terms', '/login', '/signup', '/forgot-password', '/reset-password', '/verify-email',
+]);
+
+const AUTH_ENTRY_ROUTES = new Set([
+  '/', '/landing', '/login', '/signup', '/verify-email', '/forgot-password', '/reset-password', '/subscription', '/welcome',
+]);
+
 // Routes that unpaid-but-verified users are allowed to visit.
 // Everything else redirects to /subscription (the paywall).
 const PAYWALL_OPEN_ROUTES = new Set([
@@ -48,14 +56,16 @@ function PaywallGuard() {
 
 // Native-only auth/subscription guard. No-op during hydration to avoid flicker.
 function NativeAuthGuard() {
-  const { accessToken, hasHydrated, isLoading: authLoading } = useAuth();
+  const { accessToken, user, hasHydrated, isLoading: authLoading, refreshUser } = useAuth();
   const rootNavState = useRootNavigationState();
   const pathname = usePathname();
 
-  // Allowlist routes for unauthenticated, not-entitled users (first launch / marketing).
-  const allowUnauthed = new Set([
-    '/landing', '/welcome', '/contact', '/privacy', '/terms', '/login', '/signup', '/forgot-password', '/reset-password', '/verify-email',
-  ]);
+  useEffect(() => {
+    if (!hasHydrated || authLoading) return;
+    if (!accessToken || user) return;
+
+    refreshUser();
+  }, [accessToken, authLoading, hasHydrated, refreshUser, user]);
 
   useEffect(() => {
     if (Platform.OS === 'web') return;
@@ -66,12 +76,17 @@ function NativeAuthGuard() {
 
     // Unauthenticated users: force landing unless already on an allowlisted marketing/auth route.
     if (!accessToken) {
-      if (pathname === '/' || (!allowUnauthed.has(pathname) && !allowUnauthed.has(seg))) {
+      if (pathname === '/' || (!UNAUTHED_OPEN_ROUTES.has(pathname) && !UNAUTHED_OPEN_ROUTES.has(seg))) {
         router.replace('/landing');
       }
       return;
     }
-  }, [accessToken, authLoading, hasHydrated, pathname, rootNavState?.key]);
+
+    // Restored premium sessions should bypass landing/auth/paywall entry routes.
+    if (pathname !== '/' && user?.is_premium && (AUTH_ENTRY_ROUTES.has(pathname) || AUTH_ENTRY_ROUTES.has(seg))) {
+      router.replace('/');
+    }
+  }, [accessToken, authLoading, hasHydrated, pathname, rootNavState?.key, user?.is_premium]);
 
   return null;
 }

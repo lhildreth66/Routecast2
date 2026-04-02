@@ -22,6 +22,19 @@ export default function LandingPage() {
   const isWideScreen = width > 768;
   const isMobile = width <= 480;
 
+  const handleStartTrial = () => {
+    if (Platform.OS === 'web') {
+      Linking.openURL(GOOGLE_PLAY_URL);
+      return;
+    }
+
+    router.push('/signup');
+  };
+
+  const handleSignIn = () => {
+    router.push('/login');
+  };
+
   const scrollToSection = (sectionId: string) => {
     // For web, use anchor scrolling
     if (Platform.OS === 'web') {
@@ -54,6 +67,9 @@ export default function LandingPage() {
               <TouchableOpacity onPress={() => router.push('/contact')}>
                 <Text style={[styles.navLink, !isWideScreen && styles.navLinkMobile]}>Contact</Text>
               </TouchableOpacity>
+              <TouchableOpacity style={[styles.navSignInButton, !isWideScreen && styles.navSignInButtonMobile]} onPress={handleSignIn}>
+                <Text style={styles.navSignInText}>Sign In</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
@@ -83,13 +99,7 @@ export default function LandingPage() {
               <View style={[styles.heroCtas, isMobile && styles.heroCtasMobile]}>
                 <TouchableOpacity 
                   style={styles.primaryCta}
-                  onPress={() => {
-                    if (Platform.OS === 'web') {
-                      Linking.openURL(GOOGLE_PLAY_URL);
-                      return;
-                    }
-                    router.push('/signup');
-                  }}
+                  onPress={handleStartTrial}
                   data-testid="hero-start-trial"
                 >
                   <Ionicons name="rocket" size={20} color="#0f0f0f" />
@@ -98,13 +108,22 @@ export default function LandingPage() {
                 
                 <TouchableOpacity 
                   style={styles.secondaryCta}
-                  onPress={() => scrollToSection('features')}
-                  data-testid="hero-learn-more"
+                  onPress={handleSignIn}
+                  data-testid="hero-sign-in"
                 >
-                  <Text style={styles.secondaryCtaText}>Learn More</Text>
-                  <Ionicons name="arrow-down" size={18} color="#eab308" />
+                  <Ionicons name="log-in-outline" size={18} color="#eab308" />
+                  <Text style={styles.secondaryCtaText}>Sign In</Text>
                 </TouchableOpacity>
               </View>
+
+              <TouchableOpacity
+                style={styles.learnMoreLink}
+                onPress={() => scrollToSection('features')}
+                data-testid="hero-learn-more"
+              >
+                <Text style={styles.learnMoreLinkText}>Learn More</Text>
+                <Ionicons name="arrow-down" size={16} color="#a1a1aa" />
+              </TouchableOpacity>
 
               <View style={[styles.trustBullets, isMobile && styles.trustBulletsMobile]}>
                 <View style={styles.trustBullet}>
@@ -438,6 +457,22 @@ const styles = StyleSheet.create({
     fontSize: 13,
     paddingVertical: 2,
   },
+  navSignInButton: {
+    borderWidth: 1,
+    borderColor: '#eab308',
+    borderRadius: 999,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+  },
+  navSignInButtonMobile: {
+    width: '100%',
+    alignItems: 'center',
+  },
+  navSignInText: {
+    color: '#fef3c7',
+    fontSize: 14,
+    fontWeight: '700',
+  },
 
   // Hero Section
   heroSection: {
@@ -518,6 +553,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   heroCtasMobile: {
+    flexDirection: 'column',
     gap: 12,
     width: '100%',
     justifyContent: 'center',
@@ -550,6 +586,17 @@ const styles = StyleSheet.create({
   secondaryCtaText: {
     color: '#eab308',
     fontSize: 16,
+    fontWeight: '600',
+  },
+  learnMoreLink: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 28,
+  },
+  learnMoreLinkText: {
+    color: '#a1a1aa',
+    fontSize: 14,
     fontWeight: '600',
   },
   trustBullets: {
