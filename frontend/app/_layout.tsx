@@ -4,7 +4,6 @@ import { useEffect, useRef } from 'react';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
-import { useBilling } from './hooks/useBilling';
 
 // Routes that unpaid-but-verified users are allowed to visit.
 // Everything else redirects to /subscription (the paywall).
@@ -50,7 +49,6 @@ function PaywallGuard() {
 // Native-only auth/subscription guard. No-op during hydration to avoid flicker.
 function NativeAuthGuard() {
   const { accessToken, hasHydrated, isLoading: authLoading } = useAuth();
-  const { entitlementActive, isLoading: billingLoading } = useBilling();
   const rootNavState = useRootNavigationState();
   const pathname = usePathname();
 
@@ -62,28 +60,18 @@ function NativeAuthGuard() {
   useEffect(() => {
     if (Platform.OS === 'web') return;
     if (!rootNavState?.key) return; // navigator not ready
-    if (!hasHydrated || authLoading || billingLoading) return; // still hydrating
+    if (!hasHydrated || authLoading) return; // still hydrating
 
     const seg = '/' + (pathname.split('/').filter(Boolean)[0] ?? '');
 
-    // Unauthenticated + not entitled: force landing unless already on an allowlisted marketing/auth route.
-    if (!accessToken && !entitlementActive) {
+    // Unauthenticated users: force landing unless already on an allowlisted marketing/auth route.
+    if (!accessToken) {
       if (pathname === '/' || (!allowUnauthed.has(pathname) && !allowUnauthed.has(seg))) {
         router.replace('/landing');
       }
       return;
     }
-
-    // Unauthenticated but entitled (guest purchase) → allow access without forcing login.
-    if (!accessToken && entitlementActive) {
-      return;
-    }
-
-    // Authenticated but not subscribed: route to subscription.
-    if (!entitlementActive && seg !== '/subscription' && seg !== '/login' && seg !== '/signup') {
-      router.replace('/subscription');
-    }
-  }, [accessToken, authLoading, billingLoading, entitlementActive, hasHydrated, pathname, rootNavState?.key]);
+  }, [accessToken, authLoading, hasHydrated, pathname, rootNavState?.key]);
 
   return null;
 }
