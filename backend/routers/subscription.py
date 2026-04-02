@@ -276,19 +276,48 @@ async def verify_google_purchase(
     db = get_db(request)
     user_id = current_user.get("sub")
 
+    if not data.purchase_token or not data.product_id:
+        raise HTTPException(status_code=400, detail="purchase_token and product_id are required")
+
     result = await verify_google_receipt(data.purchase_token, data.product_id, data.package_name)
 
-    if result["valid"]:
-        # Determine plan from product_id
-        plan = "yearly" if "yearly" in data.product_id.lower() else "monthly"
+    if not result.get("verified_with_google", False):
+        # Do not mutate entitlement state on transient verification failures.
+        raise HTTPException(status_code=502, detail=result.get("message", "Google Play verification unavailable"))
 
-        await activate_subscription(
-            db=db,
-            user_id=user_id,
-            plan=plan,
-            provider="google",
-            google_purchase_token=data.purchase_token
-        )
+    now = datetime.now(timezone.utc)
+    status = result.get("subscription_status", "inactive")
+    expiration = result.get("expiration")
+    plan = result.get("plan") or ("yearly" if "yearly" in data.product_id.lower() else "monthly")
+
+    existing_user = await db.users.find_one({"user_id": user_id})
+    if not existing_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    update_data = {
+        "subscription_status": status,
+        "subscription_provider": "google",
+        "subscription_expiration": expiration,
+        "google_purchase_token": data.purchase_token,
+        "updated_at": now,
+    }
+
+    if result["valid"]:
+        update_data["is_premium"] = status in ["trialing", "active", "canceling"]
+        update_data["subscription_plan"] = plan
+        if status == "trialing":
+            update_data["trial_used"] = True
+            if expiration:
+                update_data["trial_end"] = expiration
+            if not existing_user.get("trial_start"):
+                update_data["trial_start"] = now
+    else:
+        update_data["is_premium"] = False
+        update_data["subscription_plan"] = "free"
+        update_data["trial_end"] = None
+        update_data["trial_start"] = None
+
+    await db.users.update_one({"user_id": user_id}, {"$set": update_data})
 
     return ReceiptVerifyResponse(
         valid=result["valid"],

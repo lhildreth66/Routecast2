@@ -31,25 +31,37 @@ function PaywallGuard() {
   const pathname = usePathname();
   const firedRef = useRef(false);
 
-  // STRIPE DISABLED - Google Play submission - do not delete
-  /*
   useEffect(() => {
+    if (Platform.OS === 'web') return;
     if (!rootNavState?.key) return;
     if (!hasHydrated || authLoading) return;
-    if (!accessToken || !user) return;     // not authenticated or not loaded
+
+    const seg = '/' + (pathname.split('/').filter(Boolean)[0] ?? '');
+
+    // Signed-out users are handled by NativeAuthGuard.
+    if (!accessToken) {
+      firedRef.current = false;
+      return;
+    }
+
+    // Fail-closed: unknown entitlement state is locked to subscription.
+    if (!user) {
+      if (pathname !== '/subscription' && seg !== '/subscription') {
+        router.replace('/subscription');
+      }
+      return;
+    }
+
     if (user.is_premium) { firedRef.current = false; return; } // reset when user pays
     if (!user.email_verified) return;     // pre-verification handled by verify-email itself
     if (firedRef.current) return;
 
-    // Normalise pathname to its first segment so /subscription/success still passes.
-    const seg = '/' + (pathname.split('/').filter(Boolean)[0] ?? '');
     if (PAYWALL_OPEN_ROUTES.has(pathname) || PAYWALL_OPEN_ROUTES.has(seg)) return;
 
     firedRef.current = true;
     __DEV__ && console.log('[paywall] blocking', pathname, '→ /subscription');
     router.replace('/subscription');
-  }, [rootNavState?.key, hasHydrated, authLoading, accessToken, user?.is_premium, user?.email_verified, pathname]);
-  */
+  }, [rootNavState?.key, hasHydrated, authLoading, accessToken, user, user?.is_premium, user?.email_verified, pathname]);
 
   return null;
 }

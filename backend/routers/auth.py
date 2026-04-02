@@ -26,7 +26,7 @@ from models.user import (
     UserCreate, UserLogin, UserResponse, UserMeResponse,
     TokenResponse, TokenRefreshRequest, PasswordResetRequest,
     PasswordResetConfirm, ChangePasswordRequest,
-    SubscriptionStatus, SubscriptionPlan,
+    SubscriptionStatus, SubscriptionPlan, EntitlementState,
     get_user_entitlements, user_is_premium
 )
 from services.auth_service import (
@@ -41,6 +41,12 @@ from services.email_service import (
 )
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
+
+FRONTEND_URL = (
+    os.environ.get("FRONTEND_URL")
+    or os.environ.get("APP_URL")
+    or "https://routecastweather.com"
+).rstrip("/")
 
 # STRIPE DISABLED - Google Play submission - do not delete
 # STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "")
@@ -615,6 +621,16 @@ async def get_me(request: Request, current_user: dict = Depends(get_current_user
     entitlements = get_user_entitlements(mock_user)
     is_premium = user_is_premium(mock_user)
 
+    normalized_status = sub_status["status"]
+    if normalized_status == "trialing" and is_premium:
+        entitlement_state = EntitlementState.TRIAL_ACTIVE
+    elif normalized_status in ("active", "canceling") and is_premium:
+        entitlement_state = EntitlementState.SUBSCRIPTION_ACTIVE
+    elif normalized_status in ("expired", "canceled", "past_due", "unpaid"):
+        entitlement_state = EntitlementState.EXPIRED
+    else:
+        entitlement_state = EntitlementState.FREE_TIER
+
     return UserMeResponse(
         user_id=user["user_id"],
         email=user["email"],
@@ -628,7 +644,8 @@ async def get_me(request: Request, current_user: dict = Depends(get_current_user
         is_premium=is_premium,
         entitlements=entitlements,
         trial_available=trial_available,
-        trial_days_remaining=trial_days_remaining
+        trial_days_remaining=trial_days_remaining,
+        entitlement_state=entitlement_state,
     )
 
 

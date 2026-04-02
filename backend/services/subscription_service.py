@@ -4,11 +4,15 @@ Subscription Service for RouteCast
 Handles Stripe subscriptions, Apple/Google receipt verification, and entitlements
 """
 import os
+import json
+import base64
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 from motor.motor_asyncio import AsyncIOMotorDatabase
 import logging
 import httpx
+from google.oauth2 import service_account
+from google.auth.transport.requests import Request as GoogleAuthRequest
 
 # STRIPE DISABLED - Google Play submission - do not delete
 # import stripe
@@ -34,6 +38,92 @@ NON_PREMIUM_STATUSES = frozenset({
 })
 
 logger = logging.getLogger(__name__)
+
+GOOGLE_PLAY_SCOPE = "https://www.googleapis.com/auth/androidpublisher"
+GOOGLE_PLAY_PACKAGE_NAME = os.environ.get("GOOGLE_PLAY_PACKAGE_NAME", "com.routecast.app")
+GOOGLE_PLAY_SERVICE_ACCOUNT_FILE = os.environ.get("GOOGLE_PLAY_SERVICE_ACCOUNT_FILE") or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+GOOGLE_PLAY_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON", "")
+
+
+def _load_google_service_account_info() -> Optional[dict]:
+    raw_json = (GOOGLE_PLAY_SERVICE_ACCOUNT_JSON or "").strip()
+    if raw_json:
+        try:
+            return json.loads(raw_json)
+        except json.JSONDecodeError:
+            try:
+                decoded = base64.b64decode(raw_json).decode("utf-8")
+                return json.loads(decoded)
+            except Exception as e:
+                logger.error(f"Invalid GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: {e}")
+
+    if GOOGLE_PLAY_SERVICE_ACCOUNT_FILE:
+        try:
+            with open(GOOGLE_PLAY_SERVICE_ACCOUNT_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.error(f"Unable to read Google service account file: {e}")
+
+    return None
+
+
+def _get_google_access_token() -> str:
+    info = _load_google_service_account_info()
+    if not info:
+        raise RuntimeError("Google Play credentials not configured")
+
+    creds = service_account.Credentials.from_service_account_info(
+        info,
+        scopes=[GOOGLE_PLAY_SCOPE],
+    )
+    creds.refresh(GoogleAuthRequest())
+    if not creds.token:
+        raise RuntimeError("Failed to obtain Google Play access token")
+    return creds.token
+
+
+def _parse_rfc3339(ts: Optional[str]) -> Optional[datetime]:
+    if not ts:
+        return None
+    try:
+        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _derive_google_plan(payload: dict, fallback_product_id: str) -> str:
+    line_items = payload.get("lineItems") or []
+    for item in line_items:
+        auto_plan = item.get("autoRenewingPlan") or {}
+        base_plan_id = (auto_plan.get("basePlanId") or "").lower()
+        if any(token in base_plan_id for token in ("annual", "year")):
+            return "yearly"
+        if any(token in base_plan_id for token in ("monthly", "month")):
+            return "monthly"
+
+        product_id = (item.get("productId") or "").lower()
+        if any(token in product_id for token in ("annual", "year")):
+            return "yearly"
+        if any(token in product_id for token in ("monthly", "month")):
+            return "monthly"
+
+    product_lower = (fallback_product_id or "").lower()
+    if any(token in product_lower for token in ("annual", "year")):
+        return "yearly"
+    return "monthly"
+
+
+def _google_payload_has_trial(payload: dict) -> bool:
+    line_items = payload.get("lineItems") or []
+    for item in line_items:
+        offer = item.get("offerDetails") or {}
+        offer_id = (offer.get("offerId") or "").lower()
+        if "trial" in offer_id:
+            return True
+        for tag in offer.get("offerTags") or []:
+            if "trial" in str(tag).lower():
+                return True
+    return False
 
 
 async def _revoke_premium(
@@ -449,20 +539,137 @@ async def verify_apple_receipt(receipt_data: str, product_id: str) -> dict:
 
 async def verify_google_receipt(purchase_token: str, product_id: str, package_name: str) -> dict:
     """
-    Verify a Google Play purchase token.
-    In production, this would call Google Play Developer API.
+    Verify Google Play subscription token against subscriptionsv2.get.
+    Returns normalized status for backend entitlement updates.
     """
-    # TODO: Implement actual Google Play verification
-    # Requires: Google Play Developer API credentials
+    now = datetime.now(timezone.utc)
+    token = (purchase_token or "").strip()
+    prod = (product_id or "").strip()
+    pkg = (package_name or GOOGLE_PLAY_PACKAGE_NAME).strip() or GOOGLE_PLAY_PACKAGE_NAME
 
-    logger.info(f"Google Play verification requested for product: {product_id}")
+    if not token or not prod:
+        return {
+            "valid": False,
+            "message": "Missing Google purchase token or product ID",
+            "subscription_status": "inactive",
+            "expiration": None,
+            "plan": "free",
+            "verified_with_google": False,
+            "error_code": "malformed_payload",
+        }
 
-    # Scaffold response - implement when Google Play Billing is configured
+    try:
+        access_token = _get_google_access_token()
+    except Exception as e:
+        logger.error(f"Google Play auth failure: {e}")
+        return {
+            "valid": False,
+            "message": "Google Play credentials not configured",
+            "subscription_status": "inactive",
+            "expiration": None,
+            "plan": "free",
+            "verified_with_google": False,
+            "error_code": "credentials_unavailable",
+        }
+
+    url = (
+        f"https://androidpublisher.googleapis.com/androidpublisher/v3/"
+        f"applications/{pkg}/purchases/subscriptionsv2/tokens/{token}"
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(
+                url,
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Accept": "application/json",
+                },
+            )
+
+        if resp.status_code == 404:
+            return {
+                "valid": False,
+                "message": "Purchase token not found in Google Play",
+                "subscription_status": "expired",
+                "expiration": None,
+                "plan": "free",
+                "verified_with_google": True,
+                "error_code": None,
+            }
+
+        if resp.status_code >= 400:
+            logger.error(f"Google Play verify HTTP {resp.status_code}: {resp.text[:400]}")
+            return {
+                "valid": False,
+                "message": "Google Play verification failed",
+                "subscription_status": "inactive",
+                "expiration": None,
+                "plan": "free",
+                "verified_with_google": False,
+                "error_code": "google_api_error",
+            }
+
+        payload = resp.json()
+    except Exception as e:
+        logger.error(f"Google Play verification request failed: {e}")
+        return {
+            "valid": False,
+            "message": "Unable to verify Google Play purchase",
+            "subscription_status": "inactive",
+            "expiration": None,
+            "plan": "free",
+            "verified_with_google": False,
+            "error_code": "network_or_parse_error",
+        }
+
+    line_items = payload.get("lineItems") or []
+    expiries = [_parse_rfc3339(item.get("expiryTime")) for item in line_items]
+    expiries = [dt for dt in expiries if dt]
+    expiration = max(expiries) if expiries else None
+
+    google_state = (payload.get("subscriptionState") or "").upper()
+    entitled = False
+    status = "inactive"
+
+    if google_state in {
+        "SUBSCRIPTION_STATE_ACTIVE",
+        "SUBSCRIPTION_STATE_IN_GRACE_PERIOD",
+        "SUBSCRIPTION_STATE_ON_HOLD",
+        "SUBSCRIPTION_STATE_PAUSED",
+    }:
+        entitled = True
+        status = "active"
+    elif google_state == "SUBSCRIPTION_STATE_CANCELED":
+        if expiration and expiration > now:
+            entitled = True
+            status = "active"
+        else:
+            status = "expired"
+    elif google_state == "SUBSCRIPTION_STATE_EXPIRED":
+        status = "expired"
+    else:
+        if expiration and expiration > now:
+            entitled = True
+            status = "active"
+
+    if expiration and expiration <= now:
+        entitled = False
+        status = "expired"
+
+    if entitled and _google_payload_has_trial(payload):
+        status = "trialing"
+
+    plan = _derive_google_plan(payload, prod)
+
     return {
-        "valid": False,
-        "message": "Google Play verification not yet configured. Please contact support.",
-        "subscription_status": "inactive",
-        "expiration": None
+        "valid": entitled,
+        "message": "Google Play subscription verified" if entitled else "No active Google Play entitlement",
+        "subscription_status": status,
+        "expiration": expiration,
+        "plan": plan if entitled else "free",
+        "verified_with_google": True,
+        "error_code": None,
     }
 
 

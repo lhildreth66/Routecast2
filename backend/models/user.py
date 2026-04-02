@@ -11,9 +11,17 @@ class SubscriptionStatus(str, Enum):
     ACTIVE = "active"
     INACTIVE = "inactive"
     TRIALING = "trialing"
+    CANCELING = "canceling"
     PAST_DUE = "past_due"
     CANCELED = "canceled"
     EXPIRED = "expired"
+
+
+class EntitlementState(str, Enum):
+    FREE_TIER = "FREE_TIER"
+    TRIAL_ACTIVE = "TRIAL_ACTIVE"
+    SUBSCRIPTION_ACTIVE = "SUBSCRIPTION_ACTIVE"
+    EXPIRED = "EXPIRED"
 
 
 class SubscriptionProvider(str, Enum):
@@ -86,6 +94,7 @@ class UserMeResponse(UserResponse):
     entitlements: List[str] = []
     trial_available: bool = False
     trial_days_remaining: Optional[int] = None
+    entitlement_state: EntitlementState = EntitlementState.FREE_TIER
 
 
 # ==================== Auth Models ====================
@@ -235,7 +244,7 @@ PREMIUM_FEATURES = [
 
 def get_user_entitlements(user: UserInDB) -> List[str]:
     """Get list of entitlements for a user based on their subscription"""
-    if user.subscription_status in [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING]:
+    if user.subscription_status in [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING, SubscriptionStatus.CANCELING]:
         return ENTITLEMENTS.get(user.subscription_plan, ENTITLEMENTS[SubscriptionPlan.FREE])
     return ENTITLEMENTS[SubscriptionPlan.FREE]
 
@@ -247,6 +256,6 @@ def user_has_entitlement(user: UserInDB, entitlement: str) -> bool:
 
 def user_is_premium(user: UserInDB) -> bool:
     """Check if user has premium access"""
-    if user.subscription_status not in [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING]:
+    if user.subscription_status not in [SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIALING, SubscriptionStatus.CANCELING]:
         return False
     return user.subscription_plan in [SubscriptionPlan.MONTHLY, SubscriptionPlan.YEARLY]

@@ -164,17 +164,74 @@ export default function AccountScreen() {
 
   const getSubscriptionBadge = () => {
     if (!user) return null;
-    
-    if (user.is_premium) {
-      if (user.subscription_status === 'trialing') {
-        return { label: 'TRIAL', color: '#eab308', bgColor: '#422006' };
-      }
-      return { label: 'PREMIUM', color: '#22c55e', bgColor: '#14532d' };
+
+    const state = user.entitlement_state || 'FREE_TIER';
+    if (state === 'TRIAL_ACTIVE') {
+      return { label: 'TRIAL_ACTIVE', color: '#eab308', bgColor: '#422006' };
     }
-    return { label: 'FREE', color: '#6b7280', bgColor: '#27272a' };
+    if (state === 'SUBSCRIPTION_ACTIVE') {
+      return { label: 'SUBSCRIPTION_ACTIVE', color: '#22c55e', bgColor: '#14532d' };
+    }
+    if (state === 'EXPIRED') {
+      return { label: 'EXPIRED', color: '#f97316', bgColor: '#3f1d08' };
+    }
+    return { label: 'FREE_TIER', color: '#6b7280', bgColor: '#27272a' };
+  };
+
+  const getEntitlementView = () => {
+    if (!user) {
+      return {
+        state: 'FREE_TIER',
+        planLabel: 'Free',
+        statusLabel: 'Active',
+        featuresLabel: 'Limited free features',
+        statusColor: '#6b7280',
+      };
+    }
+
+    const state = user.entitlement_state || 'FREE_TIER';
+    if (state === 'TRIAL_ACTIVE') {
+      return {
+        state,
+        planLabel: 'Premium Trial',
+        statusLabel: 'Active',
+        featuresLabel: 'Full premium access',
+        statusColor: '#eab308',
+      };
+    }
+
+    if (state === 'SUBSCRIPTION_ACTIVE') {
+      const isYearly = user.subscription_plan === 'yearly';
+      return {
+        state,
+        planLabel: isYearly ? 'Premium Annual' : 'Premium Monthly',
+        statusLabel: 'Active',
+        featuresLabel: 'Full premium access',
+        statusColor: '#22c55e',
+      };
+    }
+
+    if (state === 'EXPIRED') {
+      return {
+        state,
+        planLabel: 'Expired',
+        statusLabel: 'Inactive',
+        featuresLabel: 'Limited free features',
+        statusColor: '#f97316',
+      };
+    }
+
+    return {
+      state,
+      planLabel: 'Free',
+      statusLabel: 'Active',
+      featuresLabel: 'Limited free features',
+      statusColor: '#6b7280',
+    };
   };
 
   const badge = getSubscriptionBadge();
+  const entitlementView = getEntitlementView();
 
   const formatDate = (dateString?: string) => {
     if (!dateString) return 'N/A';
@@ -277,7 +334,7 @@ export default function AccountScreen() {
                   <Text style={styles.cardRowLabel}>Plan</Text>
                 </View>
                 <Text style={styles.cardRowValue}>
-                  {user.subscription_plan.charAt(0).toUpperCase() + user.subscription_plan.slice(1)}
+                  {entitlementView.planLabel}
                 </Text>
               </View>
 
@@ -291,15 +348,24 @@ export default function AccountScreen() {
                 <View style={styles.statusContainer}>
                   <View style={[
                     styles.statusDot,
-                    { backgroundColor: user.is_premium ? '#22c55e' : '#6b7280' }
+                    { backgroundColor: entitlementView.statusColor }
                   ]} />
                   <Text style={[
                     styles.cardRowValue,
-                    { color: user.is_premium ? '#22c55e' : '#a1a1aa' }
+                    { color: entitlementView.statusColor }
                   ]}>
-                    {user.subscription_status.charAt(0).toUpperCase() + user.subscription_status.slice(1)}
+                    {entitlementView.statusLabel}
                   </Text>
                 </View>
+              </View>
+
+              <View style={styles.cardDivider} />
+              <View style={styles.cardRow}>
+                <View style={styles.cardRowLeft}>
+                  <Ionicons name="layers-outline" size={22} color="#a1a1aa" />
+                  <Text style={styles.cardRowLabel}>Features</Text>
+                </View>
+                <Text style={styles.cardRowValue}>{entitlementView.featuresLabel}</Text>
               </View>
 
               {user.subscription_expiration && (
@@ -309,7 +375,7 @@ export default function AccountScreen() {
                     <View style={styles.cardRowLeft}>
                       <Ionicons name="calendar" size={22} color="#a1a1aa" />
                       <Text style={styles.cardRowLabel}>
-                        {user.subscription_status === 'trialing' ? 'Trial Ends' : 'Renews'}
+                        {entitlementView.state === 'TRIAL_ACTIVE' ? 'Trial Ends' : 'Expires'}
                       </Text>
                     </View>
                     <Text style={styles.cardRowValue}>

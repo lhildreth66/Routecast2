@@ -70,6 +70,7 @@ interface User {
   email: string;
   name?: string;
   email_verified: boolean;
+  entitlement_state?: 'FREE_TIER' | 'TRIAL_ACTIVE' | 'SUBSCRIPTION_ACTIVE' | 'EXPIRED';
   subscription_status: string;
   subscription_plan: string;
   subscription_provider?: string;

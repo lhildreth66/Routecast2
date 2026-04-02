@@ -5145,8 +5145,8 @@ async def estimate_water_budget(request: WaterBudgetRequest):
     """
     logger.info(f"[PREMIUM] Water budget estimate requested")
     
-    # Check premium entitlement (no database check for testing)
-    # TESTING: Paywalls disabled - require_premium(request.subscription_id, WATER_BUDGET)
+    # Check premium entitlement
+    require_premium(request.subscription_id, WATER_BUDGET)
     
     # Call pure domain service
     try:
@@ -5786,7 +5786,7 @@ async def register_planned_trip(request: RegisterPlannedTripRequest):
     Backend will evaluate forecast and send smart delay notifications.
     """
     # Premium gating
-    # TESTING: Paywalls disabled - require_premium(request.subscription_id, SMART_DELAY_ALERTS)
+    require_premium(request.subscription_id, SMART_DELAY_ALERTS)
     
     try:
         # Validate subscription_id
@@ -5838,7 +5838,7 @@ async def register_push_token(request: RegisterPushTokenRequest):
     Stores the Expo push token so smart delay alerts can be sent to this device.
     """
     # Premium gating
-    # TESTING: Paywalls disabled - require_premium(request.subscription_id, SMART_DELAY_ALERTS)
+    require_premium(request.subscription_id, SMART_DELAY_ALERTS)
     
     try:
         # Validate subscription_id
@@ -5897,7 +5897,7 @@ async def check_notification(request: CheckNotificationRequest):
     Pro-only feature: Task E1
     """
     # Premium gating
-    # TESTING: Paywalls disabled - require_premium(request.subscription_id, SMART_DELAY_ALERTS)
+    require_premium(request.subscription_id, SMART_DELAY_ALERTS)
     
     try:
         # Validate subscription_id
@@ -6101,7 +6101,7 @@ async def search_free_camping(request: FreeCampingRequest):
 @api_router.post("/dump-stations/search", response_model=DumpStationResponse)
 async def search_dump_stations(request: DumpStationRequest):
     """Find RV dump stations near given coordinates using OpenStreetMap data."""
-    # TESTING: Paywalls disabled - require_premium(request.subscription_id, CAMPSITE_INDEX)  # Reuse campsite_index feature
+    require_premium(request.subscription_id, CAMPSITE_INDEX)  # Reuse campsite_index feature
     
     try:
         # Convert miles to meters for Overpass API
@@ -7499,7 +7499,7 @@ async def search_boondockers(request: OvernightSearchRequest):
 @api_router.post("/last-chance/search", response_model=LastChanceResponse)
 async def search_last_chance_supplies(request: LastChanceRequest):
     """Find grocery stores, propane refill, and hardware stores near given coordinates using OpenStreetMap data."""
-    # TESTING: Paywalls disabled - require_premium(request.subscription_id, CAMPSITE_INDEX)  # Reuse campsite_index feature
+    require_premium(request.subscription_id, CAMPSITE_INDEX)  # Reuse campsite_index feature
     
     try:
         # Convert miles to meters for Overpass API
@@ -7804,7 +7804,7 @@ async def search_last_chance_supplies(request: LastChanceRequest):
 @api_router.post("/rv-dealerships/search", response_model=RVDealershipResponse)
 async def search_rv_dealerships(request: RVDealershipRequest):
     """Find RV dealerships, service centers, and parts stores near given coordinates using OpenStreetMap data."""
-    # TESTING: Paywalls disabled - require_premium(request.subscription_id, CAMPSITE_INDEX)  # Reuse campsite_index feature
+    require_premium(request.subscription_id, CAMPSITE_INDEX)  # Reuse campsite_index feature
     
     try:
         # Convert miles to meters for Overpass API
@@ -8187,7 +8187,7 @@ class TruckParkingResponse(BaseModel):
 @api_router.post("/truck-parking/search", response_model=TruckParkingResponse)
 async def search_truck_parking(request: TruckParkingRequest):
     """Find truck parking including rest areas and safe parking zones."""
-    # TESTING: Paywalls disabled - require_premium(request.subscription_id, TRUCK_PARKING)
+    require_premium(request.subscription_id, TRUCK_PARKING)
     try:
         if not GOOGLE_PLACES_API_KEY:
             logger.error("GOOGLE_PLACES_API_KEY missing for truck parking search")
@@ -8539,7 +8539,7 @@ class TruckRestrictionResponse(BaseModel):
 @api_router.post("/truck-restrictions/search", response_model=TruckRestrictionResponse)
 async def search_truck_restrictions(request: TruckRestrictionRequest):
     """Find roads with truck restrictions using OpenStreetMap."""
-    # TESTING: Paywalls disabled - require_premium(request.subscription_id, TRUCK_RESTRICTIONS)
+    require_premium(request.subscription_id, TRUCK_RESTRICTIONS)
     try:
         radius_meters = int(request.radius_miles * 1609.34)
         

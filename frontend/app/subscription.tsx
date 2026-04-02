@@ -12,9 +12,10 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
-import type * as IAP from 'expo-iap';
+import * as IAP from 'expo-iap';
 import { useAuth } from '../contexts/AuthContext';
 import { useBilling } from './hooks/useBilling';
+import { buildUrl } from './apiConfig';
 
 const GOOGLE_PLAY_URL = 'https://play.google.com/store/apps/details?id=com.routecast.app';
 const isWeb = Platform.OS === 'web';
@@ -80,9 +81,11 @@ const selectOfferForBasePlan = (product: IAP.Subscription | undefined, basePlanI
 };
 
 export default function SubscriptionScreen() {
-  const { user, refreshUser, isAuthenticated } = useAuth();
+  const { user, refreshUser, isAuthenticated, accessToken } = useAuth();
   useLocalSearchParams<{ canceled?: string }>();
   const billing = useBilling();
+  const [verifyLoading, setVerifyLoading] = useState(false);
+  const [verifyError, setVerifyError] = useState<string | null>(null);
 
   const product = billing.products[0];
   const monthlyOffer = useMemo(() => selectOfferForBasePlan(product, 'monthly'), [product]);
@@ -115,26 +118,112 @@ export default function SubscriptionScreen() {
 
   const openGooglePlay = () => Linking.openURL(GOOGLE_PLAY_URL);
 
+  const verifyGooglePurchase = async (payload: { purchaseToken: string; productId: string; packageName: string }) => {
+    if (!accessToken) {
+      throw new Error('Sign in is required before starting a trial/subscription.');
+    }
+
+    const response = await fetch(buildUrl('subscription/verify/google'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        purchase_token: payload.purchaseToken,
+        product_id: payload.productId,
+        package_name: payload.packageName,
+      }),
+    });
+
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(body?.detail || 'Google Play verification failed');
+    }
+
+    if (!body?.valid) {
+      throw new Error(body?.message || 'Google Play entitlement is not active.');
+    }
+  };
+
+  const verifyAllActiveGooglePurchases = async () => {
+    if (!accessToken) {
+      throw new Error('Sign in is required to restore purchases.');
+    }
+
+    const active = await IAP.getAvailablePurchases();
+    const candidates = (active ?? []).filter((p: any) => {
+      const pid = p.productId ?? p.sku ?? p.id;
+      return pid === 'routecast_vs1';
+    });
+
+    if (!candidates.length) {
+      throw new Error('No active Google Play purchases found to restore.');
+    }
+
+    let atLeastOneVerified = false;
+    for (const p of candidates) {
+      const purchaseToken = (p as any)?.purchaseToken ?? (p as any)?.purchaseTokenAndroid;
+      const productId = (p as any)?.productId ?? (p as any)?.sku ?? (p as any)?.id ?? 'routecast_vs1';
+      if (!purchaseToken) continue;
+      await verifyGooglePurchase({
+        purchaseToken,
+        productId,
+        packageName: 'com.routecast.app',
+      });
+      atLeastOneVerified = true;
+    }
+
+    if (!atLeastOneVerified) {
+      throw new Error('No valid purchase token found for restore verification.');
+    }
+  };
+
   const handlePurchase = async (basePlanId: string, offerToken?: string) => {
     const productId = product?.id ?? (product as any)?.productId;
     console.log('[billing] CTA payload', { productId, basePlanId, offerToken });
-    await billing.purchase(offerToken);
+    setVerifyError(null);
 
-    // If the user is already signed in, sync their server profile; otherwise prompt to link/create after purchase.
-    if (isAuthenticated) {
+    const receipt = await billing.purchase(offerToken);
+    if (!receipt) {
+      return;
+    }
+
+    setVerifyLoading(true);
+    try {
+      await verifyGooglePurchase(receipt);
       await refreshUser();
-    } else {
+      router.replace('/account');
+    } catch (err: any) {
+      setVerifyError(err?.message ?? 'Unable to verify purchase with backend');
+    } finally {
+      setVerifyLoading(false);
+    }
+
+    if (!isAuthenticated) {
       router.replace('/signup?postPurchase=1');
     }
   };
 
   const handleRestore = async () => {
-    await billing.restore();
-    await refreshUser();
+    setVerifyError(null);
+    setVerifyLoading(true);
+    try {
+      await billing.restore();
+      await verifyAllActiveGooglePurchases();
+      await refreshUser();
+      router.replace('/account');
+    } catch (err: any) {
+      setVerifyError(err?.message ?? 'Unable to restore entitlement from backend');
+    } finally {
+      setVerifyLoading(false);
+    }
   };
 
-  const isPremium = user?.is_premium;
+  const isPremium = Boolean(user?.is_premium);
   const isTrialing = user?.subscription_status === 'trialing';
+  const hasServerEntitlement = Boolean(isPremium && user?.email_verified);
+  const purchaseDetectedPendingSync = billing.entitlementActive && !hasServerEntitlement;
 
   if (billing.isLoading && !billing.error) {
     return (
@@ -144,7 +233,7 @@ export default function SubscriptionScreen() {
     );
   }
 
-  if (billing.entitlementActive || (isPremium && !isTrialing)) {
+  if (hasServerEntitlement) {
     return (
       <View style={styles.container}>
         <SafeAreaView style={styles.safeArea}>
@@ -169,11 +258,17 @@ export default function SubscriptionScreen() {
                   Plan: {user?.subscription_plan?.charAt(0).toUpperCase() + user?.subscription_plan?.slice(1)}
                 </Text>
               </View>
+              {isTrialing && (
+                <View style={styles.premiumInfoRow}>
+                  <Ionicons name="hourglass-outline" size={20} color="#a1a1aa" />
+                  <Text style={styles.premiumInfoText}>Status: Trial Active</Text>
+                </View>
+              )}
               {user?.subscription_expiration && (
                 <View style={styles.premiumInfoRow}>
                   <Ionicons name="time" size={20} color="#a1a1aa" />
                   <Text style={styles.premiumInfoText}>
-                    Renews: {new Date(user.subscription_expiration).toLocaleDateString()}
+                    {isTrialing ? 'Trial Ends' : 'Renews'}: {new Date(user.subscription_expiration).toLocaleDateString()}
                   </Text>
                 </View>
               )}
@@ -293,12 +388,12 @@ export default function SubscriptionScreen() {
           </View>
 
           <TouchableOpacity
-            style={[styles.planButton, (!selectedOffer?.offerToken || !!selectedOffer?.error || billing.isPurchasing) && styles.buttonDisabled, styles.mainCta]}
+            style={[styles.planButton, (!selectedOffer?.offerToken || !!selectedOffer?.error || billing.isPurchasing || verifyLoading) && styles.buttonDisabled, styles.mainCta]}
             onPress={() => handlePurchase(selectedPlan, selectedOffer?.offerToken)}
-            disabled={billing.isPurchasing || !selectedOffer?.offerToken || !!selectedOffer?.error}
+            disabled={billing.isPurchasing || verifyLoading || !selectedOffer?.offerToken || !!selectedOffer?.error}
             data-testid="purchase-selected"
           >
-            {billing.isPurchasing ? (
+            {(billing.isPurchasing || verifyLoading) ? (
               <ActivityIndicator color="#1a1a1a" size="small" />
             ) : (
               <>
@@ -326,6 +421,22 @@ export default function SubscriptionScreen() {
             <View style={styles.errorContainer}>
               <Ionicons name="alert-circle" size={18} color="#ef4444" />
               <Text style={styles.errorText}>{billing.error}</Text>
+            </View>
+          )}
+
+          {verifyError && (
+            <View style={styles.errorContainer}>
+              <Ionicons name="alert-circle" size={18} color="#ef4444" />
+              <Text style={styles.errorText}>{verifyError}</Text>
+            </View>
+          )}
+
+          {purchaseDetectedPendingSync && (
+            <View style={styles.errorContainer}>
+              <Ionicons name="information-circle" size={18} color="#eab308" />
+              <Text style={styles.errorText}>
+                Purchase detected on device. Access unlocks only after account entitlement sync completes.
+              </Text>
             </View>
           )}
 

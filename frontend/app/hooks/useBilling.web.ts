@@ -11,11 +11,18 @@ export interface BillingState {
 
 export interface BillingApi extends BillingState {
   connect: () => Promise<void>;
-  purchase: (offerToken?: string) => Promise<void>;
+  purchase: (offerToken?: string) => Promise<PurchaseVerificationPayload | null>;
   restore: () => Promise<void>;
 }
 
+export interface PurchaseVerificationPayload {
+  purchaseToken: string;
+  productId: string;
+  packageName: string;
+}
+
 const noopAsync = async () => {};
+const noopPurchase = async (): Promise<PurchaseVerificationPayload | null> => null;
 
 export function useBilling(): BillingApi {
   // No billing on web; return stable no-op values.
@@ -27,7 +34,7 @@ export function useBilling(): BillingApi {
     error: null,
     entitlementActive: false,
     connect: noopAsync,
-    purchase: noopAsync,
+    purchase: noopPurchase,
     restore: noopAsync,
   }), []);
 }

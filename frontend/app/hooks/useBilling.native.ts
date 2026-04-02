@@ -14,8 +14,14 @@ export interface BillingState {
 
 export interface BillingApi extends BillingState {
   connect: () => Promise<void>;
-  purchase: (offerToken?: string) => Promise<void>;
+  purchase: (offerToken?: string) => Promise<PurchaseVerificationPayload | null>;
   restore: () => Promise<void>;
+}
+
+export interface PurchaseVerificationPayload {
+  purchaseToken: string;
+  productId: string;
+  packageName: string;
 }
 
 // Single Play subscription SKU with base plans (monthly, annual) and optional offers (e.g., trial7d).
@@ -109,7 +115,7 @@ export function useBilling(): BillingApi {
   const purchase = async (offerToken?: string) => {
     if (!offerToken) {
       setError('Offer unavailable');
-      return;
+      return null;
     }
     setPurchasing(true);
     setError(null);
@@ -123,8 +129,39 @@ export function useBilling(): BillingApi {
           },
         },
       });
+
+      // The purchase listener can resolve after requestPurchase returns.
+      // Poll briefly for an active purchase token we can send to backend verification.
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const active = await IAP.getAvailablePurchases();
+        if (active?.length) {
+          setPurchases(active);
+          const latest = [...active]
+            .reverse()
+            .find((p: any) => {
+              const pid = p.productId ?? p.sku ?? p.id;
+              return pid === SUBSCRIPTION_SKU;
+            });
+
+          const purchaseToken = (latest as any)?.purchaseToken ?? (latest as any)?.purchaseTokenAndroid ?? '';
+          const productId = (latest as any)?.productId ?? (latest as any)?.sku ?? (latest as any)?.id ?? SUBSCRIPTION_SKU;
+          if (purchaseToken) {
+            return {
+              purchaseToken,
+              productId,
+              packageName: 'com.routecast.app',
+            };
+          }
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 700));
+      }
+
+      setError('Purchase finished, but receipt token was unavailable. Tap Restore purchases and try again.');
+      return null;
     } catch (e: any) {
       setError(e?.message ?? 'Purchase failed');
+      return null;
     } finally {
       setPurchasing(false);
     }
