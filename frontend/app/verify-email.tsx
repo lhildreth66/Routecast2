@@ -27,11 +27,13 @@ export default function VerifyEmailScreen() {
   const {
     token: tokenParam,
     t: tParam,
+    verified: verifiedParam,
     error: errorParam,
     email: emailParam,
   } = useLocalSearchParams<{
     token?: string;
     t?: string;
+    verified?: string;
     error?: string;
     email?: string;
   }>();
@@ -50,6 +52,18 @@ export default function VerifyEmailScreen() {
   const [countdown, setCountdown] = useState(0);
   const [resendEmail, setResendEmail] = useState(emailParam || '');
 
+  // ── MODE 0: Deep-link success from backend verify page ───────────────
+  useEffect(() => {
+    if (verifiedParam !== '1' || token || errorParam) return;
+
+    const next = `/login?verified=1${emailParam ? `&email=${encodeURIComponent(emailParam)}` : ''}`;
+    const timer = setTimeout(() => {
+      router.replace(next);
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [verifiedParam, token, errorParam, emailParam]);
+
   // ── MODE 1: Token present → call backend verify endpoint directly ──────
   useEffect(() => {
     if (!token) return;
@@ -61,7 +75,7 @@ export default function VerifyEmailScreen() {
       setVerifyError('');
       try {
         const response = await axios.get(`${API_BASE}/api/auth/verify-email`, {
-          params: { token },
+          params: { token, format: 'json' },
         });
         if (cancelled) return;
         setVerifySuccess(true);
@@ -69,7 +83,8 @@ export default function VerifyEmailScreen() {
         // Let the user see the success state, then route them to login.
         setTimeout(() => {
           if (!cancelled) {
-            router.replace('/login?verified=1');
+            const next = `/login?verified=1${response.data?.email ? `&email=${encodeURIComponent(response.data.email)}` : ''}`;
+            router.replace(next);
           }
         }, 1200);
       } catch (err: any) {
@@ -194,6 +209,21 @@ export default function VerifyEmailScreen() {
                 )}
               </>
             )}
+          </View>
+        </SafeAreaView>
+      </View>
+    );
+  }
+
+  if (verifiedParam === '1') {
+    return (
+      <View style={styles.container}>
+        <SafeAreaView style={styles.safeArea}>
+          <View style={styles.content}>
+            <ActivityIndicator size="large" color="#22c55e" />
+            <Text style={{ color: '#a1a1aa', marginTop: 16, fontSize: 15 }}>
+              Email verified. Opening sign in...
+            </Text>
           </View>
         </SafeAreaView>
       </View>

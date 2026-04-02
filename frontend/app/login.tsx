@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -20,12 +20,17 @@ export default function LoginScreen() {
   // this screen renders, hydration is always complete. The destructure
   // of hasHydrated is kept for the early-return below as a fallback.
   const { login, hasHydrated } = useAuth();
-  const { verified, trial } = useLocalSearchParams<{ verified?: string; trial?: string }>();
+  const { verified, trial, email: emailParam } = useLocalSearchParams<{ verified?: string; trial?: string; email?: string }>();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (!emailParam || email) return;
+    setEmail(emailParam);
+  }, [emailParam, email]);
 
   // Defensive guard – should never be true since AuthProvider blocks children
   // until hydration completes, but keeps hook ordering intact.

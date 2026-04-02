@@ -5,12 +5,14 @@ Handles signup, login, email verification, password reset, and user profile.
 Flow:  signup → verify-email (302 → Stripe Checkout) → /welcome (activate + JWT)
 """
 from fastapi import APIRouter, HTTPException, Depends, Header, Request, BackgroundTasks
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, HTMLResponse
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timedelta, timezone
 import logging
 import os
+from html import escape as html_escape
+from urllib.parse import quote as urlquote
 
 try:
     import stripe as stripe_module
@@ -47,6 +49,8 @@ FRONTEND_URL = (
     or os.environ.get("APP_URL")
     or "https://routecastweather.com"
 ).rstrip("/")
+MOBILE_APP_SCHEME = os.environ.get("MOBILE_APP_SCHEME", "routecast2")
+ANDROID_PLAY_URL = "https://play.google.com/store/apps/details?id=com.routecast.app"
 
 # STRIPE DISABLED - Google Play submission - do not delete
 # STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "")
@@ -191,6 +195,7 @@ async def verify_email_get(
     request: Request,
     token: Optional[str] = FastQuery(None, alias="token"),
     t: Optional[str] = FastQuery(None, alias="t"),
+    response_format: Optional[str] = FastQuery(None, alias="format"),
 ):
     """Verify email via GET — primary path triggered by clicking the link.
 
@@ -200,7 +205,8 @@ async def verify_email_get(
     param so the page can show a friendly message.
     """
     raw = (token or t or "").strip()
-    return await _verify_email_with_token(raw, background_tasks, request)
+    wants_json = (response_format or "").strip().lower() == "json"
+    return await _verify_email_with_token(raw, background_tasks, request, wants_json)
 
 
 # STRIPE DISABLED - Google Play submission - do not delete
@@ -265,19 +271,55 @@ async def verify_email_get(
 _ERROR_REDIRECT = f"{os.environ.get('FRONTEND_URL', '')}/signup?error=invalid_token"
 
 
+def _build_native_verify_success_response(email: str = "") -> HTMLResponse:
+        safe_email = html_escape(email or "")
+        encoded_email = urlquote(email or "", safe="")
+        app_url = f"{MOBILE_APP_SCHEME}://verify-email?verified=1&email={encoded_email}"
+        html = f"""
+        <!doctype html>
+        <html>
+            <head>
+                <meta charset=\"utf-8\" />
+                <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
+                <title>RouteCast Verification Complete</title>
+            </head>
+            <body style=\"font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:#0f0f0f; color:#fff; margin:0;\">
+                <div style=\"max-width:560px; margin:0 auto; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px;\">
+                    <div style=\"width:100%; background:#1f2937; border:1px solid #374151; border-radius:14px; padding:24px; text-align:center;\">
+                        <h1 style=\"margin:0 0 8px; color:#22c55e;\">Email Verified</h1>
+                        <p style=\"margin:0 0 16px; color:#d1d5db;\">{safe_email if safe_email else 'Your account is verified.'}</p>
+                        <p style=\"margin:0 0 16px; color:#e5e7eb;\">Opening RouteCast app to continue your billing setup...</p>
+                        <a href=\"{app_url}\" style=\"display:inline-block; background:#eab308; color:#111827; text-decoration:none; font-weight:700; border-radius:10px; padding:12px 18px;\">Open RouteCast App</a>
+                        <p style=\"margin:14px 0 0; color:#9ca3af; font-size:14px;\">If the app does not open, install or update RouteCast from Google Play.</p>
+                        <a href=\"{ANDROID_PLAY_URL}\" style=\"display:inline-block; margin-top:10px; color:#93c5fd;\">Open in Google Play</a>
+                    </div>
+                </div>
+                <script>
+                    (function() {{
+                        var appUrl = {app_url!r};
+                        window.location.replace(appUrl);
+                        setTimeout(function() {{
+                            window.location.href = appUrl;
+                        }}, 600);
+                    }})();
+                </script>
+            </body>
+        </html>
+        """
+        return HTMLResponse(content=html, status_code=200)
+
+
 async def _verify_email_with_token(
     token: str,
     background_tasks: BackgroundTasks,
     request: Request,
+    wants_json: bool = False,
 ):
-    """Verify the email token, create a Stripe Checkout Session, and 302-redirect.
+        """Verify the email token and return either JSON or browser redirect/HTML.
 
-    Only two possible responses:
-      • 302 → Stripe checkout URL  (success)
-      • 302 → /signup?error=invalid_token  (any failure)
-
-    Never returns JSON.
-    """
+        API/native callers can request JSON with ``format=json``.
+        Browser link clicks receive redirect/HTML responses that open the app.
+        """
     db = get_db(request)
 
     # ── Step 1: diagnostic logging ───────────────────────────────────────
@@ -293,6 +335,8 @@ async def _verify_email_with_token(
 
     if not token:
         logger.warning("[VERIFY-EMAIL] FAIL bucket=MISSING — no token supplied")
+        if wants_json:
+            return JSONResponse(status_code=400, content={"detail": "Verification token is required."})
         return RedirectResponse(url=_ERROR_REDIRECT, status_code=302)
 
     # ── Step 2: consume the token ────────────────────────────────────────
@@ -318,7 +362,12 @@ async def _verify_email_with_token(
                 # if err:
                 #     logger.error(f"[VERIFY-EMAIL] Stripe checkout failed on retry: {err}")
                 #     return RedirectResponse(url=_ERROR_REDIRECT, status_code=302)
-                return JSONResponse({"message": "Email verified successfully"})
+                if wants_json:
+                    return JSONResponse(
+                        status_code=200,
+                        content={"message": "Email verified successfully", "email": existing_user.get("email", "")},
+                    )
+                return _build_native_verify_success_response(existing_user.get("email", ""))
             logger.warning(
                 f"[VERIFY-EMAIL] FAIL bucket=ALREADY_USED "
                 f"user={old_token_doc['user_id']} preview={safe_preview}"
@@ -335,12 +384,16 @@ async def _verify_email_with_token(
                 f"[VERIFY-EMAIL] FAIL bucket=NOT_FOUND "
                 f"preview={safe_preview}"
             )
+        if wants_json:
+            return JSONResponse(status_code=400, content={"detail": "Verification failed. The link may be invalid or expired."})
         return RedirectResponse(url=_ERROR_REDIRECT, status_code=302)
 
     # ── Step 3: mark the user as verified ────────────────────────────────
     user = await get_user_by_id(db, user_id)
     if not user:
         logger.warning(f"[VERIFY-EMAIL] FAIL bucket=USER_MISMATCH user_id={user_id}")
+        if wants_json:
+            return JSONResponse(status_code=404, content={"detail": "User not found for verification token."})
         return RedirectResponse(url=_ERROR_REDIRECT, status_code=302)
 
     await update_user(db, user_id, {"email_verified": True})
@@ -359,7 +412,13 @@ async def _verify_email_with_token(
     #     logger.error(f"[VERIFY-EMAIL] Stripe checkout creation failed: {err}")
     #     return RedirectResponse(url=_ERROR_REDIRECT, status_code=302)
 
-    return JSONResponse({"message": "Email verified successfully"})
+    if wants_json:
+        return JSONResponse(
+            status_code=200,
+            content={"message": "Email verified successfully", "email": user.get("email", "")},
+        )
+
+    return _build_native_verify_success_response(user.get("email", ""))
 
 
 class ResendVerificationRequest(BaseModel):

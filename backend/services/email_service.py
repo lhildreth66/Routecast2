@@ -25,6 +25,11 @@ FRONTEND_URL = (
     or os.environ.get('APP_URL', '')
     or 'https://app.routecastweather.com'
 ).rstrip('/')
+BACKEND_URL = (
+    os.environ.get('BACKEND_PUBLIC_URL')
+    or os.environ.get('BACKEND_URL', '')
+    or os.environ.get('EXPO_PUBLIC_BACKEND_URL', '')
+).rstrip('/')
 CONTACT_TO_EMAIL = os.environ.get('CONTACT_TO_EMAIL', 'support@routecastweather.com')
 
 
@@ -61,7 +66,11 @@ def send_verification_email(email: str, token: str, name: Optional[str] = None) 
     """Send email verification link"""
     from urllib.parse import quote as urlquote
     safe_token = urlquote(token, safe='')
-    verify_url = f"{FRONTEND_URL}/verify-email?token={safe_token}"
+    verify_base = BACKEND_URL or FRONTEND_URL
+    if verify_base.endswith('/api'):
+        verify_url = f"{verify_base}/auth/verify-email?token={safe_token}"
+    else:
+        verify_url = f"{verify_base}/api/auth/verify-email?token={safe_token}"
     logger.info(
         f"[EMAIL] Sending verification email to={email} "
         f"url_domain={FRONTEND_URL} "
