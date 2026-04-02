@@ -45,8 +45,19 @@ GOOGLE_PLAY_SERVICE_ACCOUNT_FILE = os.environ.get("GOOGLE_PLAY_SERVICE_ACCOUNT_F
 GOOGLE_PLAY_SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON", "")
 
 
+def _mask_token(token: str) -> str:
+    t = (token or "").strip()
+    if len(t) <= 12:
+        return "<short>"
+    return f"{t[:6]}...{t[-6:]}"
+
+
 def _load_google_service_account_info() -> Optional[dict]:
     raw_json = (GOOGLE_PLAY_SERVICE_ACCOUNT_JSON or "").strip()
+    if raw_json.lower() in {"unset", "placeholder", "null", "none", "{}"}:
+        logger.error("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON is present but appears to be a placeholder value")
+        raw_json = ""
+
     if raw_json:
         try:
             return json.loads(raw_json)
@@ -545,7 +556,23 @@ async def verify_google_receipt(purchase_token: str, product_id: str, package_na
     now = datetime.now(timezone.utc)
     token = (purchase_token or "").strip()
     prod = (product_id or "").strip()
-    pkg = (package_name or GOOGLE_PLAY_PACKAGE_NAME).strip() or GOOGLE_PLAY_PACKAGE_NAME
+    incoming_pkg = (package_name or "").strip()
+    pkg = GOOGLE_PLAY_PACKAGE_NAME
+    if incoming_pkg and incoming_pkg != pkg:
+        logger.warning(
+            "Google verify package mismatch: incoming=%s configured=%s; using configured package",
+            incoming_pkg,
+            pkg,
+        )
+
+    logger.info(
+        "Google verify start product_id=%s package=%s token=%s creds_json_set=%s creds_file_set=%s",
+        prod,
+        pkg,
+        _mask_token(token),
+        bool((GOOGLE_PLAY_SERVICE_ACCOUNT_JSON or "").strip()),
+        bool((GOOGLE_PLAY_SERVICE_ACCOUNT_FILE or "").strip()),
+    )
 
     if not token or not prod:
         return {
@@ -561,7 +588,13 @@ async def verify_google_receipt(purchase_token: str, product_id: str, package_na
     try:
         access_token = _get_google_access_token()
     except Exception as e:
-        logger.error(f"Google Play auth failure: {e}")
+        logger.error(
+            "Google Play auth failure product_id=%s package=%s token=%s reason=%s",
+            prod,
+            pkg,
+            _mask_token(token),
+            e,
+        )
         return {
             "valid": False,
             "message": "Google Play credentials not configured",
@@ -599,7 +632,14 @@ async def verify_google_receipt(purchase_token: str, product_id: str, package_na
             }
 
         if resp.status_code >= 400:
-            logger.error(f"Google Play verify HTTP {resp.status_code}: {resp.text[:400]}")
+            logger.error(
+                "Google Play verify HTTP failure status=%s product_id=%s package=%s token=%s body=%s",
+                resp.status_code,
+                prod,
+                pkg,
+                _mask_token(token),
+                resp.text[:400],
+            )
             return {
                 "valid": False,
                 "message": "Google Play verification failed",
@@ -612,7 +652,13 @@ async def verify_google_receipt(purchase_token: str, product_id: str, package_na
 
         payload = resp.json()
     except Exception as e:
-        logger.error(f"Google Play verification request failed: {e}")
+        logger.error(
+            "Google Play verification request failed product_id=%s package=%s token=%s reason=%s",
+            prod,
+            pkg,
+            _mask_token(token),
+            e,
+        )
         return {
             "valid": False,
             "message": "Unable to verify Google Play purchase",
@@ -661,6 +707,18 @@ async def verify_google_receipt(purchase_token: str, product_id: str, package_na
         status = "trialing"
 
     plan = _derive_google_plan(payload, prod)
+
+    logger.info(
+        "Google verify result valid=%s status=%s plan=%s expiration=%s product_id=%s package=%s token=%s google_state=%s",
+        entitled,
+        status,
+        plan if entitled else "free",
+        expiration.isoformat() if isinstance(expiration, datetime) else None,
+        prod,
+        pkg,
+        _mask_token(token),
+        google_state,
+    )
 
     return {
         "valid": entitled,

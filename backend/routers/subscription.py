@@ -276,13 +276,31 @@ async def verify_google_purchase(
     db = get_db(request)
     user_id = current_user.get("sub")
 
+    token_preview = f"{data.purchase_token[:6]}...{data.purchase_token[-6:]}" if data.purchase_token and len(data.purchase_token) > 12 else "<short>"
+    logger.info(
+        "[GOOGLE_VERIFY] request user_id=%s product_id=%s package_name=%s token=%s",
+        user_id,
+        data.product_id,
+        data.package_name,
+        token_preview,
+    )
+
     if not data.purchase_token or not data.product_id:
+        logger.warning("[GOOGLE_VERIFY] malformed payload user_id=%s", user_id)
         raise HTTPException(status_code=400, detail="purchase_token and product_id are required")
 
     result = await verify_google_receipt(data.purchase_token, data.product_id, data.package_name)
 
     if not result.get("verified_with_google", False):
         # Do not mutate entitlement state on transient verification failures.
+        logger.warning(
+            "[GOOGLE_VERIFY] verification unavailable user_id=%s product_id=%s token=%s message=%s error_code=%s",
+            user_id,
+            data.product_id,
+            token_preview,
+            result.get("message"),
+            result.get("error_code"),
+        )
         raise HTTPException(status_code=502, detail=result.get("message", "Google Play verification unavailable"))
 
     now = datetime.now(timezone.utc)
@@ -318,6 +336,16 @@ async def verify_google_purchase(
         update_data["trial_start"] = None
 
     await db.users.update_one({"user_id": user_id}, {"$set": update_data})
+
+    logger.info(
+        "[GOOGLE_VERIFY] persisted user_id=%s valid=%s status=%s plan=%s expiration=%s is_premium=%s",
+        user_id,
+        result.get("valid"),
+        status,
+        update_data.get("subscription_plan"),
+        update_data.get("subscription_expiration"),
+        update_data.get("is_premium"),
+    )
 
     return ReceiptVerifyResponse(
         valid=result["valid"],
