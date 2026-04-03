@@ -7,7 +7,7 @@
     "production": {
       "node": "20.19.0",
       "android": {
-        "autoIncrement": true
+        "autoIncrement": false
       },
       "env": {
         "EXPO_PUBLIC_BACKEND_URL": "https://api.routecastweather.com",
