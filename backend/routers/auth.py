@@ -287,20 +287,37 @@ def _build_native_verify_success_response(email: str = "") -> HTMLResponse:
                 <div style=\"max-width:560px; margin:0 auto; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px;\">
                     <div style=\"width:100%; background:#1f2937; border:1px solid #374151; border-radius:14px; padding:24px; text-align:center;\">
                         <h1 style=\"margin:0 0 8px; color:#22c55e;\">Email Verified</h1>
-                        <p style=\"margin:0 0 16px; color:#d1d5db;\">{safe_email if safe_email else 'Your account is verified.'}</p>
-                        <p style=\"margin:0 0 16px; color:#e5e7eb;\">Opening RouteCast app to continue your billing setup...</p>
-                        <a href=\"{app_url}\" style=\"display:inline-block; background:#eab308; color:#111827; text-decoration:none; font-weight:700; border-radius:10px; padding:12px 18px;\">Open RouteCast App</a>
-                        <p style=\"margin:14px 0 0; color:#9ca3af; font-size:14px;\">If the app does not open, install or update RouteCast from Google Play.</p>
-                        <a href=\"{ANDROID_PLAY_URL}\" style=\"display:inline-block; margin-top:10px; color:#93c5fd;\">Open in Google Play</a>
+                        <p style=\"margin:0 0 20px; color:#d1d5db;\">{safe_email if safe_email else 'Your account is verified.'}</p>
+
+                        <!-- Opening state: shown immediately while deep link is attempted -->
+                        <div id=\"rc-opening\">
+                            <p style=\"margin:0 0 16px; color:#e5e7eb;\">Opening RouteCast app to continue your billing setup...</p>
+                            <a href=\"{app_url}\" style=\"display:inline-block; background:#eab308; color:#111827; text-decoration:none; font-weight:700; border-radius:10px; padding:12px 18px;\">Open RouteCast App</a>
+                        </div>
+
+                        <!-- Fallback state: shown after 1500ms if page is still visible (app didn't open) -->
+                        <div id=\"rc-fallback\" style=\"display:none;\">
+                            <p style=\"margin:0 0 16px; color:#e5e7eb; font-size:16px; line-height:1.5;\">The app didn&apos;t open automatically.<br>Tap below to install or open RouteCast.</p>
+                            <a href=\"{ANDROID_PLAY_URL}\" style=\"display:block; background:#eab308; color:#111827; text-decoration:none; font-weight:700; border-radius:10px; padding:16px 24px; font-size:17px; box-sizing:border-box;\">Get RouteCast on Google Play</a>
+                        </div>
                     </div>
                 </div>
                 <script>
                     (function() {{
                         var appUrl = {app_url!r};
+                        // Attempt deep link immediately
                         window.location.replace(appUrl);
+                        // After 1500ms, check if the page is still visible.
+                        // If visibilityState is 'hidden', the app opened and took focus — do nothing.
+                        // If still visible, the deep link failed — show the Google Play fallback.
                         setTimeout(function() {{
-                            window.location.href = appUrl;
-                        }}, 600);
+                            if (document.visibilityState !== 'hidden') {{
+                                var opening = document.getElementById('rc-opening');
+                                var fallback = document.getElementById('rc-fallback');
+                                if (opening) opening.style.display = 'none';
+                                if (fallback) fallback.style.display = 'block';
+                            }}
+                        }}, 1500);
                     }})();
                 </script>
             </body>
