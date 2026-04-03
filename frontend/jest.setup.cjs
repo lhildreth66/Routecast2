@@ -7,7 +7,7 @@ jest.mock('expo-secure-store', () => {
     getItemAsync: jest.fn(async (k) => store[k] || null),
     deleteItemAsync: jest.fn(async (k) => { delete store[k]; }),
   };
-});
+}, { virtual: true });
 
 jest.mock('react-native-iap', () => {
   return {
@@ -20,6 +20,6 @@ jest.mock('react-native-iap', () => {
     finishTransaction: jest.fn(async () => true),
     getAvailablePurchases: jest.fn(async () => []),
   };
-});
+}, { virtual: true });
 
 jest.mock('react-native/Libraries/EventEmitter/NativeEventEmitter');

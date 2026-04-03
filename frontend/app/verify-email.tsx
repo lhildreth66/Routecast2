@@ -11,6 +11,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, router } from 'expo-router';
 import axios from 'axios';
+import { Platform, Linking } from 'react-native';
+import { verifySuccessRoute } from './routing/billingGuards';
 
 const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 
@@ -56,9 +58,13 @@ export default function VerifyEmailScreen() {
   useEffect(() => {
     if (verifiedParam !== '1' || token || errorParam) return;
 
-    const next = `/login?verified=1${emailParam ? `&email=${encodeURIComponent(emailParam)}` : ''}`;
+    const next = verifySuccessRoute({ isWeb: Platform.OS === 'web', email: emailParam });
     const timer = setTimeout(() => {
-      router.replace(next);
+      if (Platform.OS === 'web') {
+        Linking.openURL(next).catch(() => undefined);
+      } else {
+        router.replace(next);
+      }
     }, 400);
 
     return () => clearTimeout(timer);
@@ -83,8 +89,12 @@ export default function VerifyEmailScreen() {
         // Let the user see the success state, then route them to login.
         setTimeout(() => {
           if (!cancelled) {
-            const next = `/login?verified=1${response.data?.email ? `&email=${encodeURIComponent(response.data.email)}` : ''}`;
-            router.replace(next);
+            const next = verifySuccessRoute({ isWeb: Platform.OS === 'web', email: response.data?.email });
+            if (Platform.OS === 'web') {
+              Linking.openURL(next).catch(() => undefined);
+            } else {
+              router.replace(next);
+            }
           }
         }, 1200);
       } catch (err: any) {

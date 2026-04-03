@@ -315,11 +315,11 @@ async def _verify_email_with_token(
     request: Request,
     wants_json: bool = False,
 ):
-        """Verify the email token and return either JSON or browser redirect/HTML.
+    """Verify the email token and return either JSON or browser redirect/HTML.
 
-        API/native callers can request JSON with ``format=json``.
-        Browser link clicks receive redirect/HTML responses that open the app.
-        """
+    API/native callers can request JSON with ``format=json``.
+    Browser link clicks receive redirect/HTML responses that open the app.
+    """
     db = get_db(request)
 
     # ── Step 1: diagnostic logging ───────────────────────────────────────

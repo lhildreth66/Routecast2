@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
+import { hasActiveSubscription, shouldForcePaywall } from './routing/billingGuards';
 
 const UNAUTHED_OPEN_ROUTES = new Set([
   '/landing', '/welcome', '/contact', '/privacy', '/terms', '/login', '/signup', '/forgot-password', '/reset-password', '/verify-email',
@@ -11,18 +12,6 @@ const UNAUTHED_OPEN_ROUTES = new Set([
 
 const AUTH_ENTRY_ROUTES = new Set([
   '/', '/landing', '/login', '/signup', '/verify-email', '/forgot-password', '/reset-password', '/subscription', '/welcome',
-]);
-
-const ACTIVE_SUBSCRIPTION_STATUSES = new Set(['trialing', 'active', 'canceling']);
-
-// Routes that unpaid-but-verified users are allowed to visit.
-// Everything else redirects to /subscription (the paywall).
-const PAYWALL_OPEN_ROUTES = new Set([
-  '/login', '/signup', '/verify-email', '/subscription',
-  '/landing', '/terms', '/privacy', '/contact',
-  '/forgot-password', '/reset-password',
-  '/welcome',   // post-Stripe activation page (issues JWT before redirect)
-  '/account',   // users need account access to manage billing / cancel
 ]);
 
 // Global paywall guard: renders null (never blocks Stack from mounting).
@@ -34,11 +23,8 @@ function PaywallGuard() {
   const firedRef = useRef(false);
 
   useEffect(() => {
-    if (Platform.OS === 'web') return;
     if (!rootNavState?.key) return;
     if (!hasHydrated || authLoading) return;
-
-    const seg = '/' + (pathname.split('/').filter(Boolean)[0] ?? '');
 
     // Signed-out users are handled by NativeAuthGuard.
     if (!accessToken) {
@@ -46,25 +32,10 @@ function PaywallGuard() {
       return;
     }
 
-    // Fail-closed: unknown entitlement state is locked to subscription.
-    if (!user) {
-      if (pathname !== '/subscription' && seg !== '/subscription') {
-        router.replace('/subscription');
-      }
-      return;
-    }
-
-    const hasActiveSubscription = Boolean(
-      user.email_verified &&
-      user.is_premium &&
-      ACTIVE_SUBSCRIPTION_STATUSES.has((user.subscription_status || '').toLowerCase())
-    );
-
-    if (hasActiveSubscription) { firedRef.current = false; return; } // reset when user pays
-    if (!user.email_verified) return;     // pre-verification handled by verify-email itself
+    if (hasActiveSubscription(user)) { firedRef.current = false; return; } // reset when user pays
     if (firedRef.current) return;
 
-    if (PAYWALL_OPEN_ROUTES.has(pathname) || PAYWALL_OPEN_ROUTES.has(seg)) return;
+    if (!shouldForcePaywall(pathname, accessToken, user)) return;
 
     firedRef.current = true;
     __DEV__ && console.log('[paywall] blocking', pathname, '→ /subscription');
@@ -98,7 +69,6 @@ function NativeAuthGuard() {
   }, [accessToken, authLoading, hasHydrated, refreshUser, user]);
 
   useEffect(() => {
-    if (Platform.OS === 'web') return;
     if (!rootNavState?.key) return; // navigator not ready
     if (!hasHydrated || authLoading) return; // still hydrating
 
@@ -112,14 +82,8 @@ function NativeAuthGuard() {
       return;
     }
 
-    const hasActiveSubscription = Boolean(
-      user?.email_verified &&
-      user?.is_premium &&
-      ACTIVE_SUBSCRIPTION_STATUSES.has((user?.subscription_status || '').toLowerCase())
-    );
-
     // Restored entitled sessions should bypass landing/auth/paywall entry routes.
-    if (pathname !== '/' && hasActiveSubscription && (AUTH_ENTRY_ROUTES.has(pathname) || AUTH_ENTRY_ROUTES.has(seg))) {
+    if (pathname !== '/' && hasActiveSubscription(user) && (AUTH_ENTRY_ROUTES.has(pathname) || AUTH_ENTRY_ROUTES.has(seg))) {
       router.replace('/');
     }
   }, [accessToken, authLoading, hasHydrated, pathname, rootNavState?.key, user?.email_verified, user?.is_premium, user?.subscription_status]);
