@@ -58,13 +58,14 @@ export default function VerifyEmailScreen() {
   useEffect(() => {
     if (verifiedParam !== '1' || token || errorParam) return;
 
-    const next = verifySuccessRoute({ isWeb: Platform.OS === 'web', email: emailParam });
+    // Web: stay on the verify-email page and show the "Open the app" UI.
+    // Custom-scheme deep links (routecast2://) do not work reliably from a browser;
+    // the website is informational only — no login path exists on web.
+    if (Platform.OS === 'web') return;
+
+    const next = verifySuccessRoute({ isWeb: false, email: emailParam });
     const timer = setTimeout(() => {
-      if (Platform.OS === 'web') {
-        Linking.openURL(next).catch(() => undefined);
-      } else {
-        router.replace(next);
-      }
+      router.replace(next);
     }, 400);
 
     return () => clearTimeout(timer);
@@ -86,17 +87,17 @@ export default function VerifyEmailScreen() {
         if (cancelled) return;
         setVerifySuccess(true);
         setVerifiedEmail(response.data?.email || emailParam || '');
-        // Let the user see the success state, then route them to login.
-        setTimeout(() => {
-          if (!cancelled) {
-            const next = verifySuccessRoute({ isWeb: Platform.OS === 'web', email: response.data?.email });
-            if (Platform.OS === 'web') {
-              Linking.openURL(next).catch(() => undefined);
-            } else {
+        // On native: route to login after a short pause so user sees success state.
+        // On web: stay here — show the "Open the app" message; custom-scheme deep
+        // links don't work in browsers and the website has no login path.
+        if (Platform.OS !== 'web') {
+          setTimeout(() => {
+            if (!cancelled) {
+              const next = verifySuccessRoute({ isWeb: false, email: response.data?.email });
               router.replace(next);
             }
-          }
-        }, 1200);
+          }, 1200);
+        }
       } catch (err: any) {
         if (cancelled) return;
         const msg = err?.response?.data?.detail || 'Verification failed. The link may be expired.';
@@ -164,12 +165,29 @@ export default function VerifyEmailScreen() {
                   <Ionicons name="checkmark-circle" size={48} color="#22c55e" />
                 </View>
                 <Text style={styles.title}>Verification Successful</Text>
-                <Text style={styles.subtitle}>
-                  {verifiedEmail ? `You're verified as ${verifiedEmail}.` : 'Your email is verified.'} You can sign in to continue.
-                </Text>
-                <TouchableOpacity style={styles.resendButton} onPress={() => router.replace('/login?verified=1')}>
-                  <Text style={styles.resendButtonText}>Continue to Login</Text>
-                </TouchableOpacity>
+                {Platform.OS === 'web' ? (
+                  <>
+                    <Text style={styles.subtitle}>
+                      {verifiedEmail ? `${verifiedEmail} is verified.` : 'Your email is verified.'}{' '}
+                      Open the RouteCast app on your Android device to sign in and start your subscription.
+                    </Text>
+                    <TouchableOpacity
+                      style={styles.resendButton}
+                      onPress={() => Linking.openURL('https://play.google.com/store/apps/details?id=com.routecast.app')}
+                    >
+                      <Text style={styles.resendButtonText}>Get RouteCast on Google Play</Text>
+                    </TouchableOpacity>
+                  </>
+                ) : (
+                  <>
+                    <Text style={styles.subtitle}>
+                      {verifiedEmail ? `You're verified as ${verifiedEmail}.` : 'Your email is verified.'} You can sign in to continue.
+                    </Text>
+                    <TouchableOpacity style={styles.resendButton} onPress={() => router.replace('/login?verified=1')}>
+                      <Text style={styles.resendButtonText}>Continue to Login</Text>
+                    </TouchableOpacity>
+                  </>
+                )}
               </>
             )}
 
@@ -230,10 +248,31 @@ export default function VerifyEmailScreen() {
       <View style={styles.container}>
         <SafeAreaView style={styles.safeArea}>
           <View style={styles.content}>
-            <ActivityIndicator size="large" color="#22c55e" />
-            <Text style={{ color: '#a1a1aa', marginTop: 16, fontSize: 15 }}>
-              Email verified. Opening sign in...
-            </Text>
+            {Platform.OS === 'web' ? (
+              // Web: no login path exists — show permanent Open App gate.
+              <>
+                <View style={styles.iconContainer}>
+                  <Ionicons name="checkmark-circle" size={48} color="#22c55e" />
+                </View>
+                <Text style={styles.title}>Email Verified!</Text>
+                <Text style={styles.subtitle}>
+                  Open the RouteCast app on your Android device to sign in and start your subscription.
+                </Text>
+                <TouchableOpacity
+                  style={styles.resendButton}
+                  onPress={() => Linking.openURL('https://play.google.com/store/apps/details?id=com.routecast.app')}
+                >
+                  <Text style={styles.resendButtonText}>Get RouteCast on Google Play</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <>
+                <ActivityIndicator size="large" color="#22c55e" />
+                <Text style={{ color: '#a1a1aa', marginTop: 16, fontSize: 15 }}>
+                  Email verified. Opening sign in...
+                </Text>
+              </>
+            )}
           </View>
         </SafeAreaView>
       </View>

@@ -48,6 +48,20 @@ export function shouldForcePaywall(pathname: string, accessToken: string | null,
   return true;
 }
 
+/**
+ * Routes that are allowed on the web build.
+ * routecastweather.com is informational/verification only — no login, no app access.
+ * Everything else redirects to /landing on web.
+ */
+export const WEB_ALLOWED_ROUTES = new Set([
+  '/landing', '/verify-email', '/terms', '/privacy', '/contact', '/welcome',
+]);
+
+export function isWebAllowed(pathname: string): boolean {
+  const seg = topSegment(pathname);
+  return WEB_ALLOWED_ROUTES.has(pathname) || WEB_ALLOWED_ROUTES.has(seg);
+}
+
 export function verifySuccessHandoffUrl(email?: string): string {
   const encoded = email ? encodeURIComponent(email) : '';
   return `${MOBILE_APP_SCHEME}://login?verified=1${encoded ? `&email=${encoded}` : ''}`;

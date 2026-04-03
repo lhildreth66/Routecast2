@@ -4,7 +4,29 @@ import { useEffect, useRef } from 'react';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
-import { hasActiveSubscription, shouldForcePaywall } from './routing/billingGuards';
+import { hasActiveSubscription, shouldForcePaywall, isWebAllowed } from './routing/billingGuards';
+
+/**
+ * WebGate: routecastweather.com is informational/verification only.
+ * On web, any route that isn't an allowed static page redirects to /landing.
+ * This prevents browser-based login, signup, or any app content access.
+ */
+function WebGate() {
+  const rootNavState = useRootNavigationState();
+  const pathname = usePathname();
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    if (!rootNavState?.key) return;
+
+    if (!isWebAllowed(pathname)) {
+      __DEV__ && console.log('[WebGate] blocking web access to', pathname, '→ /landing');
+      router.replace('/landing');
+    }
+  }, [rootNavState?.key, pathname]);
+
+  return null;
+}
 
 const UNAUTHED_OPEN_ROUTES = new Set([
   '/landing', '/welcome', '/contact', '/privacy', '/terms', '/login', '/signup', '/forgot-password', '/reset-password', '/verify-email',
@@ -119,6 +141,7 @@ export default function RootLayout() {
   return (
     <AuthProvider>
       <StatusBar style="light" />
+      <WebGate />
       <NativeAuthGuard />
       <PaywallGuard />
       <Stack

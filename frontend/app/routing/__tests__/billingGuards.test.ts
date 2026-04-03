@@ -2,6 +2,7 @@ import {
   hasActiveSubscription,
   shouldForcePaywall,
   verifySuccessRoute,
+  isWebAllowed,
 } from '../billingGuards';
 
 describe('billingGuards', () => {
@@ -77,8 +78,39 @@ describe('billingGuards', () => {
         email_verified: true,
         is_premium: true,
         subscription_status: 'active',
-      };
-      expect(shouldForcePaywall('/route', 'token-1', user)).toBe(false);
+      };      expect(shouldForcePaywall('/route', 'token-1', user)).toBe(false);
+    });
+  });
+
+  describe('isWebAllowed - website is informational only (Android app only)', () => {
+    // These routes must NEVER be accessible on the web build.
+    // The website (routecastweather.com) has no login, no signup, no app content.
+    it.each([
+      ['/'],
+      ['/login'],
+      ['/signup'],
+      ['/subscription'],
+      ['/account'],
+      ['/route'],
+      ['/boondockers'],
+      ['/free-camping'],
+      ['/solar-forecast'],
+      ['/truck-stops'],
+      ['/radar-map'],
+    ])('blocks %s on web (redirects to /landing)', (route) => {
+      expect(isWebAllowed(route)).toBe(false);
+    });
+
+    // These are the only routes served on the website.
+    it.each([
+      ['/landing'],
+      ['/verify-email'],
+      ['/terms'],
+      ['/privacy'],
+      ['/contact'],
+      ['/welcome'],
+    ])('allows %s on web (informational/verification page)', (route) => {
+      expect(isWebAllowed(route)).toBe(true);
     });
   });
 });
