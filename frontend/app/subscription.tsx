@@ -334,7 +334,7 @@ export default function SubscriptionScreen() {
               <Ionicons name="rocket" size={32} color="#1a1a1a" />
             </View>
             <Text style={styles.title}>Continue Full Access</Text>
-            <Text style={styles.subtitle}>Every signup gets 7 days of full access. Subscribe to keep access after day 7.</Text>
+            <Text style={styles.subtitle}>Start a Google Play subscription to activate your included 7-day full-access trial.</Text>
           </View>
 
           <Text style={styles.sectionTitle}>Choose Your Plan</Text>

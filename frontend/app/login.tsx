@@ -107,7 +107,7 @@ export default function LoginScreen() {
                 borderColor: '#22c55e', borderRadius: 10, padding: 14, marginBottom: 16 }}>
                 <Ionicons name="checkmark-circle" size={20} color="#22c55e" />
                 <Text style={{ color: '#22c55e', fontSize: 14, flex: 1, lineHeight: 20 }}>
-                  Email verified! Sign in to continue your 7-day full-access trial.
+                  Email verified! Sign in to start subscription and activate your 7-day trial.
                 </Text>
               </View>
             )}

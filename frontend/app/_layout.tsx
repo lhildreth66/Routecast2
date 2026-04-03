@@ -13,6 +13,8 @@ const AUTH_ENTRY_ROUTES = new Set([
   '/', '/landing', '/login', '/signup', '/verify-email', '/forgot-password', '/reset-password', '/subscription', '/welcome',
 ]);
 
+const ACTIVE_SUBSCRIPTION_STATUSES = new Set(['trialing', 'active', 'canceling']);
+
 // Routes that unpaid-but-verified users are allowed to visit.
 // Everything else redirects to /subscription (the paywall).
 const PAYWALL_OPEN_ROUTES = new Set([
@@ -52,7 +54,13 @@ function PaywallGuard() {
       return;
     }
 
-    if (user.is_premium) { firedRef.current = false; return; } // reset when user pays
+    const hasActiveSubscription = Boolean(
+      user.email_verified &&
+      user.is_premium &&
+      ACTIVE_SUBSCRIPTION_STATUSES.has((user.subscription_status || '').toLowerCase())
+    );
+
+    if (hasActiveSubscription) { firedRef.current = false; return; } // reset when user pays
     if (!user.email_verified) return;     // pre-verification handled by verify-email itself
     if (firedRef.current) return;
 
@@ -61,7 +69,17 @@ function PaywallGuard() {
     firedRef.current = true;
     __DEV__ && console.log('[paywall] blocking', pathname, '→ /subscription');
     router.replace('/subscription');
-  }, [rootNavState?.key, hasHydrated, authLoading, accessToken, user, user?.is_premium, user?.email_verified, pathname]);
+  }, [
+    rootNavState?.key,
+    hasHydrated,
+    authLoading,
+    accessToken,
+    user,
+    user?.is_premium,
+    user?.email_verified,
+    user?.subscription_status,
+    pathname,
+  ]);
 
   return null;
 }
@@ -94,11 +112,17 @@ function NativeAuthGuard() {
       return;
     }
 
-    // Restored premium sessions should bypass landing/auth/paywall entry routes.
-    if (pathname !== '/' && user?.is_premium && (AUTH_ENTRY_ROUTES.has(pathname) || AUTH_ENTRY_ROUTES.has(seg))) {
+    const hasActiveSubscription = Boolean(
+      user?.email_verified &&
+      user?.is_premium &&
+      ACTIVE_SUBSCRIPTION_STATUSES.has((user?.subscription_status || '').toLowerCase())
+    );
+
+    // Restored entitled sessions should bypass landing/auth/paywall entry routes.
+    if (pathname !== '/' && hasActiveSubscription && (AUTH_ENTRY_ROUTES.has(pathname) || AUTH_ENTRY_ROUTES.has(seg))) {
       router.replace('/');
     }
-  }, [accessToken, authLoading, hasHydrated, pathname, rootNavState?.key, user?.is_premium]);
+  }, [accessToken, authLoading, hasHydrated, pathname, rootNavState?.key, user?.email_verified, user?.is_premium, user?.subscription_status]);
 
   return null;
 }
