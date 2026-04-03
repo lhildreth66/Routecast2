@@ -55,6 +55,7 @@ function PaywallGuard() {
     }
 
     if (hasActiveSubscription(user)) { firedRef.current = false; return; } // reset when user pays
+    if (!user) { firedRef.current = false; return; } // wait for user to load before firing
     if (firedRef.current) return;
 
     if (!shouldForcePaywall(pathname, accessToken, user)) return;
