@@ -298,7 +298,7 @@ def _build_native_verify_success_response(email: str = "") -> HTMLResponse:
                         <!-- Fallback state: shown after 1500ms if page is still visible (app didn't open) -->
                         <div id=\"rc-fallback\" style=\"display:none;\">
                             <p style=\"margin:0 0 16px; color:#e5e7eb; font-size:16px; line-height:1.5;\">The app didn&apos;t open automatically.<br>Tap below to install or open RouteCast.</p>
-                            <a href=\"{ANDROID_PLAY_URL}\" style=\"display:block; background:#eab308; color:#111827; text-decoration:none; font-weight:700; border-radius:10px; padding:16px 24px; font-size:17px; box-sizing:border-box;\">Get RouteCast on Google Play</a>
+                            <a onclick=\"window.location='{MOBILE_APP_SCHEME}://subscription';setTimeout(function(){{window.location='{ANDROID_PLAY_URL}';}},500);return false;\" href=\"{ANDROID_PLAY_URL}\" style=\"display:block; background:#eab308; color:#111827; text-decoration:none; font-weight:700; border-radius:10px; padding:16px 24px; font-size:17px; box-sizing:border-box; cursor:pointer;\">Get RouteCast on Google Play</a>
                         </div>
                     </div>
                 </div>
