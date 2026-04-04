@@ -30,6 +30,7 @@ function WebGate() {
 
 const UNAUTHED_OPEN_ROUTES = new Set([
   '/landing', '/welcome', '/contact', '/privacy', '/terms', '/login', '/signup', '/forgot-password', '/reset-password', '/verify-email',
+  '/subscription', // allow deep-link from email verification: routecast2://subscription
 ]);
 
 const AUTH_ENTRY_ROUTES = new Set([
