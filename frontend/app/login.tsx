@@ -56,8 +56,9 @@ export default function LoginScreen() {
     __DEV__ && console.log('[auth] login() returned – success:', result.success, 'error:', result.error ?? 'none');
 
     if (result.success) {
-      __DEV__ && console.log('[auth] login success – resetting loading, guards will route');
+      __DEV__ && console.log('[auth] login success – navigating to /, PaywallGuard will redirect if unsubscribed');
       setLoading(false);
+      router.replace('/');
       return;
     }
 
