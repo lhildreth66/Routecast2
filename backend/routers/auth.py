@@ -274,9 +274,7 @@ _ERROR_REDIRECT = f"{os.environ.get('FRONTEND_URL', '')}/signup?error=invalid_to
 def _build_native_verify_success_response(email: str = "") -> HTMLResponse:
         safe_email = html_escape(email or "")
         encoded_email = urlquote(email or "", safe="")
-        # Deep-link directly to the subscription screen so verified users land
-        # there immediately.  The verify-email route is not needed for this flow.
-        app_url = f"{MOBILE_APP_SCHEME}://subscription"
+        app_url = f"{MOBILE_APP_SCHEME}://verify-email?verified=1&email={encoded_email}"
         html = f"""
         <!doctype html>
         <html>
