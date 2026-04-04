@@ -56,12 +56,8 @@ export default function LoginScreen() {
     __DEV__ && console.log('[auth] login() returned – success:', result.success, 'error:', result.error ?? 'none');
 
     if (result.success) {
-      __DEV__ && console.log('[auth] login success – resetting loading, navigating to /');
+      __DEV__ && console.log('[auth] login success – resetting loading, guards will route');
       setLoading(false);
-      // If user arrived from a verify-email link on a different device,
-      // they are now verified and need to subscribe – the index guard will
-      // detect email_verified=true + is_premium=false and redirect them.
-      router.replace('/');
       return;
     }
 
