@@ -10,6 +10,7 @@
  *  6. Alert-derived state and reroute flag are logically consistent
  *  7. Wet weather + flood alert → alert overrides lesser weather state (not just DRY)
  *  8. Fog weather + ice alert → ICY overrides FOG
+ *  9. alerts_status field — timeout/error/unavailable/ok carry correct desc and alertsStatus
  */
 
 import {
@@ -24,16 +25,19 @@ function makeWp({
   conditions = 'Clear',
   alerts = [] as any[],
   alertsField = 'present', // 'present' | 'null' | 'undefined'
+  alertsStatus,           // backend alerts_status field value (optional)
 }: {
   temperature?: number;
   conditions?: string;
   alerts?: any[];
   alertsField?: 'present' | 'null' | 'undefined';
+  alertsStatus?: string;
 }) {
-  const base = {
+  const base: any = {
     weather: { temperature, conditions, wind_speed: '10 mph' },
     waypoint: { name: 'Test Point', distance_from_start: 42 },
   };
+  if (alertsStatus !== undefined) base.alerts_status = alertsStatus;
   if (alertsField === 'null') return { ...base, alerts: null };
   if (alertsField === 'undefined') return { ...base };
   return { ...base, alerts };
@@ -342,5 +346,77 @@ describe('Test 8 — Ice alert overrides fog weather state', () => {
     expect(result.condLabel).toBe('ICY');
     expect(result.condLabel).not.toBe('FOG');
     expect(isRerouteCondition(result)).toBe(true);
+  });
+});
+
+// ── Test 9: alerts_status field — granular fetch status ─────────────────────
+
+describe('Test 9 — alerts_status field drives alertsStatus and condDesc', () => {
+  it('alerts_status "ok" with empty alerts → Clear, alertsUnavailable=false, alertsStatus="ok"', () => {
+    const wp = makeWp({ alerts: [], alertsStatus: 'ok' });
+    const result = resolveRoutePointCondition(wp);
+    expect(result.alertsStatus).toBe('ok');
+    expect(result.alertsUnavailable).toBe(false);
+    expect(result.condDesc).toBe('Clear');
+    expect(result.roadSurface).toBe('Normal driving conditions');
+  });
+
+  it('alerts_status "timeout" → alertsUnavailable=true, alertsStatus="timeout", desc mentions timed out', () => {
+    const wp = makeWp({ alerts: [], alertsStatus: 'timeout' });
+    const result = resolveRoutePointCondition(wp);
+    expect(result.alertsStatus).toBe('timeout');
+    expect(result.alertsUnavailable).toBe(true);
+    expect(result.condDesc).toMatch(/timed out/i);
+    expect(result.roadSurface).toMatch(/timed out/i);
+  });
+
+  it('alerts_status "error" → alertsUnavailable=true, alertsStatus="error", desc says unavailable', () => {
+    const wp = makeWp({ alerts: [], alertsStatus: 'error' });
+    const result = resolveRoutePointCondition(wp);
+    expect(result.alertsStatus).toBe('error');
+    expect(result.alertsUnavailable).toBe(true);
+    expect(result.condDesc).toMatch(/hazard data unavailable/i);
+  });
+
+  it('alerts_status "unavailable" → alertsUnavailable=true, alertsStatus="unavailable"', () => {
+    const wp = makeWp({ alerts: [], alertsStatus: 'unavailable' });
+    const result = resolveRoutePointCondition(wp);
+    expect(result.alertsStatus).toBe('unavailable');
+    expect(result.alertsUnavailable).toBe(true);
+    expect(result.condDesc).toMatch(/hazard data unavailable/i);
+  });
+
+  it('alerts_status "ok" with flood alert → alert still overrides DRY, alertsStatus="ok"', () => {
+    const wp = makeWp({ alerts: [alert('Flood Warning')], alertsStatus: 'ok' });
+    const result = resolveRoutePointCondition(wp);
+    expect(result.alertsStatus).toBe('ok');
+    expect(result.condLabel).toBe('FLOOD');
+    expect(result.alertsUnavailable).toBe(false);
+  });
+
+  it('alerts_status "timeout" with non-null alerts list → treats as timeout (status wins over list)', () => {
+    // Backend sends alerts=[] and alerts_status="timeout": timeout status must win
+    const wp = makeWp({ alerts: [], alertsStatus: 'timeout' });
+    const result = resolveRoutePointCondition(wp);
+    expect(result.alertsStatus).toBe('timeout');
+    expect(result.alertsUnavailable).toBe(true);
+    // No hazard was in alerts, so label stays DRY
+    expect(result.condLabel).toBe('DRY');
+  });
+
+  it('no alerts_status field + alerts=null → backward-compat fallback to unavailable', () => {
+    // Old backend response without alerts_status field
+    const wp = makeWp({ alertsField: 'null' });
+    const result = resolveRoutePointCondition(wp);
+    expect(result.alertsStatus).toBe('unavailable');
+    expect(result.alertsUnavailable).toBe(true);
+  });
+
+  it('no alerts_status field + alerts=[] → backward-compat fallback to ok', () => {
+    const wp = makeWp({ alerts: [] }); // no alertsStatus, alerts is []
+    const result = resolveRoutePointCondition(wp);
+    expect(result.alertsStatus).toBe('ok');
+    expect(result.alertsUnavailable).toBe(false);
+    expect(result.condDesc).toBe('Clear');
   });
 });

@@ -215,7 +215,7 @@ async def test_route_weather_handles_missing_waypoints(monkeypatch):
         )
 
     async def fake_alerts(*args, **kwargs):
-        return []
+        return [], "ok"
 
     async def fake_reverse(*args, **kwargs):
         return None

@@ -10,6 +10,9 @@
  * while route cards still show "Clear / Dry / Normal" (weather-only).
  */
 
+/** Granular status for the alerts fetch attempt on a waypoint. */
+export type AlertsStatus = 'ok' | 'timeout' | 'error' | 'unavailable';
+
 export interface ConditionResult {
   condIcon: string;
   condLabel: string;
@@ -19,10 +22,19 @@ export interface ConditionResult {
   /** The first matching hazard alert object, or null if none. */
   hazardAlert: any | null;
   /**
-   * True when wp.alerts is null or undefined — meaning the backend did not
-   * attach alert data to this waypoint at all. Distinct from [] (fetched, clean).
+   * True when alerts were not successfully fetched (timeout, error, or not
+   * attempted). Distinct from alertsStatus === "ok" with an empty list (fetched
+   * clean, no active alerts).
    */
   alertsUnavailable: boolean;
+  /**
+   * Granular fetch status from the backend alerts_status field.
+   * "ok"          — fetched successfully (list may be empty)
+   * "timeout"     — NWS endpoint timed out
+   * "error"       — HTTP error or provider failure
+   * "unavailable" — not attempted (weather-only mode, Alaska cache shortcut, etc.)
+   */
+  alertsStatus: AlertsStatus;
 }
 
 /** Keywords that indicate a hazard-level NWS event in event or headline text. */
@@ -57,8 +69,20 @@ function matchesHazardKeyword(text: string): boolean {
  * Pass the raw waypoint object as received from the backend RouteResponse.
  */
 export function resolveRoutePointCondition(wp: any): ConditionResult {
-  // ── Detect missing alerts field ────────────────────────────────────────────
-  const alertsUnavailable = wp.alerts === undefined || wp.alerts === null;
+  // ── Resolve alerts_status ──────────────────────────────────────────────────
+  // Prefer the explicit backend field; fall back to null/undefined field check
+  // for backward compat with responses that predate alerts_status.
+  const rawStatus: string | undefined = wp.alerts_status;
+  let alertsStatus: AlertsStatus;
+  if (rawStatus === 'ok' || rawStatus === 'timeout' || rawStatus === 'error' || rawStatus === 'unavailable') {
+    alertsStatus = rawStatus;
+  } else if (wp.alerts === undefined || wp.alerts === null) {
+    alertsStatus = 'unavailable';
+  } else {
+    alertsStatus = 'ok';
+  }
+
+  const alertsUnavailable = alertsStatus !== 'ok';
   const waypointAlerts: any[] = alertsUnavailable ? [] : (wp.alerts as any[]);
 
   // ── Step 1: Derive weather-based state ────────────────────────────────────
@@ -68,10 +92,23 @@ export function resolveRoutePointCondition(wp: any): ConditionResult {
   let condIcon = '✓';
   let condLabel = 'DRY';
   let condColor = '#22c55e';
-  let condDesc = alertsUnavailable ? 'Hazard data unavailable' : 'Clear';
-  let roadSurface = alertsUnavailable
-    ? 'Alert data could not be loaded — drive with caution'
-    : 'Normal driving conditions';
+
+  // Status-aware default desc / road surface (overridden below by weather or alerts)
+  let condDesc: string;
+  let roadSurface: string;
+  if (alertsStatus === 'timeout') {
+    condDesc = 'Hazard data timed out';
+    roadSurface = 'Alert data timed out — drive with caution';
+  } else if (alertsStatus === 'error') {
+    condDesc = 'Hazard data unavailable';
+    roadSurface = 'Alert data could not be loaded — drive with caution';
+  } else if (alertsStatus === 'unavailable') {
+    condDesc = 'Hazard data unavailable';
+    roadSurface = 'Alert data could not be loaded — drive with caution';
+  } else {
+    condDesc = 'Clear';
+    roadSurface = 'Normal driving conditions';
+  }
 
   if (
     temp <= 32 &&
@@ -193,6 +230,7 @@ export function resolveRoutePointCondition(wp: any): ConditionResult {
     roadSurface,
     hazardAlert,
     alertsUnavailable,
+    alertsStatus,
   };
 }
 

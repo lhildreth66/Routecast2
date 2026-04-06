@@ -652,6 +652,7 @@ class WaypointWeather(BaseModel):
     waypoint: Waypoint
     weather: Optional[WeatherData] = None
     alerts: List[WeatherAlert] = []
+    alerts_status: str = "ok"  # "ok" | "timeout" | "error" | "unavailable"
     error: Optional[str] = None
 
 class RouteWeatherResponse(BaseModel):
@@ -1418,13 +1419,21 @@ async def get_noaa_weather(lat: float, lon: float) -> Optional[WeatherData]:
         return None
 
 
-async def get_noaa_alerts(lat: float, lon: float) -> List[WeatherAlert]:
-    """Fetch raw NWS alert features for a point (alerts/active?point=lat,lon)."""
+async def get_noaa_alerts(lat: float, lon: float) -> Tuple[List[WeatherAlert], str]:
+    """
+    Fetch active NWS alerts for a point (alerts/active?point=lat,lon).
+
+    Returns:
+        (alerts, status) where status is one of:
+            "ok"      — fetch succeeded; list may be empty (no active alerts)
+            "timeout" — NWS endpoint did not respond within the timeout
+            "error"   — HTTP error, parse failure, or other provider problem
+    """
     cache_key = f"{_bucket_coord(lat):.2f}:{_bucket_coord(lon):.2f}"
     cached = _cache_get(_noaa_alerts_cache, cache_key)
     if cached is not None:
         _noaa_cache_stats["alerts_hits"] += 1
-        return cached
+        return cached, "ok"  # cache only stores successful fetches
 
     _noaa_cache_stats["alerts_misses"] += 1
 
@@ -1435,7 +1444,7 @@ async def get_noaa_alerts(lat: float, lon: float) -> List[WeatherAlert]:
             _noaa_cache_stats["nws_http_calls"] += 1
             if resp.status_code != 200:
                 logger.warning("NWS alerts lookup failed status=%s", resp.status_code)
-                return []
+                return [], "error"
 
             data = resp.json() if resp else {}
             features = data.get("features") or []
@@ -1472,10 +1481,13 @@ async def get_noaa_alerts(lat: float, lon: float) -> List[WeatherAlert]:
                 )
 
             _cache_set(_noaa_alerts_cache, cache_key, alerts, ttl=NOAA_CACHE_TTL_SECONDS)
-            return alerts
+            return alerts, "ok"
+    except httpx.TimeoutException as e:
+        logger.warning(f"Alerts timeout for {lat},{lon}: {e}")
+        return [], "timeout"
     except Exception as e:  # noqa: BLE001
         logger.error(f"Alerts provider error for {lat},{lon}: {e}")
-        return []
+        return [], "error"
 
 def generate_packing_suggestions(waypoints_weather: List[WaypointWeather]) -> List[PackingSuggestion]:
     """Generate packing suggestions based on weather conditions."""
@@ -3733,7 +3745,7 @@ async def get_route_weather(request: RouteRequest):
     async def fetch_waypoint_weather(wp: Waypoint, index: int, total: int, origin_name: str, dest_name: str) -> WaypointWeather:
         nonlocal has_severe
         weather = await get_noaa_weather(wp.lat, wp.lon)
-        alerts = await get_noaa_alerts(wp.lat, wp.lon)
+        alerts, alerts_status = await get_noaa_alerts(wp.lat, wp.lon)
         
         # Get location name via reverse geocoding
         location_name = await reverse_geocode(wp.lat, wp.lon)
@@ -3768,7 +3780,8 @@ async def get_route_weather(request: RouteRequest):
         return WaypointWeather(
             waypoint=updated_wp,
             weather=weather,
-            alerts=alerts
+            alerts=alerts,
+            alerts_status=alerts_status,
         )
     
     # Fetch weather concurrently (alerts deferred to follow-up)
@@ -3797,6 +3810,7 @@ async def get_route_weather(request: RouteRequest):
             waypoint=updated_wp,
             weather=weather,
             alerts=[],
+            alerts_status="unavailable",
         )
 
     tasks = [fetch_waypoint_weather(wp, i, total_waypoints, request.origin, request.destination) for i, wp in enumerate(waypoints)]
@@ -4120,7 +4134,8 @@ async def get_route_weather_alerts(
     alaska_alerts_cache: Optional[List[WeatherAlert]] = None
     if is_alaska_route and hazard_waypoints_data:
         first_wp = hazard_waypoints_data[0]
-        alaska_alerts_cache = await get_noaa_alerts(first_wp.get("lat"), first_wp.get("lon"))
+        _alaska_alerts, _ = await get_noaa_alerts(first_wp.get("lat"), first_wp.get("lon"))
+        alaska_alerts_cache = _alaska_alerts
 
     async def fetch_hazard_wp(wp_dict: Dict[str, Any], index: int, total: int) -> Optional[Tuple[int, WaypointWeather]]:
         try:
@@ -4157,7 +4172,7 @@ async def get_route_weather_alerts(
             alerts = alaska_alerts_cache
         else:
             try:
-                alerts = await asyncio.wait_for(get_noaa_alerts(wp.lat, wp.lon), timeout=3.0)
+                alerts, _ = await asyncio.wait_for(get_noaa_alerts(wp.lat, wp.lon), timeout=3.0)
             except asyncio.TimeoutError:
                 logger.warning(
                     "route_alerts_nws_alerts_timeout",
