@@ -48,13 +48,19 @@ export default function TruckServicesScreen() {
   };
 
   const searchServices = async () => {
+    const parsedLat = parseFloat(latitude);
+    const parsedLon = parseFloat(longitude);
+    if (isNaN(parsedLat) || isNaN(parsedLon)) {
+      setError('Please enter a location or tap "Use My Location" before searching.');
+      return;
+    }
     setLoading(true);
     setServices([]);
     setError('');
     try {
       const resp = await axios.post(buildUrl('truck-services/search'), {
-        latitude: parseFloat(latitude),
-        longitude: parseFloat(longitude),
+        latitude: parsedLat,
+        longitude: parsedLon,
         radius_miles: parseInt(searchRadius, 10),
       });
       setServices(resp.data.services || []);

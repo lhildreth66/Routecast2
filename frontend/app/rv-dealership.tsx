@@ -37,7 +37,7 @@ export default function RVDealershipScreen() {
     clearManualLocation, triggerGps, setShowSuggestions,
   } = useLocationSearch('rvDealershipLoc');
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [dealerships, setDealerships] = useState<RVDealership[]>([]);
   const [error, setError] = useState<string>('');
   const [expandedDealerships, setExpandedDealerships] = useState(new Set<number>());
@@ -65,8 +65,14 @@ export default function RVDealershipScreen() {
     }
   };
 
-  const refreshLocation = async () => {
-    await triggerGps();
+  const handleSearch = () => {
+    const parsedLat = parseFloat(latitude);
+    const parsedLon = parseFloat(longitude);
+    if (isNaN(parsedLat) || isNaN(parsedLon)) {
+      setError('Please enter a location or tap "Use My Location" before searching.');
+      return;
+    }
+    performSearch(parsedLat, parsedLon);
   };
 
   const toggleDealershipExpand = (index: number) => {
@@ -119,7 +125,7 @@ export default function RVDealershipScreen() {
           />
 
           <TouchableOpacity 
-            onPress={refreshLocation} 
+            onPress={handleSearch} 
             style={styles.locationButton}
             disabled={locationLoading || loading}
           >

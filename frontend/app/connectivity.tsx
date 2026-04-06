@@ -49,14 +49,20 @@ export default function ConnectivityScreen() {
   };
 
   const runCellPrediction = async () => {
+    const parsedLat = parseFloat(latitude);
+    const parsedLon = parseFloat(longitude);
+    if (isNaN(parsedLat) || isNaN(parsedLon)) {
+      setCellResult('Error: Please enter a location or tap "Use My Location" before running the prediction.');
+      return;
+    }
     setLoading(true);
     setCellResult(null);
     setCellResultData(null);
     try {
       const payload = {
         carrier,
-        lat: parseFloat(latitude),
-        lon: parseFloat(longitude),
+        lat: parsedLat,
+        lon: parsedLon,
       };
 
       try {

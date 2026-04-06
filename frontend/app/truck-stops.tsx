@@ -51,13 +51,19 @@ export default function TruckStopsScreen() {
   };
 
   const searchTruckStops = async () => {
+    const parsedLat = parseFloat(latitude);
+    const parsedLon = parseFloat(longitude);
+    if (isNaN(parsedLat) || isNaN(parsedLon)) {
+      setError('Please enter a location or tap "Use My Location" before searching.');
+      return;
+    }
     setLoading(true);
     setStops([]);
     setError('');
     try {
       const resp = await axios.post(buildUrl('truck-stops/search'), {
-        latitude: parseFloat(latitude),
-        longitude: parseFloat(longitude),
+        latitude: parsedLat,
+        longitude: parsedLon,
         radius_miles: parseInt(searchRadius, 10),
       }, {
         timeout: 65000, // 65 second timeout
