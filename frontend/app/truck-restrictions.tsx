@@ -8,6 +8,8 @@ import { API_BASE, buildUrl } from '../lib/apiConfig';
 import InfoBanner from '../lib/components/InfoBanner';
 import { useLocationSearch } from '../lib/useLocationSearch';
 import LocationSearchBox from '../lib/components/LocationSearchBox';
+import { useAuth } from '../contexts/AuthContext';
+import { classifyPremiumError } from './utils/premiumScreenErrors';
 
 interface TruckRestriction {
   name: string;
@@ -24,6 +26,7 @@ interface TruckRestriction {
 
 export default function TruckRestrictionsScreen() {
   const router = useRouter();
+  const { accessToken } = useAuth();
 
   // ── Location (manual search + explicit GPS only) ────────────────────
   const {
@@ -62,6 +65,7 @@ export default function TruckRestrictionsScreen() {
         latitude: parsedLat,
         longitude: parsedLon,
         radius_miles: parseInt(searchRadius, 10),
+        subscription_id: accessToken,
       }, {
         timeout: 50000,
       });
@@ -71,7 +75,12 @@ export default function TruckRestrictionsScreen() {
       }
     } catch (err: any) {
       console.error('Truck restrictions search error:', err);
-      setError(err?.response?.data?.detail || 'Failed to find truck restrictions. Tap to retry.');
+      const classified = classifyPremiumError(err, 'Failed to find truck restrictions. Tap to retry.');
+      if (classified.kind === 'entitlement') {
+        setError('Access temporarily unavailable — your session may have expired. Please sign out and back in.');
+      } else {
+        setError(classified.message);
+      }
     } finally {
       setLoading(false);
     }

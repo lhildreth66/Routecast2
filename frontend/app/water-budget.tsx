@@ -5,9 +5,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { API_BASE, buildUrl } from '../lib/apiConfig';
+import { useAuth } from '../contexts/AuthContext';
+import { classifyPremiumError } from './utils/premiumScreenErrors';
 
 export default function WaterBudgetScreen() {
   const router = useRouter();
+  const { accessToken } = useAuth();
   const [freshGallons, setFreshGallons] = useState('40');
   const [grayGallons, setGrayGallons] = useState('30');
   const [blackGallons, setBlackGallons] = useState('20');
@@ -17,11 +20,14 @@ export default function WaterBudgetScreen() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [error, setError] = useState<string>('');
+  const [entitlementMissing, setEntitlementMissing] = useState(false);
 
   const calculate = async () => {
     setLoading(true);
     setResult(null);
     setError('');
+    setEntitlementMissing(false);
+
     try {
       const resp = await axios.post(buildUrl('water-budget'), {
         fresh_gal: parseInt(freshGallons, 10),
@@ -29,12 +35,18 @@ export default function WaterBudgetScreen() {
         black_gal: parseInt(blackGallons, 10),
         people: parseInt(numPeople, 10),
         showers_per_week: parseFloat(showersPerWeek),
-        hot_days: false, // Could add a toggle for this
+        hot_days: false,
+        subscription_id: accessToken,
       });
-      setResult(resp.data);
+      setResult(resp.data ?? null);
     } catch (err: any) {
       console.error('Water budget calculation error:', err);
-      setError(err?.response?.data?.detail || err?.message || 'Failed to calculate water budget');
+      const classified = classifyPremiumError(err, 'Failed to calculate water budget.');
+      if (classified.kind === 'entitlement') {
+        setEntitlementMissing(true);
+      } else {
+        setError(classified.message);
+      }
     } finally {
       setLoading(false);
     }
@@ -116,11 +128,17 @@ export default function WaterBudgetScreen() {
             {loading ? <ActivityIndicator color="#1a1a1a" /> : <Text style={styles.buttonText}>Calculate</Text>}
           </TouchableOpacity>
 
-          {error && (
+          {entitlementMissing ? (
+            <View style={styles.errorBox}>
+              <Text style={styles.errorText}>⚠️ Access unavailable — your session may have expired. Please sign out and back in.</Text>
+            </View>
+          ) : null}
+
+          {error ? (
             <View style={styles.errorBox}>
               <Text style={styles.errorText}>❌ {error}</Text>
             </View>
-          )}
+          ) : null}
 
           {result && (
             <View style={styles.resultBox}>

@@ -8,6 +8,8 @@ import { API_BASE, buildUrl } from '../lib/apiConfig';
 import InfoBanner from '../lib/components/InfoBanner';
 import { useLocationSearch } from '../lib/useLocationSearch';
 import LocationSearchBox from '../lib/components/LocationSearchBox';
+import { useAuth } from '../contexts/AuthContext';
+import { classifyPremiumError } from './utils/premiumScreenErrors';
 
 interface RVDealership {
   name: string;
@@ -27,6 +29,7 @@ interface RVDealership {
 
 export default function RVDealershipScreen() {
   const router = useRouter();
+  const { accessToken } = useAuth();
 
   // ── Location (manual search + explicit GPS only) ────────────────────
   const {
@@ -52,6 +55,7 @@ export default function RVDealershipScreen() {
         latitude: lat,
         longitude: lon,
         radius_miles: 10,
+        subscription_id: accessToken,
       });
       setDealerships(resp.data.dealerships || []);
       if (resp.data.dealerships?.length === 0) {
@@ -59,7 +63,12 @@ export default function RVDealershipScreen() {
       }
     } catch (err: any) {
       console.error('RV dealership search error:', err);
-      setError(err?.response?.data?.detail || err?.message || 'Failed to find RV dealerships');
+      const classified = classifyPremiumError(err, 'Failed to find RV dealerships.');
+      if (classified.kind === 'entitlement') {
+        setError('Access temporarily unavailable — your session may have expired. Please sign out and back in.');
+      } else {
+        setError(classified.message);
+      }
     } finally {
       setLoading(false);
     }

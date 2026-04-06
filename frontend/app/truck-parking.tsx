@@ -4,11 +4,12 @@ import axios from 'axios';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { API_BASE, buildUrl } from '../lib/apiConfig';
 import InfoBanner from '../lib/components/InfoBanner';
 import { useLocationSearch } from '../lib/useLocationSearch';
 import LocationSearchBox from '../lib/components/LocationSearchBox';
+import { useAuth } from '../contexts/AuthContext';
+import { classifyPremiumError, extractResultArray } from './utils/premiumScreenErrors';
 
 interface ParkingSpot {
   name: string;
@@ -25,6 +26,7 @@ interface ParkingSpot {
 
 export default function TruckParkingScreen() {
   const router = useRouter();
+  const { accessToken } = useAuth();
 
   // ── Location (manual search + explicit GPS only) ────────────────────
   const {
@@ -41,6 +43,7 @@ export default function TruckParkingScreen() {
   const [spots, setSpots] = useState<ParkingSpot[]>([]);
   const [error, setError] = useState<string>('');
   const [expandedSpots, setExpandedSpots] = useState(new Set<number>());
+  const [entitlementMissing, setEntitlementMissing] = useState(false);
 
 
 
@@ -58,19 +61,28 @@ export default function TruckParkingScreen() {
     setLoading(true);
     setSpots([]);
     setError('');
+    setEntitlementMissing(false);
+
     try {
       const resp = await axios.post(buildUrl('truck-parking/search'), {
         latitude: parsedLat,
         longitude: parsedLon,
         radius_miles: parseInt(searchRadius, 10),
+        subscription_id: accessToken,
       });
-      setSpots(resp.data.spots || []);
-      if (resp.data.spots && resp.data.spots.length === 0) {
+      const results = extractResultArray(resp.data, 'spots') as ParkingSpot[];
+      setSpots(results);
+      if (results.length === 0) {
         setError('No truck parking found in this area. Try increasing the search radius.');
       }
     } catch (err: any) {
       console.error('Truck parking search error:', err);
-      setError(err?.response?.data?.detail || 'Failed to find truck parking. Tap to retry.');
+      const classified = classifyPremiumError(err, 'Failed to find truck parking. Tap to retry.');
+      if (classified.kind === 'entitlement') {
+        setEntitlementMissing(true);
+      } else {
+        setError(classified.message);
+      }
     } finally {
       setLoading(false);
     }
@@ -177,6 +189,15 @@ export default function TruckParkingScreen() {
             message={'ℹ️ To keep subscription costs low, we use free mapping data. Some locations may show as "Store" or generic names. When you tap "Directions" and open in Google Maps, the full business name will appear at your destination.'}
             style={{ marginTop: 12, marginBottom: 8 }}
           />
+
+          {entitlementMissing ? (
+            <View style={styles.errorBox}>
+              <Ionicons name="alert-circle" size={20} color="#f59e0b" />
+              <Text style={styles.errorText}>
+                Access unavailable — your session may have expired. Please sign out and back in.
+              </Text>
+            </View>
+          ) : null}
 
           {error ? (
             <TouchableOpacity style={styles.errorBox} onPress={searchParking}>

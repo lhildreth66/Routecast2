@@ -8,6 +8,8 @@ import { API_BASE, buildUrl } from '../lib/apiConfig';
 import InfoBanner from '../lib/components/InfoBanner';
 import { useLocationSearch } from '../lib/useLocationSearch';
 import LocationSearchBox from '../lib/components/LocationSearchBox';
+import { useAuth } from '../contexts/AuthContext';
+import { classifyPremiumError, extractResultArray } from './utils/premiumScreenErrors';
 
 interface DumpStation {
   name: string;
@@ -30,6 +32,7 @@ interface DumpStation {
 
 export default function DumpStationScreen() {
   const router = useRouter();
+  const { accessToken } = useAuth();
 
   // ── Location (manual search + explicit GPS only) ────────────────────
   const {
@@ -46,6 +49,7 @@ export default function DumpStationScreen() {
   const [stations, setStations] = useState<DumpStation[]>([]);
   const [error, setError] = useState<string>('');
   const [expandedStations, setExpandedStations] = useState(new Set<number>());
+  const [entitlementMissing, setEntitlementMissing] = useState(false);
 
 
   const useCurrentLocation = async () => {
@@ -62,19 +66,28 @@ export default function DumpStationScreen() {
     setLoading(true);
     setStations([]);
     setError('');
+    setEntitlementMissing(false);
+
     try {
       const resp = await axios.post(buildUrl('dump-stations/search'), {
         latitude: parsedLat,
         longitude: parsedLon,
         radius_miles: parseInt(searchRadius, 10),
+        subscription_id: accessToken,
       });
-      setStations(resp.data.stations || []);
-      if (resp.data.stations && resp.data.stations.length === 0) {
+      const results = extractResultArray(resp.data, 'stations') as DumpStation[];
+      setStations(results);
+      if (results.length === 0) {
         setError('No dump stations found in this area. Try increasing the search radius.');
       }
     } catch (err: any) {
       console.error('Dump station search error:', err);
-      setError(err?.response?.data?.detail || err?.message || 'Failed to find dump stations. Tap to retry.');
+      const classified = classifyPremiumError(err, 'Failed to find dump stations. Tap to retry.');
+      if (classified.kind === 'entitlement') {
+        setEntitlementMissing(true);
+      } else {
+        setError(classified.message);
+      }
     } finally {
       setLoading(false);
     }
@@ -160,6 +173,15 @@ export default function DumpStationScreen() {
             message={'ℹ️ To keep subscription costs low, we use free mapping data. Some locations may show as "Store" or generic names. When you tap "Directions" and open in Google Maps, the full business name will appear at your destination.'}
             style={{ marginTop: 12, marginBottom: 8 }}
           />
+
+          {entitlementMissing ? (
+            <View style={styles.errorBox}>
+              <Ionicons name="alert-circle" size={20} color="#f59e0b" />
+              <Text style={styles.errorText}>
+                Access unavailable — your session may have expired. Please sign out and back in.
+              </Text>
+            </View>
+          ) : null}
 
           {error ? (
             <View style={styles.errorBox}>

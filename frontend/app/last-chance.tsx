@@ -8,6 +8,8 @@ import { API_BASE, buildUrl } from '../lib/apiConfig';
 import InfoBanner from '../lib/components/InfoBanner';
 import { useLocationSearch } from '../lib/useLocationSearch';
 import LocationSearchBox from '../lib/components/LocationSearchBox';
+import { useAuth } from '../contexts/AuthContext';
+import { classifyLastChanceError, extractSupplies } from './utils/lastChanceErrors';
 
 interface SupplyPoint {
   name: string;
@@ -31,6 +33,7 @@ interface SupplyPoint {
 
 export default function LastChanceScreen() {
   const router = useRouter();
+  const { accessToken } = useAuth();
 
   // ── Location (manual search + explicit GPS only) ────────────────────
   const {
@@ -47,6 +50,7 @@ export default function LastChanceScreen() {
   const [error, setError] = useState<string>('');
   const [expandedSupplies, setExpandedSupplies] = useState(new Set<number>());
   const [filterType, setFilterType] = useState<'all' | 'grocery' | 'propane' | 'hardware'>('all');
+  const [entitlementMissing, setEntitlementMissing] = useState(false);
 
 
   const useCurrentLocation = async () => {
@@ -60,19 +64,28 @@ export default function LastChanceScreen() {
       setError('Please enter a location or tap "Use My Location" before searching.');
       return;
     }
+
     setLoading(true);
     setSupplies([]);
     setError('');
+    setEntitlementMissing(false);
+
     try {
       const resp = await axios.post(buildUrl('last-chance/search'), {
         latitude: parsedLat,
         longitude: parsedLon,
         radius_miles: parseInt(searchRadius, 10),
+        subscription_id: accessToken,
       });
-      setSupplies(resp.data.supplies || []);
+      setSupplies(extractSupplies(resp.data) as SupplyPoint[]);
     } catch (err: any) {
       console.error('Last chance search error:', err);
-      setError(err?.response?.data?.detail || err?.message || 'Failed to find supply points');
+      const classified = classifyLastChanceError(err);
+      if (classified.kind === 'entitlement') {
+        setEntitlementMissing(true);
+      } else {
+        setError(classified.message);
+      }
     } finally {
       setLoading(false);
     }
@@ -180,6 +193,15 @@ export default function LastChanceScreen() {
             message={'ℹ️ To keep subscription costs low, we use free mapping data. Some locations may show as "Store" or generic names. When you tap "Directions" and open in Google Maps, the full business name will appear at your destination.'}
             style={{ marginTop: 12, marginBottom: 8 }}
           />
+
+          {entitlementMissing ? (
+            <View style={styles.errorBox}>
+              <Ionicons name="alert-circle" size={20} color="#f59e0b" />
+              <Text style={styles.errorText}>
+                Access unavailable — your session may have expired. Please sign out and back in.
+              </Text>
+            </View>
+          ) : null}
 
           {error ? (
             <View style={styles.errorBox}>
