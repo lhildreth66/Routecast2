@@ -21,6 +21,7 @@ import * as Speech from 'expo-speech';
 import { format, parseISO } from 'date-fns';
 import axios from 'axios';
 import { WebView } from 'react-native-webview';
+import { resolveRoutePointCondition } from './utils/routeCondition';
 
 const API_BASE = process.env.EXPO_PUBLIC_BACKEND_URL || '';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -786,116 +787,16 @@ export default function RouteScreen() {
             <Text style={styles.sectionTitle}>🛣️ Road Conditions Along Route</Text>
             <Text style={styles.sectionSubtitle}>Weather-based road surface conditions</Text>
             {routeData.waypoints.map((wp, index) => {
-              // Derive road condition from weather ONLY (no alerts shown here)
-              const temp = wp.weather?.temperature || 50;
-              const conditions = (wp.weather?.conditions || '').toLowerCase();
-              const windSpeed = wp.weather?.wind_speed ? parseInt(wp.weather.wind_speed) : 0;
-              
-              let condIcon = '✓';
-              let condLabel = 'DRY';
-              let condColor = '#22c55e';
-              let condDesc = 'Clear';
-              let roadSurface = 'Normal driving conditions';
-              
-              // Road conditions based ONLY on weather - NO alerts here
-              if (temp <= 32 && (conditions.includes('rain') || conditions.includes('freezing') || conditions.includes('drizzle'))) {
-                condIcon = '🧊';
-                condLabel = 'ICY';
-                condColor = '#ef4444';
-                condDesc = `Black ice likely`;
-                roadSurface = `${temp}°F - Reduce speed significantly`;
-              } else if (temp <= 32 && conditions.includes('snow')) {
-                condIcon = '❄️';
-                condLabel = 'SNOW';
-                condColor = '#60a5fa';
-                condDesc = `Snow-covered`;
-                roadSurface = `${temp}°F - Use caution`;
-              } else if (temp > 32 && temp <= 40 && conditions.includes('snow')) {
-                condIcon = '🌨️';
-                condLabel = 'SLUSH';
-                condColor = '#f59e0b';
-                condDesc = `Slushy`;
-                roadSurface = `${temp}°F - Reduced traction`;
-              } else if (conditions.includes('fog') || conditions.includes('mist')) {
-                condIcon = '🌫️';
-                condLabel = 'FOG';
-                condColor = '#9ca3af';
-                condDesc = 'Low visibility';
-                roadSurface = 'Use low beams';
-              } else if (conditions.includes('rain') || conditions.includes('shower') || conditions.includes('drizzle')) {
-                condIcon = '💧';
-                condLabel = 'WET';
-                condColor = '#3b82f6';
-                condDesc = 'Wet roads';
-                roadSurface = 'Watch for hydroplaning';
-              } else if (conditions.includes('thunder') || conditions.includes('storm')) {
-                condIcon = '⛈️';
-                condLabel = 'STORM';
-                condColor = '#7c3aed';
-                condDesc = 'Storm conditions';
-                roadSurface = 'Heavy rain possible';
-              }
-              
-              // Check wp.alerts for NWS hazard alerts at this waypoint
-              const waypointAlerts = (wp.alerts || []) as any[];
-              const hazardAlert = waypointAlerts.find((a: any) => {
-                const ev = ((a.event || '') + ' ' + (a.headline || '')).toLowerCase();
-                return (
-                  ev.includes('flood') ||
-                  ev.includes('ice') ||
-                  ev.includes('freezing') ||
-                  ev.includes('winter') ||
-                  ev.includes('blizzard') ||
-                  ev.includes('tornado') ||
-                  ev.includes('severe') ||
-                  ev.includes('sleet') ||
-                  ev.includes('hail') ||
-                  ev.includes('high wind') ||
-                  ev.includes('dust storm')
-                );
-              });
-
-              // If weather shows DRY but an NWS hazard alert is active, upgrade the card state
-              if (hazardAlert && condLabel === 'DRY') {
-                const ev = (hazardAlert.event || '').toLowerCase();
-                if (ev.includes('flood')) {
-                  condIcon = '🌊';
-                  condLabel = 'FLOOD';
-                  condColor = '#dc2626';
-                  condDesc = 'Flooding reported';
-                  roadSurface = hazardAlert.event || 'NWS Flood Alert active';
-                } else if (ev.includes('ice') || ev.includes('freezing') || ev.includes('sleet')) {
-                  condIcon = '🧊';
-                  condLabel = 'ICY';
-                  condColor = '#ef4444';
-                  condDesc = 'Ice conditions reported';
-                  roadSurface = hazardAlert.event || 'NWS Winter Alert active';
-                } else if (ev.includes('blizzard') || ev.includes('winter') || ev.includes('snow')) {
-                  condIcon = '❄️';
-                  condLabel = 'SNOW';
-                  condColor = '#60a5fa';
-                  condDesc = 'Winter conditions reported';
-                  roadSurface = hazardAlert.event || 'NWS Winter Alert active';
-                } else if (ev.includes('tornado') || ev.includes('severe')) {
-                  condIcon = '🌪️';
-                  condLabel = 'SEVERE';
-                  condColor = '#7c3aed';
-                  condDesc = 'Severe weather alert';
-                  roadSurface = hazardAlert.event || 'NWS Severe Alert active';
-                } else if (ev.includes('high wind') || ev.includes('dust storm')) {
-                  condIcon = '💨';
-                  condLabel = 'WIND';
-                  condColor = '#f59e0b';
-                  condDesc = 'Hazardous wind alert';
-                  roadSurface = hazardAlert.event || 'NWS Wind Alert active';
-                } else {
-                  condIcon = '⚠️';
-                  condLabel = 'ALERT';
-                  condColor = '#f59e0b';
-                  condDesc = 'Weather alert active';
-                  roadSurface = hazardAlert.event || 'NWS Alert active';
-                }
-              }
+              // Single source of truth: alerts checked first, then weather.
+              // resolveRoutePointCondition mirrors backend derive_road_condition priority.
+              const {
+                condIcon,
+                condLabel,
+                condColor,
+                condDesc,
+                roadSurface,
+                hazardAlert,
+              } = resolveRoutePointCondition(wp);
 
               const mileMarker = Math.round(wp.waypoint.distance_from_start || 0);
               const locationName = wp.waypoint.name || 'Unknown';
