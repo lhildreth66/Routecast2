@@ -64,6 +64,13 @@ export default function CasinosScreen() {
   };
 
   const searchCasinos = async () => {
+    const parsedLat = parseFloat(latitude);
+    const parsedLon = parseFloat(longitude);
+    if (isNaN(parsedLat) || isNaN(parsedLon)) {
+      setError('Please enter a location or tap "Use My Location" before searching.');
+      return;
+    }
+
     setLoading(true);
     setSpots([]);
     setError('');
@@ -71,8 +78,8 @@ export default function CasinosScreen() {
     setOverpassUnavailable(false);
     try {
       const resp = await axios.post(buildUrl('casinos/search'), {
-        latitude: parseFloat(latitude),
-        longitude: parseFloat(longitude),
+        latitude: parsedLat,
+        longitude: parsedLon,
         radius_miles: parseInt(searchRadius, 10),
       });
       const data = resp.data || {};

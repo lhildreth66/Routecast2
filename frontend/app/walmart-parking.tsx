@@ -59,6 +59,13 @@ export default function WalmartParkingScreen() {
   };
 
   const searchWalmart = async () => {
+    const parsedLat = parseFloat(latitude);
+    const parsedLon = parseFloat(longitude);
+    if (isNaN(parsedLat) || isNaN(parsedLon)) {
+      setError('Please enter a location or tap "Use My Location" before searching.');
+      return;
+    }
+
     const startedAt = Date.now();
     const controller = new AbortController();
     // Guard against a stuck request that would leave the spinner active forever
@@ -83,8 +90,8 @@ export default function WalmartParkingScreen() {
       const resp = await axios.post(
         buildUrl('walmart-parking/search'),
         {
-          latitude: parseFloat(latitude),
-          longitude: parseFloat(longitude),
+          latitude: parsedLat,
+          longitude: parsedLon,
           radius_miles: parseInt(searchRadius, 10),
         },
         { signal: controller.signal }
