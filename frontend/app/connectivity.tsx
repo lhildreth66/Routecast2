@@ -175,7 +175,7 @@ export default function ConnectivityScreen() {
                   {(['att', 'verizon', 'tmobile'] as const).map((c) => (
                     <TouchableOpacity
                       key={c}
-                      onPress={() => setCarrier(c)}
+                      onPress={() => { setCarrier(c); setCellResult(null); setCellResultData(null); }}
                       style={[styles.carrierBtn, carrier === c && styles.carrierBtnActive]}
                     >
                       <Text style={[styles.carrierText, carrier === c && styles.carrierTextActive]}>
@@ -201,6 +201,7 @@ export default function ConnectivityScreen() {
                       </View>
                       <Text style={styles.resultExplanation}>{cellResultData.explanation}</Text>
                       <Text style={styles.carrierInfo}>Carrier: {cellResultData.carrier.toUpperCase()}</Text>
+                      <Text style={styles.disclaimerText}>⚠️ Heuristic estimate based on carrier coverage patterns. For exact coverage check your carrier's map.</Text>
                     </>
                   )}
                   {!cellResultData && <Text style={styles.result}>{cellResult}</Text>}
@@ -318,6 +319,7 @@ const styles = StyleSheet.create({
   signalProb: { color: '#9ca3af', fontSize: 14, marginTop: 4 },
   resultExplanation: { color: '#d4d4d8', fontSize: 14, lineHeight: 20 },
   carrierInfo: { color: '#9ca3af', fontSize: 12, fontStyle: 'italic' },
+  disclaimerText: { color: '#6b7280', fontSize: 11, marginTop: 8, lineHeight: 15 },
   riskBox: { backgroundColor: '#1f2937', borderRadius: 8, padding: 16, alignItems: 'center', borderWidth: 2 },
   riskLabel: { color: '#9ca3af', fontSize: 12, marginBottom: 4 },
   riskValue: { color: '#fff', fontSize: 24, fontWeight: '800' },

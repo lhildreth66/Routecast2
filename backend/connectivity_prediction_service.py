@@ -113,19 +113,23 @@ def cell_bars_probability(
     prob = max(0.0, min(1.0, prob))  # Clamp to [0.0, 1.0]
     
     # Estimate bar count from probability
-    if prob >= 0.8:
+    # Thresholds tuned to the realistic range produced by the distance/terrain heuristic:
+    # < 2 mi, low terrain  → 3+ bars; 2-5 mi moderate → 2-3 bars;
+    # 5-9 mi / high terrain → 1-2 bars; > 10 mi remote → possible no signal
+    if prob >= 0.65:
         bar_estimate = "3+ bars"
-    elif prob >= 0.6:
+    elif prob >= 0.45:
         bar_estimate = "2-3 bars"
-    elif prob >= 0.3:
+    elif prob >= 0.22:
         bar_estimate = "1-2 bars"
     else:
         bar_estimate = "no signal"
     
-    # Explanation
+    # Explanation (distance converted to miles for US audience)
     reasons = []
-    if distance > 5:
-        reasons.append(f"tower {distance:.1f} km away")
+    if distance > 3:  # > ~1.9 miles
+        distance_mi = distance * 0.621371
+        reasons.append(f"tower ~{distance_mi:.1f} mi away")
     if obstruction >= 50:
         reasons.append(f"significant terrain obstruction {obstruction}%")
     
@@ -220,58 +224,50 @@ def _haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> f
 
 def _lookup_nearest_tower(lat: float, lon: float, carrier: str) -> Optional[float]:
     """
-    Look up nearest cell tower for given carrier near coordinates.
-    Uses OpenCellID database (free, no API key needed for basic queries).
-    
+    Estimate nearest cell tower distance using carrier-specific rural heuristics.
+
+    Carrier base distances reflect real-world rural footprint differences:
+    - Verizon: 700/850 MHz LTE gives longest rural range; densest rural tower deployment
+    - AT&T: Good rural coverage via FirstNet/850 MHz; slightly further than Verizon
+    - T-Mobile: Excellent in cities and suburbs; notable rural gaps in remote areas
+
+    A coordinate-derived variation (±4 km) gives meaningful location-sensitivity
+    across the full signal spectrum without requiring a live tower database.
+
     Args:
         lat: Latitude
         lon: Longitude
         carrier: Carrier name (verizon, att, tmobile)
-    
+
     Returns:
         Distance to nearest tower in kilometers, or None if lookup fails
     """
-    # Map our carrier names to MCC/MNC codes for US carriers
-    # MCC 310/311 = USA
-    carrier_mnc_map = {
-        "verizon": ["004", "010", "012", "013"],  # Verizon Wireless
-        "att": ["070", "080", "090", "150", "170", "280", "380", "410"],  # AT&T
-        "tmobile": ["026", "160", "200", "210", "220", "230", "240", "250", "260", "270", "310", "490", "660", "800"],  # T-Mobile
+    # Carrier-specific base distances (km) for rural/boondocking contexts
+    carrier_base_km: dict = {
+        "verizon": 5.5,   # Best rural coverage in the US
+        "att":     7.5,   # Good rural, slightly behind Verizon
+        "tmobile": 11.0,  # Strong in cities, weakest in remote rural areas
+        "unknown": 8.0,   # Conservative mid-point
     }
-    
-    if carrier not in carrier_mnc_map:
-        # Unknown carrier - estimate moderate distance
-        logger.warning(f"Unknown carrier {carrier}, using default tower distance")
-        return 5.0  # Default to 5km
-    
-    try:
-        # Use OpenCellID API to find nearby towers
-        # Note: This is a simplified approach. In production, you'd want to:
-        # 1. Cache tower locations locally
-        # 2. Use a proper API key
-        # 3. Handle rate limits
-        
-        # For now, we'll use a heuristic based on population density
-        # Rural areas: 5-15km to tower
-        # Suburban: 2-5km
-        # Urban: 0.5-2km
-        
-        # Simple heuristic: assume rural boondocking location
-        # This can be enhanced with actual tower database lookup
-        base_distance = 8.0  # km, typical rural tower spacing
-        
-        # Add some variation based on coordinates (deterministic but location-aware)
-        coord_hash = (abs(int(lat * 1000)) + abs(int(lon * 1000))) % 10
-        distance_variation = (coord_hash - 5) * 0.5  # -2.5 to +2.5 km
-        
-        estimated_distance = base_distance + distance_variation
-        
-        logger.info(f"Estimated tower distance for {carrier} at ({lat}, {lon}): {estimated_distance:.1f} km")
-        return max(0.5, estimated_distance)  # Minimum 0.5km
-        
-    except Exception as e:
-        logger.error(f"Error looking up tower location: {e}")
-        return 5.0  # Default fallback
+
+    carrier_norm = (carrier or "unknown").strip().lower()
+    if carrier_norm not in carrier_base_km:
+        carrier_norm = "unknown"
+
+    base_distance = carrier_base_km[carrier_norm]
+
+    # Location-aware variation: ±4 km swing (deterministic, coordinate-sensitive)
+    # Uses a wider hash range than before so the full signal spectrum is reachable
+    coord_hash = (abs(int(lat * 1000)) * 31 + abs(int(lon * 1000)) * 17) % 80
+    distance_variation = (coord_hash / 10.0) - 4.0  # -4.0 to +4.0 km
+
+    estimated_distance = max(0.5, base_distance + distance_variation)
+
+    logger.info(
+        "Estimated tower distance for %s at (%.4f, %.4f): %.1f km (%.1f mi)",
+        carrier_norm, lat, lon, estimated_distance, estimated_distance * 0.621371,
+    )
+    return estimated_distance
 
 
 def _estimate_terrain_obstruction(lat: float, lon: float) -> int:
@@ -343,8 +339,10 @@ def predict_cell_signal_at_location(lat: float, lon: float, carrier: str) -> Cel
     # Use existing probability calculation
     result = cell_bars_probability(carrier, tower_distance_km, terrain_obstruction)
     
-    # Enhance explanation with location context
-    enhanced_explanation = f"{result.explanation} at ({lat:.4f}, {lon:.4f}); est. tower {tower_distance_km:.1f}km, terrain {terrain_obstruction}%"
+    # Enhance explanation with location context (tower dist already in result.explanation)
+    enhanced_explanation = (
+        f"{result.explanation}; terrain est. {terrain_obstruction}% obstruction"
+    )
     
     return CellProbabilityResult(
         carrier=result.carrier,
