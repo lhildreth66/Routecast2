@@ -836,6 +836,67 @@ export default function RouteScreen() {
                 roadSurface = 'Heavy rain possible';
               }
               
+              // Check wp.alerts for NWS hazard alerts at this waypoint
+              const waypointAlerts = (wp.alerts || []) as any[];
+              const hazardAlert = waypointAlerts.find((a: any) => {
+                const ev = ((a.event || '') + ' ' + (a.headline || '')).toLowerCase();
+                return (
+                  ev.includes('flood') ||
+                  ev.includes('ice') ||
+                  ev.includes('freezing') ||
+                  ev.includes('winter') ||
+                  ev.includes('blizzard') ||
+                  ev.includes('tornado') ||
+                  ev.includes('severe') ||
+                  ev.includes('sleet') ||
+                  ev.includes('hail') ||
+                  ev.includes('high wind') ||
+                  ev.includes('dust storm')
+                );
+              });
+
+              // If weather shows DRY but an NWS hazard alert is active, upgrade the card state
+              if (hazardAlert && condLabel === 'DRY') {
+                const ev = (hazardAlert.event || '').toLowerCase();
+                if (ev.includes('flood')) {
+                  condIcon = '🌊';
+                  condLabel = 'FLOOD';
+                  condColor = '#dc2626';
+                  condDesc = 'Flooding reported';
+                  roadSurface = hazardAlert.event || 'NWS Flood Alert active';
+                } else if (ev.includes('ice') || ev.includes('freezing') || ev.includes('sleet')) {
+                  condIcon = '🧊';
+                  condLabel = 'ICY';
+                  condColor = '#ef4444';
+                  condDesc = 'Ice conditions reported';
+                  roadSurface = hazardAlert.event || 'NWS Winter Alert active';
+                } else if (ev.includes('blizzard') || ev.includes('winter') || ev.includes('snow')) {
+                  condIcon = '❄️';
+                  condLabel = 'SNOW';
+                  condColor = '#60a5fa';
+                  condDesc = 'Winter conditions reported';
+                  roadSurface = hazardAlert.event || 'NWS Winter Alert active';
+                } else if (ev.includes('tornado') || ev.includes('severe')) {
+                  condIcon = '🌪️';
+                  condLabel = 'SEVERE';
+                  condColor = '#7c3aed';
+                  condDesc = 'Severe weather alert';
+                  roadSurface = hazardAlert.event || 'NWS Severe Alert active';
+                } else if (ev.includes('high wind') || ev.includes('dust storm')) {
+                  condIcon = '💨';
+                  condLabel = 'WIND';
+                  condColor = '#f59e0b';
+                  condDesc = 'Hazardous wind alert';
+                  roadSurface = hazardAlert.event || 'NWS Wind Alert active';
+                } else {
+                  condIcon = '⚠️';
+                  condLabel = 'ALERT';
+                  condColor = '#f59e0b';
+                  condDesc = 'Weather alert active';
+                  roadSurface = hazardAlert.event || 'NWS Alert active';
+                }
+              }
+
               const mileMarker = Math.round(wp.waypoint.distance_from_start || 0);
               const locationName = wp.waypoint.name || 'Unknown';
               
@@ -861,6 +922,13 @@ export default function RouteScreen() {
                       </Text>
                     </View>
                   </View>
+                  {hazardAlert && (
+                    <View style={styles.alertBadgeRow}>
+                      <Text style={styles.alertBadgeText}>
+                        ⚠️ NWS Alert: {hazardAlert.event || 'Weather Alert'}
+                      </Text>
+                    </View>
+                  )}
                 </View>
               );
             })}
@@ -1303,6 +1371,18 @@ const styles = StyleSheet.create({
   conditionCardExpanded: {
     borderWidth: 1,
     borderColor: '#fbbf24',
+  },
+  alertBadgeRow: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#3f3f46',
+    paddingHorizontal: 4,
+  },
+  alertBadgeText: {
+    color: '#fbbf24',
+    fontSize: 12,
+    fontWeight: '600',
   },
   conditionCardMain: {
     flexDirection: 'row',
