@@ -16,6 +16,7 @@ import * as IAP from 'expo-iap';
 import { useAuth } from '../contexts/AuthContext';
 import { useBilling } from './hooks/useBilling';
 import { buildUrl } from './apiConfig';
+import { runPostPurchaseFlow } from './utils/postPurchaseFlow';
 
 const GOOGLE_PLAY_URL = 'https://play.google.com/store/apps/details?id=com.routecast.app';
 const isWeb = Platform.OS === 'web';
@@ -184,40 +185,37 @@ export default function SubscriptionScreen() {
     console.log('[billing] CTA payload', { productId, basePlanId, offerToken });
     setVerifyError(null);
 
+    // billing.purchase() polls IAP.getAvailablePurchases() for the receipt token.
+    // On Android the purchaseUpdatedListener can acknowledge (finish) the transaction
+    // before the poll runs, causing getAvailablePurchases to return nothing for the
+    // new purchase.  runPostPurchaseFlow falls through to the restore path in that
+    // case, so the successful purchase is never silently dropped.
     const receipt = await billing.purchase(offerToken);
-    if (!receipt) {
-      return;
-    }
-
     setVerifyLoading(true);
-    try {
-      await verifyGooglePurchase(receipt);
-      await refreshUser();
-      router.replace('/account');
-    } catch (err: any) {
-      setVerifyError(err?.message ?? 'Unable to verify purchase with backend');
-    } finally {
-      setVerifyLoading(false);
-    }
-
-    if (!isAuthenticated) {
-      router.replace('/signup?postPurchase=1');
-    }
+    const { error } = await runPostPurchaseFlow(receipt, {
+      verifyWithReceipt: verifyGooglePurchase,
+      verifyWithRestore: verifyAllActiveGooglePurchases,
+      refreshUser,
+      navigate: () => router.replace('/'),
+    });
+    setVerifyLoading(false);
+    if (error) setVerifyError(error);
   };
 
   const handleRestore = async () => {
     setVerifyError(null);
     setVerifyLoading(true);
-    try {
-      await billing.restore();
-      await verifyAllActiveGooglePurchases();
-      await refreshUser();
-      router.replace('/account');
-    } catch (err: any) {
-      setVerifyError(err?.message ?? 'Unable to restore entitlement from backend');
-    } finally {
-      setVerifyLoading(false);
-    }
+    const { error } = await runPostPurchaseFlow(null, {
+      verifyWithReceipt: verifyGooglePurchase,
+      verifyWithRestore: async () => {
+        await billing.restore();
+        await verifyAllActiveGooglePurchases();
+      },
+      refreshUser,
+      navigate: () => router.replace('/'),
+    });
+    setVerifyLoading(false);
+    if (error) setVerifyError(error);
   };
 
   const isPremium = Boolean(user?.is_premium);
