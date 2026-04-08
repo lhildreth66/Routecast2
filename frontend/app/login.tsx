@@ -19,13 +19,35 @@ export default function LoginScreen() {
   // AuthProvider already gates children on hasHydrated, so by the time
   // this screen renders, hydration is always complete. The destructure
   // of hasHydrated is kept for the early-return below as a fallback.
-  const { login, hasHydrated } = useAuth();
+  const { login, hasHydrated, accessToken, user } = useAuth();
   const { verified, trial, email: emailParam } = useLocalSearchParams<{ verified?: string; trial?: string; email?: string }>();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [loginPending, setLoginPending] = useState(false);
+
+  // Navigate only once both accessToken and user are committed to React state.
+  // This prevents PaywallGuard from seeing user=null on the first render after
+  // navigating to '/', which could cause a spurious /subscription redirect.
+  useEffect(() => {
+    if (!loginPending || !accessToken || !user) return;
+    setLoginPending(false);
+    setLoading(false);
+    router.replace('/');
+  }, [loginPending, accessToken, user]);
+
+  // Safety timeout: if fetchUserProfile never resolves, unblock the UI.
+  useEffect(() => {
+    if (!loginPending) return;
+    const t = setTimeout(() => {
+      setLoginPending(false);
+      setLoading(false);
+      router.replace('/');
+    }, 5000);
+    return () => clearTimeout(t);
+  }, [loginPending]);
 
   useEffect(() => {
     if (!emailParam || email) return;
@@ -56,9 +78,8 @@ export default function LoginScreen() {
     __DEV__ && console.log('[auth] login() returned – success:', result.success, 'error:', result.error ?? 'none');
 
     if (result.success) {
-      __DEV__ && console.log('[auth] login success – navigating to /, PaywallGuard will redirect if unsubscribed');
-      setLoading(false);
-      router.replace('/');
+      __DEV__ && console.log('[auth] login success – waiting for user state commit before navigating');
+      setLoginPending(true);  // loading stays true; useEffect navigates once user is non-null
       return;
     }
 

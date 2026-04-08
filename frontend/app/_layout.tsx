@@ -1,6 +1,6 @@
 import { Stack, router, useRootNavigationState, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
@@ -38,30 +38,30 @@ const AUTH_ENTRY_ROUTES = new Set([
 ]);
 
 // Global paywall guard: renders null (never blocks Stack from mounting).
-// Fires once per session after user loads.
+// Re-evaluates on every relevant state change. Loop safety: shouldForcePaywall()
+// returns false when pathname is in PAYWALL_OPEN_ROUTES (which includes /subscription),
+// so redirecting to /subscription cannot cause a redirect loop.
 function PaywallGuard() {
   const { user, hasHydrated, isLoading: authLoading, accessToken } = useAuth();
   const rootNavState = useRootNavigationState();
   const pathname = usePathname();
-  const firedRef = useRef(false);
 
   useEffect(() => {
     if (!rootNavState?.key) return;
     if (!hasHydrated || authLoading) return;
 
     // Signed-out users are handled by NativeAuthGuard.
-    if (!accessToken) {
-      firedRef.current = false;
-      return;
-    }
+    if (!accessToken) return;
 
-    if (hasActiveSubscription(user)) { firedRef.current = false; return; } // reset when user pays
-    if (!user) { firedRef.current = false; return; } // wait for user to load before firing
-    if (firedRef.current) return;
+    // Wait for user object to be loaded before evaluating entitlement.
+    // PaywallGuard re-fires when user transitions from null → loaded.
+    if (!user) return;
+
+    // Subscribed users are never blocked.
+    if (hasActiveSubscription(user)) return;
 
     if (!shouldForcePaywall(pathname, accessToken, user)) return;
 
-    firedRef.current = true;
     __DEV__ && console.log('[paywall] blocking', pathname, '→ /subscription');
     router.replace('/subscription');
   }, [
