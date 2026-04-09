@@ -87,6 +87,30 @@ export default function SubscriptionScreen() {
   const billing = useBilling();
   const [verifyLoading, setVerifyLoading] = useState(false);
   const [verifyError, setVerifyError] = useState<string | null>(null);
+  const [purchasePending, setPurchasePending] = useState(false);
+
+  // Navigate only after React has committed user.is_premium = true.
+  // Without this, router.replace('/') fires while user.is_premium is still
+  // false in React state, causing PaywallGuard to immediately re-redirect
+  // back to /subscription before the entitlement state is reflected.
+  useEffect(() => {
+    if (!purchasePending) return;
+    const hasServerEntitlement = Boolean(user?.is_premium && user?.email_verified);
+    if (!hasServerEntitlement) return;
+    setPurchasePending(false);
+    router.replace('/');
+  }, [purchasePending, user?.is_premium, user?.email_verified]);
+
+  // Safety timeout: if /auth/me never returns the updated entitlement,
+  // unblock the UI after 10 seconds rather than leaving loading state stuck.
+  useEffect(() => {
+    if (!purchasePending) return;
+    const t = setTimeout(() => {
+      setPurchasePending(false);
+      router.replace('/');
+    }, 10000);
+    return () => clearTimeout(t);
+  }, [purchasePending]);
 
   const product = billing.products[0];
   const monthlyOffer = useMemo(() => selectOfferForBasePlan(product, 'monthly'), [product]);
@@ -196,7 +220,11 @@ export default function SubscriptionScreen() {
       verifyWithReceipt: verifyGooglePurchase,
       verifyWithRestore: verifyAllActiveGooglePurchases,
       refreshUser,
-      navigate: () => router.replace('/'),
+      // Deferred navigation: set purchasePending=true instead of navigating
+      // immediately. The purchasePending useEffect navigates only once
+      // user.is_premium is confirmed in React state, preventing PaywallGuard
+      // from evaluating stale entitlement on the pathname change.
+      navigate: () => setPurchasePending(true),
     });
     setVerifyLoading(false);
     if (error) setVerifyError(error);
@@ -212,7 +240,7 @@ export default function SubscriptionScreen() {
         await verifyAllActiveGooglePurchases();
       },
       refreshUser,
-      navigate: () => router.replace('/'),
+      navigate: () => setPurchasePending(true),
     });
     setVerifyLoading(false);
     if (error) setVerifyError(error);
