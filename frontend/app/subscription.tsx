@@ -17,6 +17,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useBilling } from './hooks/useBilling';
 import { buildUrl } from './apiConfig';
 import { runPostPurchaseFlow } from './utils/postPurchaseFlow';
+import { savePendingPurchase } from './utils/pendingPurchase';
 
 const GOOGLE_PLAY_URL = 'https://play.google.com/store/apps/details?id=com.routecast.app';
 const isWeb = Platform.OS === 'web';
@@ -215,6 +216,19 @@ export default function SubscriptionScreen() {
     // new purchase.  runPostPurchaseFlow falls through to the restore path in that
     // case, so the successful purchase is never silently dropped.
     const receipt = await billing.purchase(offerToken);
+
+    // Google Play completed but the user is not authenticated.
+    // Store the receipt so it can be verified immediately after login, then
+    // take the user to the login screen (step 8 of the required flow).
+    // Without this guard, verifyGooglePurchase() throws
+    // "Sign in is required before starting a trial/subscription." and the user
+    // is stuck on the subscription screen with an error (the reported bug).
+    if (!accessToken) {
+      await savePendingPurchase(receipt);
+      router.replace('/login');
+      return;
+    }
+
     setVerifyLoading(true);
     const { error } = await runPostPurchaseFlow(receipt, {
       verifyWithReceipt: verifyGooglePurchase,

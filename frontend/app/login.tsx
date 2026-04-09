@@ -14,12 +14,17 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useAuth } from '../contexts/AuthContext';
+import {
+  getPendingPurchase,
+  clearPendingPurchase,
+  verifyGooglePurchaseWithToken,
+} from './utils/pendingPurchase';
 
 export default function LoginScreen() {
   // AuthProvider already gates children on hasHydrated, so by the time
   // this screen renders, hydration is always complete. The destructure
   // of hasHydrated is kept for the early-return below as a fallback.
-  const { login, hasHydrated, accessToken, user } = useAuth();
+  const { login, hasHydrated, accessToken, user, refreshUser } = useAuth();
   const { verified, trial, email: emailParam } = useLocalSearchParams<{ verified?: string; trial?: string; email?: string }>();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -27,16 +32,82 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [loginPending, setLoginPending] = useState(false);
+  // verifyPending is true while a pre-login Google Play purchase is being
+  // verified post-login.  Navigation is deferred until is_premium commits.
+  const [verifyPending, setVerifyPending] = useState(false);
 
   // Navigate only once both accessToken and user are committed to React state.
-  // This prevents PaywallGuard from seeing user=null on the first render after
-  // navigating to '/', which could cause a spurious /subscription redirect.
+  // If the user completed a Google Play subscription before logging in
+  // (the email-verification deep-link flow), verify the stored receipt first
+  // so PaywallGuard sees is_premium=true before we navigate to '/'.
   useEffect(() => {
     if (!loginPending || !accessToken || !user) return;
     setLoginPending(false);
+
+    const runPendingPurchaseCheck = async () => {
+      const pending = await getPendingPurchase();
+
+      if (!pending) {
+        // No pending purchase — normal post-login navigation.
+        setLoading(false);
+        router.replace('/');
+        return;
+      }
+
+      await clearPendingPurchase();
+
+      if (!('purchaseToken' in pending)) {
+        // Purchase was acknowledged before the billing poll retrieved the token
+        // (rare). No receipt to verify — navigate normally; user can restore
+        // purchases manually from the subscription screen if needed.
+        setLoading(false);
+        router.replace('/');
+        return;
+      }
+
+      // A verifiable receipt exists. Verify with the backend and defer
+      // navigation until is_premium is confirmed in committed React state
+      // (verifyPending useEffect below). This prevents PaywallGuard from
+      // evaluating stale is_premium=false when router.replace('/') fires.
+      setVerifyPending(true);
+      try {
+        await verifyGooglePurchaseWithToken(accessToken, pending);
+        await refreshUser(); // schedules setUser({ is_premium: true })
+        // Do NOT navigate here — verifyPending useEffect navigates once
+        // user.is_premium is observed in committed React state.
+      } catch {
+        // Verification failed — unblock navigation; PaywallGuard will redirect
+        // to /subscription if the user still lacks entitlement.
+        setVerifyPending(false);
+        setLoading(false);
+        router.replace('/');
+      }
+    };
+
+    runPendingPurchaseCheck();
+  }, [loginPending, accessToken, user]);
+
+  // Deferred navigation after post-login purchase verification.
+  // Fires only once user.is_premium is committed to React state.
+  // Mirrors the purchasePending pattern in subscription.tsx.
+  useEffect(() => {
+    if (!verifyPending) return;
+    if (!user?.is_premium) return;
+    setVerifyPending(false);
     setLoading(false);
     router.replace('/');
-  }, [loginPending, accessToken, user]);
+  }, [verifyPending, user?.is_premium]);
+
+  // Safety timeout for post-login purchase verification.
+  useEffect(() => {
+    if (!verifyPending) return;
+    const t = setTimeout(() => {
+      setVerifyPending(false);
+      setLoading(false);
+      router.replace('/');
+    }, 10000);
+    return () => clearTimeout(t);
+  }, [verifyPending]);
 
   // Safety timeout: if fetchUserProfile never resolves, unblock the UI.
   useEffect(() => {
