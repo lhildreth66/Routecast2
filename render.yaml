@@ -29,7 +29,7 @@ services:
     name: routecast-frontend
     runtime: node
     rootDir: frontend
-    buildCommand: yarn install && npx expo export --platform web && cp public/push-sw.js dist/push-sw.js && echo '{"cleanUrls":true,"trailingSlash":false}' > dist/serve.json
+    buildCommand: yarn install && npx expo export --platform web && cp public/push-sw.js dist/push-sw.js
     startCommand: npx serve dist -l $PORT
     envVars:
       - key: EXPO_PUBLIC_BACKEND_URL
