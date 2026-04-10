@@ -50,7 +50,7 @@ const guideSections: GuideSection[] = [
       {
         name: 'Get Route Forecast',
         icon: 'cloud',
-        description: 'Tap "Get Route Forecast" to see weather conditions along your entire route with hourly breakdowns.',
+        description: 'Enter an origin and destination to see weather conditions along the entire route. Temperature, precipitation, wind speed, and road conditions are shown at each point. This is the core route-weather function.',
       }
     ]
   },
@@ -70,7 +70,7 @@ const guideSections: GuideSection[] = [
       {
         name: 'Weather Alerts',
         icon: 'warning',
-        description: 'Active NWS alerts along your route. Shows up to 10 alerts from the last 2 hours on your current route path.',
+        description: 'Receive NWS severe weather alerts for your route with no cap on the number of alerts you can receive. Alerts trigger when watches or warnings are active along your route path and refresh every 15 minutes.',
         tips: ['Red alerts = severe weather, consider delaying', 'Yellow alerts = caution, monitor conditions', 'Alerts auto-refresh every 15 minutes']
       },
       {
@@ -82,7 +82,7 @@ const guideSections: GuideSection[] = [
       {
         name: 'Weather Radar Map',
         icon: 'map',
-        description: 'Live precipitation radar overlay on your route map. See rain, snow, and storm cells in real-time.',
+        description: 'Advanced Weather includes a live precipitation radar overlay on your route map. View rain, snow, and storm cells in real-time with a timeline slider to see forecast movement ahead on your route.',
         tips: ['Pinch to zoom for detail', 'Radar updates every 5 minutes', 'Use timeline slider to see forecast movement']
       }
     ]
@@ -107,9 +107,14 @@ const guideSections: GuideSection[] = [
         tips: ['Tap the speaker icon on route screen', 'Includes hazard warnings in audio', 'Works with Bluetooth audio']
       },
       {
+        name: 'Route Monitoring',
+        icon: 'radio',
+        description: 'The app monitors your active route as you travel. Route conditions and weather update during the trip so you stay informed about changes without re-entering your route.',
+      },
+      {
         name: 'Push Notifications',
         icon: 'notifications',
-        description: 'Receive alerts when weather conditions change significantly along your saved routes. Get warned about severe weather before you hit it.',
+        description: 'Alerts can be sent as push notifications for important route and weather updates, including severe weather warnings when the app is running in the background.',
         tips: ['Enable notifications when prompted', 'Critical alerts for tornado/flash flood', 'Customize in device settings']
       },
     ]
@@ -150,7 +155,7 @@ const guideSections: GuideSection[] = [
     title: 'Boondockers Features',
     icon: 'bonfire',
     color: '#8b4513',
-    description: 'Complete toolkit for off-grid camping and RV living.',
+    description: 'Tools for off-grid camping and RV trips including free camping finder, dump station and water locator, last-chance supply finder, solar forecast, propane usage calculator, water budget planner, wind shelter advisor, connectivity checker, and campsite quality scoring.',
     features: [
       {
         name: 'Free Camping Finder',
@@ -224,7 +229,7 @@ const guideSections: GuideSection[] = [
     title: 'Tractor Trailer Features',
     icon: 'bus',
     color: '#3b82f6',
-    description: 'Professional tools designed for commercial truck drivers.',
+    description: 'Truck route tools including bridge height alerts, truck stop finder, weigh station locations, truck parking, truck services, and truck restriction information for weight, height, and hazmat routes.',
     features: [
       {
         name: 'Truck Stops & Fuel',
@@ -294,7 +299,7 @@ const guideSections: GuideSection[] = [
       {
         name: 'Share Routes',
         icon: 'share',
-        description: 'Share your route forecast with co-drivers or dispatch for coordinated planning.',
+        description: 'Share your route forecast to send route weather information to co-drivers or dispatch for coordinated trip planning.',
       }
     ]
   }

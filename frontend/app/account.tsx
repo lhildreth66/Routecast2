@@ -465,7 +465,7 @@ export default function AccountScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>YOUR FEATURES</Text>
             <View style={styles.card}>
-              {user.entitlements.map((entitlement, index) => (
+              {user.entitlements.filter(e => e !== 'ai_assistant').map((entitlement, index) => (
                 <React.Fragment key={entitlement}>
                   {index > 0 && <View style={styles.cardDivider} />}
                   <View style={styles.entitlementRow}>

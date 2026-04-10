@@ -295,20 +295,36 @@ export default function LandingPage() {
           <View style={styles.faqList}>
             {[
               {
-                q: 'Is RouteCast available on Android?',
-                a: 'Yes. Download the RouteCast app directly from Google Play to get the full experience on Android devices.'
+                q: 'What is Basic Route Weather?',
+                a: 'Enter an origin and destination to see weather conditions along the entire route. Temperature, precipitation, wind speed, and road conditions are shown at each point. This is the core route-weather function.'
               },
               {
-                q: 'How do I subscribe?',
-                a: 'All subscriptions and billing are handled securely in the Android app through Google Play. The website is informational only.'
+                q: 'What are Unlimited Alerts?',
+                a: 'Receive NWS severe weather alerts for your route with no cap on the number of alerts you can receive. Alerts trigger when watches or warnings are active along your route path and refresh every 15 minutes.'
               },
               {
-                q: 'Can I use RouteCast on the web?',
-                a: 'The web experience is a companion for information and support. For live forecasting and alerts, use the Android app.'
+                q: 'What is Route Monitoring?',
+                a: 'The app monitors your active route as you travel. Route conditions and weather update during the trip so you stay informed about changes without re-entering your route.'
               },
               {
-                q: 'How do I get support?',
-                a: 'Reach out through the Contact link and our team will help with account, billing, or product questions.'
+                q: 'How do Push Notifications work?',
+                a: 'Alerts can be sent as push notifications for important route and weather updates, including severe weather warnings when the app is running in the background.'
+              },
+              {
+                q: 'What is included in Advanced Weather?',
+                a: 'Advanced Weather includes a live precipitation radar overlay on your route map. View rain, snow, and storm cells in real-time with a timeline slider to see forecast movement ahead on your route.'
+              },
+              {
+                q: 'What are Truck Features?',
+                a: 'Truck route tools including bridge height alerts, truck stop finder, weigh station locations, truck parking, truck services, and truck restriction information for weight, height, and hazmat routes.'
+              },
+              {
+                q: 'What are Boondocking Features?',
+                a: 'Tools for off-grid camping and RV trips including free camping finder, dump station and water locator, last-chance supply finder, solar forecast, propane usage calculator, water budget planner, wind shelter advisor, connectivity checker, and campsite quality scoring.'
+              },
+              {
+                q: 'What is Export Routes?',
+                a: 'Share your route forecast to send route weather information to co-drivers or dispatch for coordinated trip planning.'
               }
             ].map((faq, index) => (
               <TouchableOpacity 
