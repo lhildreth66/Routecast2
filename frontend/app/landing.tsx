@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import {
   View,
   Text,
@@ -17,7 +17,6 @@ import { LinearGradient } from 'expo-linear-gradient';
 const GOOGLE_PLAY_URL = 'https://play.google.com/store/apps/details?id=com.routecast.app';
 
 export default function LandingPage() {
-  const [activeFaq, setActiveFaq] = useState<number | null>(null);
   const { width } = useWindowDimensions();
   const isWideScreen = width > 768;
   const isMobile = width <= 480;
@@ -29,10 +28,6 @@ export default function LandingPage() {
     }
 
     router.push('/signup');
-  };
-
-  const handleSignIn = () => {
-    router.push('/login');
   };
 
   const scrollToSection = (sectionId: string) => {
@@ -61,14 +56,11 @@ export default function LandingPage() {
               <TouchableOpacity onPress={() => scrollToSection('features')}>
                 <Text style={[styles.navLink, !isWideScreen && styles.navLinkMobile]}>Features</Text>
               </TouchableOpacity>
-              <TouchableOpacity onPress={() => scrollToSection('faq')}>
+              <TouchableOpacity onPress={() => router.push('/faq')}>
                 <Text style={[styles.navLink, !isWideScreen && styles.navLinkMobile]}>FAQ</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={() => router.push('/contact')}>
                 <Text style={[styles.navLink, !isWideScreen && styles.navLinkMobile]}>Contact</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.navSignInButton, !isWideScreen && styles.navSignInButtonMobile]} onPress={handleSignIn}>
-                <Text style={styles.navSignInText}>Sign In</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -104,15 +96,6 @@ export default function LandingPage() {
                 >
                   <Ionicons name="rocket" size={20} color="#0f0f0f" />
                   <Text style={styles.primaryCtaText}>{Platform.OS === 'web' ? 'Get it on Google Play' : 'Start Free Trial'}</Text>
-                </TouchableOpacity>
-                
-                <TouchableOpacity 
-                  style={styles.secondaryCta}
-                  onPress={handleSignIn}
-                  data-testid="hero-sign-in"
-                >
-                  <Ionicons name="log-in-outline" size={18} color="#eab308" />
-                  <Text style={styles.secondaryCtaText}>Sign In</Text>
                 </TouchableOpacity>
               </View>
 
@@ -288,66 +271,6 @@ export default function LandingPage() {
           </View>
         </View>
 
-        {/* FAQ Section */}
-        <View style={styles.faqSection} nativeID="faq">
-          <Text style={styles.sectionTitle}>Frequently Asked Questions</Text>
-          
-          <View style={styles.faqList}>
-            {[
-              {
-                q: 'What is Basic Route Weather?',
-                a: 'Enter an origin and destination to see weather conditions along the entire route. Temperature, precipitation, wind speed, and road conditions are shown at each point. This is the core route-weather function.'
-              },
-              {
-                q: 'What are Unlimited Alerts?',
-                a: 'Receive NWS severe weather alerts for your route with no cap on the number of alerts you can receive. Alerts trigger when watches or warnings are active along your route path and refresh every 15 minutes.'
-              },
-              {
-                q: 'What is Route Monitoring?',
-                a: 'The app monitors your active route as you travel. Route conditions and weather update during the trip so you stay informed about changes without re-entering your route.'
-              },
-              {
-                q: 'How do Push Notifications work?',
-                a: 'Alerts can be sent as push notifications for important route and weather updates, including severe weather warnings when the app is running in the background.'
-              },
-              {
-                q: 'What is included in Advanced Weather?',
-                a: 'Advanced Weather includes a live precipitation radar overlay on your route map. View rain, snow, and storm cells in real-time with a timeline slider to see forecast movement ahead on your route.'
-              },
-              {
-                q: 'What are Truck Features?',
-                a: 'Truck route tools including bridge height alerts, truck stop finder, weigh station locations, truck parking, truck services, and truck restriction information for weight, height, and hazmat routes.'
-              },
-              {
-                q: 'What are Boondocking Features?',
-                a: 'Tools for off-grid camping and RV trips including free camping finder, dump station and water locator, last-chance supply finder, solar forecast, propane usage calculator, water budget planner, wind shelter advisor, connectivity checker, and campsite quality scoring.'
-              },
-              {
-                q: 'What is Export Routes?',
-                a: 'Share your route forecast to send route weather information to co-drivers or dispatch for coordinated trip planning.'
-              }
-            ].map((faq, index) => (
-              <TouchableOpacity 
-                key={index}
-                style={styles.faqItem}
-                onPress={() => setActiveFaq(activeFaq === index ? null : index)}
-              >
-                <View style={styles.faqQuestion}>
-                  <Text style={styles.faqQuestionText}>{faq.q}</Text>
-                  <Ionicons 
-                    name={activeFaq === index ? 'chevron-up' : 'chevron-down'} 
-                    size={20} 
-                    color="#a1a1aa" 
-                  />
-                </View>
-                {activeFaq === index && (
-                  <Text style={styles.faqAnswer}>{faq.a}</Text>
-                )}
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-
         {/* Final CTA */}
         <View style={styles.finalCtaSection}>
           <LinearGradient
@@ -473,22 +396,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     paddingVertical: 2,
   },
-  navSignInButton: {
-    borderWidth: 1,
-    borderColor: '#eab308',
-    borderRadius: 999,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
-  navSignInButtonMobile: {
-    width: '100%',
-    alignItems: 'center',
-  },
-  navSignInText: {
-    color: '#fef3c7',
-    fontSize: 14,
-    fontWeight: '700',
-  },
 
   // Hero Section
   heroSection: {
@@ -587,22 +494,6 @@ const styles = StyleSheet.create({
     color: '#0f0f0f',
     fontSize: 16,
     fontWeight: '700',
-  },
-  secondaryCta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: 'transparent',
-    borderWidth: 2,
-    borderColor: '#eab308',
-    paddingHorizontal: 24,
-    paddingVertical: 14,
-    borderRadius: 12,
-  },
-  secondaryCtaText: {
-    color: '#eab308',
-    fontSize: 16,
-    fontWeight: '600',
   },
   learnMoreLink: {
     flexDirection: 'row',
@@ -857,43 +748,6 @@ const styles = StyleSheet.create({
     color: '#a1a1aa',
     fontSize: 14,
     lineHeight: 22,
-  },
-
-  // FAQ Section
-  faqSection: {
-    backgroundColor: '#141414',
-    paddingVertical: 80,
-    paddingHorizontal: 24,
-  },
-  faqList: {
-    maxWidth: 700,
-    marginHorizontal: 'auto',
-    gap: 12,
-  },
-  faqItem: {
-    backgroundColor: '#1a1a1a',
-    borderRadius: 12,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: '#27272a',
-  },
-  faqQuestion: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  faqQuestionText: {
-    color: '#ffffff',
-    fontSize: 15,
-    fontWeight: '600',
-    flex: 1,
-    paddingRight: 16,
-  },
-  faqAnswer: {
-    color: '#a1a1aa',
-    fontSize: 14,
-    lineHeight: 22,
-    marginTop: 12,
   },
 
   // Final CTA
