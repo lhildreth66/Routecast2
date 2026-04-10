@@ -1,4 +1,4 @@
-import { Stack, router, useRootNavigationState, usePathname } from 'expo-router';
+import { Stack, Slot, router, useRootNavigationState, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import * as Notifications from 'expo-notifications';
@@ -146,14 +146,11 @@ export default function RootLayout() {
       <WebGate />
       <NativeAuthGuard />
       <PaywallGuard />
-      <Stack
+      {Platform.OS === 'web' ? <Slot /> : <Stack
         screenOptions={{
           headerShown: false,
           contentStyle: { backgroundColor: '#0a0a0a' },
-          // 'slide_from_right' is not supported on web and causes Expo Router
-          // to generate undefined navigation keys (?__EXPO_ROUTER_key=undefined),
-          // which triggers a full page reload instead of SPA navigation.
-          animation: Platform.OS === 'web' ? 'none' : 'slide_from_right',
+          animation: 'slide_from_right',
         }}
       >
         <Stack.Screen name="landing" />
@@ -196,7 +193,7 @@ export default function RootLayout() {
         <Stack.Screen name="route-alerts" />
         <Stack.Screen name="weather-alerts" />
         <Stack.Screen name="how-to-use" />
-      </Stack>
+      </Stack>}
     </AuthProvider>
   );
 }

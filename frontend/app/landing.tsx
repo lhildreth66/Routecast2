@@ -11,7 +11,7 @@ import {
   useWindowDimensions,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, Link } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 
 const GOOGLE_PLAY_URL = 'https://play.google.com/store/apps/details?id=com.routecast.app';
@@ -56,12 +56,8 @@ export default function LandingPage() {
               <Text style={[styles.logoText, !isWideScreen && styles.logoTextMobile]}>RouteCast</Text>
             </View>
             <View style={[styles.navLinks, !isWideScreen && styles.navLinksMobile]}>
-              <TouchableOpacity onPress={() => router.push('/faq')}>
-                <Text style={[styles.navLink, !isWideScreen && styles.navLinkMobile]}>FAQ</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={() => router.push('/contact')}>
-                <Text style={[styles.navLink, !isWideScreen && styles.navLinkMobile]}>Contact</Text>
-              </TouchableOpacity>
+              <Link href="/faq" style={[styles.navLink, !isWideScreen && styles.navLinkMobile]}>FAQ</Link>
+              <Link href="/contact" style={[styles.navLink, !isWideScreen && styles.navLinkMobile]}>Contact</Link>
             </View>
           </View>
         </View>
