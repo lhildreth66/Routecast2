@@ -54,7 +54,7 @@ export function shouldForcePaywall(pathname: string, accessToken: string | null,
  * Everything else redirects to /landing on web.
  */
 export const WEB_ALLOWED_ROUTES = new Set([
-  '/landing', '/verify-email', '/terms', '/privacy', '/contact', '/welcome',
+  '/landing', '/faq', '/verify-email', '/terms', '/privacy', '/contact', '/welcome',
 ]);
 
 export function isWebAllowed(pathname: string): boolean {

@@ -1,4 +1,4 @@
-import { Stack, Slot, router, useRootNavigationState, usePathname } from 'expo-router';
+import { Stack, router, useRootNavigationState, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import * as Notifications from 'expo-notifications';
@@ -29,7 +29,7 @@ function WebGate() {
 }
 
 const UNAUTHED_OPEN_ROUTES = new Set([
-  '/landing', '/welcome', '/contact', '/privacy', '/terms', '/login', '/signup', '/forgot-password', '/reset-password', '/verify-email',
+  '/landing', '/faq', '/welcome', '/contact', '/privacy', '/terms', '/login', '/signup', '/forgot-password', '/reset-password', '/verify-email',
   '/subscription', // allow deep-link from email verification: routecast2://subscription
 ]);
 
@@ -146,11 +146,11 @@ export default function RootLayout() {
       <WebGate />
       <NativeAuthGuard />
       <PaywallGuard />
-      {Platform.OS === 'web' ? <Slot /> : <Stack
+      <Stack
         screenOptions={{
           headerShown: false,
           contentStyle: { backgroundColor: '#0a0a0a' },
-          animation: 'slide_from_right',
+          animation: Platform.OS === 'web' ? 'none' : 'slide_from_right',
         }}
       >
         <Stack.Screen name="landing" />
@@ -193,7 +193,7 @@ export default function RootLayout() {
         <Stack.Screen name="route-alerts" />
         <Stack.Screen name="weather-alerts" />
         <Stack.Screen name="how-to-use" />
-      </Stack>}
+      </Stack>
     </AuthProvider>
   );
 }
