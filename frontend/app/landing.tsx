@@ -53,9 +53,6 @@ export default function LandingPage() {
               <Text style={[styles.logoText, !isWideScreen && styles.logoTextMobile]}>RouteCast</Text>
             </View>
             <View style={[styles.navLinks, !isWideScreen && styles.navLinksMobile]}>
-              <TouchableOpacity onPress={() => scrollToSection('features')}>
-                <Text style={[styles.navLink, !isWideScreen && styles.navLinkMobile]}>Features</Text>
-              </TouchableOpacity>
               <TouchableOpacity onPress={() => router.push('/faq')}>
                 <Text style={[styles.navLink, !isWideScreen && styles.navLinkMobile]}>FAQ</Text>
               </TouchableOpacity>
