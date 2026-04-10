@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -17,9 +17,12 @@ import { LinearGradient } from 'expo-linear-gradient';
 const GOOGLE_PLAY_URL = 'https://play.google.com/store/apps/details?id=com.routecast.app';
 
 export default function LandingPage() {
+  const [mounted, setMounted] = useState(false);
   const { width } = useWindowDimensions();
-  const isWideScreen = width > 768;
-  const isMobile = width <= 480;
+  const isWideScreen = !mounted || width > 768;
+  const isMobile = mounted && width <= 480;
+
+  useEffect(() => { setMounted(true); }, []);
 
   const handleStartTrial = () => {
     if (Platform.OS === 'web') {
