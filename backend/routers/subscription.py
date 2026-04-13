@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 import os
 import asyncio
 import logging
+import json
+import base64
 
 # STRIPE DISABLED - Google Play submission - do not delete
 # import stripe
@@ -353,6 +355,169 @@ async def verify_google_purchase(
         expiration=result.get("expiration"),
         message=result["message"]
     )
+
+
+@router.post("/google/webhook")
+async def google_play_webhook(request: Request):
+    """
+    Handle Google Play Real-Time Developer Notifications (RTDN) via Pub/Sub push.
+    No authentication required — called by Google, not the app.
+    Always returns HTTP 200 to prevent Google from retrying.
+    """
+    db = get_db(request)
+
+    try:
+        body = await request.json()
+    except Exception:
+        logger.warning("[GOOGLE_WEBHOOK] Failed to parse request body as JSON")
+        return {"received": True}
+
+    message = body.get("message")
+    if not message:
+        logger.warning("[GOOGLE_WEBHOOK] No 'message' field in Pub/Sub payload")
+        return {"received": True}
+
+    raw_data = message.get("data", "")
+    if not raw_data:
+        logger.warning("[GOOGLE_WEBHOOK] Empty data field in Pub/Sub message")
+        return {"received": True}
+
+    try:
+        decoded = base64.b64decode(raw_data).decode("utf-8")
+        notification = json.loads(decoded)
+    except Exception as e:
+        logger.warning("[GOOGLE_WEBHOOK] Failed to decode/parse message.data: %s", e)
+        return {"received": True}
+
+    package_name = notification.get("packageName", "")
+    event_time_ms = notification.get("eventTimeMillis")
+
+    logger.info(
+        "[GOOGLE_WEBHOOK] received packageName=%s eventTimeMillis=%s keys=%s",
+        package_name,
+        event_time_ms,
+        list(notification.keys()),
+    )
+
+    # Test notification — acknowledge immediately, nothing to process
+    if "testNotification" in notification:
+        logger.info("[GOOGLE_WEBHOOK] testNotification received — acknowledged")
+        return {"received": True}
+
+    sub_notif = notification.get("subscriptionNotification")
+    if not sub_notif:
+        logger.warning(
+            "[GOOGLE_WEBHOOK] No subscriptionNotification or testNotification — ignored"
+        )
+        return {"received": True}
+
+    purchase_token = sub_notif.get("purchaseToken", "")
+    product_id = sub_notif.get("productId", "")
+    notification_type = sub_notif.get("notificationType")
+    token_preview = (
+        f"{purchase_token[:6]}...{purchase_token[-6:]}"
+        if len(purchase_token) > 12
+        else "<short>"
+    )
+
+    logger.info(
+        "[GOOGLE_WEBHOOK] subscriptionNotification notificationType=%s productId=%s token=%s",
+        notification_type,
+        product_id,
+        token_preview,
+    )
+
+    if not purchase_token or not product_id:
+        logger.warning("[GOOGLE_WEBHOOK] Missing purchaseToken or productId — ignored")
+        return {"received": True}
+
+    # Verify with Google BEFORE the user lookup so the response payload is
+    # available for linkedPurchaseToken chaining on renewal events.
+    result = await verify_google_receipt(
+        purchase_token,
+        product_id,
+        package_name or "com.routecast.app",
+    )
+
+    if not result.get("verified_with_google", False):
+        logger.warning(
+            "[GOOGLE_WEBHOOK] verify_google_receipt could not reach Google "
+            "error_code=%s productId=%s — skipping DB update",
+            result.get("error_code"),
+            product_id,
+        )
+        return {"received": True}
+
+    # Primary lookup: find user by the new purchase token.
+    existing_user = await db.users.find_one({"google_purchase_token": purchase_token})
+
+    if not existing_user:
+        # Renewal path: Google issues a new purchaseToken on each renewal cycle.
+        # The previous token is returned as linkedPurchaseToken in the
+        # subscriptionsv2 response. Walk one link in the chain to find the
+        # existing user record.
+        linked_token = result.get("linked_purchase_token")
+        if linked_token:
+            logger.info(
+                "[GOOGLE_WEBHOOK] token not found, retrying with linkedPurchaseToken token=%s",
+                f"{linked_token[:6]}...{linked_token[-6:]}" if len(linked_token) > 12 else "<short>",
+            )
+            existing_user = await db.users.find_one({"google_purchase_token": linked_token})
+
+    if not existing_user:
+        logger.warning(
+            "[GOOGLE_WEBHOOK] No user found for token or linkedPurchaseToken "
+            "productId=%s notificationType=%s",
+            product_id,
+            notification_type,
+        )
+        return {"received": True}
+
+    user_id = existing_user.get("user_id")
+    now = datetime.now(timezone.utc)
+    status = result.get("subscription_status", "inactive")
+    expiration = result.get("expiration")
+    plan = result.get("plan") or ("yearly" if "yearly" in product_id.lower() else "monthly")
+
+    update_data = {
+        "subscription_status": status,
+        "subscription_provider": "google",
+        "subscription_expiration": expiration,
+        # Always write the current (newest) token so future renewals chain correctly.
+        "google_purchase_token": purchase_token,
+        "updated_at": now,
+    }
+
+    if result["valid"]:
+        update_data["is_premium"] = status in ["trialing", "active", "canceling"]
+        update_data["subscription_plan"] = plan
+        if status == "trialing":
+            update_data["trial_used"] = True
+            if expiration:
+                update_data["trial_end"] = expiration
+            if not existing_user.get("trial_start"):
+                update_data["trial_start"] = now
+    else:
+        update_data["is_premium"] = False
+        update_data["subscription_plan"] = "free"
+        update_data["trial_end"] = None
+        update_data["trial_start"] = None
+
+    await db.users.update_one({"user_id": user_id}, {"$set": update_data})
+
+    logger.info(
+        "[GOOGLE_WEBHOOK] persisted user_id=%s valid=%s status=%s plan=%s "
+        "is_premium=%s notificationType=%s token_updated=%s",
+        user_id,
+        result.get("valid"),
+        status,
+        update_data.get("subscription_plan"),
+        update_data.get("is_premium"),
+        notification_type,
+        purchase_token != existing_user.get("google_purchase_token"),
+    )
+
+    return {"received": True}
 
 
 @router.post("/portal")

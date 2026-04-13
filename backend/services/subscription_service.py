@@ -728,6 +728,7 @@ async def verify_google_receipt(purchase_token: str, product_id: str, package_na
         "plan": plan if entitled else "free",
         "verified_with_google": True,
         "error_code": None,
+        "linked_purchase_token": payload.get("linkedPurchaseToken"),
     }
 
 

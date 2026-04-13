@@ -626,20 +626,3 @@ async def apple_webhook(request: Request):
         logger.error(f"Apple webhook error: {e}")
         return {"received": True}
 
-
-@router.post("/google")
-async def google_webhook(request: Request):
-    """Handle Google Play Real-time Developer Notifications"""
-    db = request.app.state.db
-    
-    try:
-        body = await request.body()
-        payload = json.loads(body)
-        logger.info("Google webhook received")
-        
-        # TODO: Implement Google Play RTDN handling
-        return {"received": True}
-        
-    except Exception as e:
-        logger.error(f"Google webhook error: {e}")
-        return {"received": True}
