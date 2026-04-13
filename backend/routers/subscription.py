@@ -412,7 +412,7 @@ async def google_play_webhook(request: Request):
         return {"received": True}
 
     purchase_token = sub_notif.get("purchaseToken", "")
-    product_id = sub_notif.get("productId", "")
+    product_id = sub_notif.get("productId") or sub_notif.get("subscriptionId", "")
     notification_type = sub_notif.get("notificationType")
     token_preview = (
         f"{purchase_token[:6]}...{purchase_token[-6:]}"
