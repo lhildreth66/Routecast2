@@ -9,7 +9,7 @@ buildscript {
         // Align Kotlin with OpenIAP's published artifacts; 2.1.x is required for kotlin.coroutines.jvm.internal.SpillingKt
         kotlinVersion = findProperty('android.kotlinVersion') ?: '2.1.10'
 
-        ndkVersion = "26.1.10909125"
+        ndkVersion = "27.2.12479018"
     }
     repositories {
         google()
