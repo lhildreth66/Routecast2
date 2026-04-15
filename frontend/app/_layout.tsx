@@ -4,6 +4,7 @@ import { useEffect } from 'react';
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
+import { registerDevicePushTokenOnce } from './pushRegistration';
 import { hasActiveSubscription, shouldForcePaywall, isWebAllowed } from './routing/billingGuards';
 
 /**
@@ -134,6 +135,8 @@ export default function RootLayout() {
         const { status } = await Notifications.requestPermissionsAsync();
         if (status !== 'granted') {
           console.log('Notification permissions not granted');
+        } else {
+          await registerDevicePushTokenOnce();
         }
       }
     }
