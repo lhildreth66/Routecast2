@@ -157,6 +157,8 @@ export default function HomeScreen() {
   // Departure time
   const [departureTime, setDepartureTime] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
+  const [pickerMode, setPickerMode] = useState<'date' | 'time'>('date');
+  const [pendingDate, setPendingDate] = useState<Date>(new Date());
   const [useCustomTime, setUseCustomTime] = useState(false);
   
   // Multi-stop
@@ -1120,7 +1122,11 @@ export default function HomeScreen() {
                 {useCustomTime && (
                   <TouchableOpacity 
                     style={styles.timeButton}
-                    onPress={() => setShowDatePicker(true)}
+                    onPress={() => {
+                      setPendingDate(new Date(departureTime));
+                      setPickerMode('date');
+                      setShowDatePicker(true);
+                    }}
                   >
                     <Text style={styles.timeButtonText}>
                       {format(departureTime, 'MMM d, h:mm a')}
@@ -1355,8 +1361,38 @@ export default function HomeScreen() {
         </KeyboardAvoidingView>
       </SafeAreaView>
 
-      {/* Date Time Picker Modal */}
-      {showDatePicker && (
+      {/* Date Time Picker — Android: bare two-step picker (no Modal), iOS/web: modal */}
+      {showDatePicker && Platform.OS === 'android' && (
+        <DateTimePicker
+          value={pendingDate}
+          mode={pickerMode}
+          display="default"
+          minimumDate={pickerMode === 'date' ? new Date() : undefined}
+          onChange={(event, date) => {
+            if (event.type === 'dismissed') {
+              setShowDatePicker(false);
+              return;
+            }
+            if (event.type === 'set' && date) {
+              if (pickerMode === 'date') {
+                // Step 1 confirmed: preserve existing time, apply new date, then show time picker
+                const merged = new Date(pendingDate);
+                merged.setFullYear(date.getFullYear(), date.getMonth(), date.getDate());
+                setPendingDate(merged);
+                setPickerMode('time');
+              } else {
+                // Step 2 confirmed: apply selected time to the pending date and commit
+                const merged = new Date(pendingDate);
+                merged.setHours(date.getHours(), date.getMinutes(), 0, 0);
+                setDepartureTime(merged);
+                setShowDatePicker(false);
+              }
+            }
+          }}
+        />
+      )}
+
+      {showDatePicker && Platform.OS !== 'android' && (
         <Modal transparent animationType="slide">
           <View style={styles.modalOverlay}>
             <View style={styles.modalContent}>
@@ -1366,7 +1402,7 @@ export default function HomeScreen() {
                   <Ionicons name="close" size={24} color="#fff" />
                 </TouchableOpacity>
               </View>
-              
+
               {Platform.OS === 'web' ? (
                 // Web-compatible date/time input
                 <View style={styles.webDatePicker}>
@@ -1392,7 +1428,7 @@ export default function HomeScreen() {
                       marginBottom: 16,
                     }}
                   />
-                  
+
                   <Text style={styles.datePickerLabel}>Time</Text>
                   <input
                     type="time"
@@ -1414,26 +1450,26 @@ export default function HomeScreen() {
                       marginBottom: 16,
                     }}
                   />
-                  
+
                   <Text style={styles.selectedDateTime}>
                     Selected: {format(departureTime, 'MMM d, yyyy h:mm a')}
                   </Text>
                 </View>
               ) : (
-                // Native DateTimePicker for iOS/Android
+                // iOS native DateTimePicker (datetime + spinner supported on iOS)
                 <DateTimePicker
                   value={departureTime}
                   mode="datetime"
                   display="spinner"
                   onChange={(event, date) => {
-                    if (date) setDepartureTime(date);
+                    if (event.type === 'set' && date) setDepartureTime(date);
                   }}
                   textColor="#fff"
                   minimumDate={new Date()}
                 />
               )}
-              
-              <TouchableOpacity 
+
+              <TouchableOpacity
                 style={styles.modalButton}
                 onPress={() => setShowDatePicker(false)}
               >
