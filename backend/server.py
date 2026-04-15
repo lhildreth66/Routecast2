@@ -5369,6 +5369,26 @@ async def predict_cell_probability(request: ConnectivityCellRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail="Unable to compute cell probability at this time")
 
+@api_router.post("/connectivity/starlink-risk", response_model=ConnectivityStarlinkResponse)
+async def predict_starlink_risk(request: ConnectivityStarlinkRequest):
+    """Starlink obstruction risk prediction (Task A7)."""
+    try:
+        res = obstruction_risk(
+            horizon_south_deg=request.horizonSouthDeg,
+            canopy_pct=request.canopyPct,
+        )
+        return ConnectivityStarlinkResponse(
+            risk_level=res.risk_level,
+            obstruction_score=res.obstruction_score,
+            explanation=res.explanation,
+            reasons=res.reasons,
+            is_premium_locked=False,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid parameters: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Unable to compute Starlink risk at this time")
+
 @api_router.post("/casinos/search", response_model=OvernightSearchResponse)
 async def search_casinos(request: OvernightSearchRequest):
     """Casino search — Google Places ONLY (no Overpass fallback)."""
