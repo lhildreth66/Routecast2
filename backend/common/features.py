@@ -17,6 +17,7 @@ CELL_STARLINK = "cell_starlink"
 EVAC_OPTIMIZER = "evac_optimizer"
 CLAIM_LOG = "claim_log"
 SMART_DELAY_ALERTS = "smart_delay_alerts"
+TRUCK_PARKING = "truck_parking"
 
 # All premium features
 PREMIUM_FEATURES = {
@@ -31,6 +32,7 @@ PREMIUM_FEATURES = {
     EVAC_OPTIMIZER,
     CLAIM_LOG,
     SMART_DELAY_ALERTS,
+    TRUCK_PARKING,
 }
 
 

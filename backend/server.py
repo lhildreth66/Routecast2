@@ -38,7 +38,7 @@ except ImportError:
 from providers import get_providers
 from billing import billing_verifier, VerificationRequest, VerificationResponse
 from common.premium_gate import require_premium
-from common.features import SOLAR_FORECAST, PROPANE_USAGE, WATER_BUDGET, WIND_SHELTER, ROAD_SIM, CAMPSITE_INDEX, CELL_STARLINK, CLAIM_LOG
+from common.features import SOLAR_FORECAST, PROPANE_USAGE, WATER_BUDGET, WIND_SHELTER, ROAD_SIM, CAMPSITE_INDEX, CELL_STARLINK, CLAIM_LOG, TRUCK_PARKING
 from road_passability_service import RoadPassabilityService
 from solar_forecast_service import SolarForecastService
 from campsite_index_service import SiteFactors, Weights, score as campsite_score
