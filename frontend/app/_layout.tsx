@@ -30,7 +30,7 @@ function WebGate() {
 }
 
 const UNAUTHED_OPEN_ROUTES = new Set([
-  '/landing', '/faq', '/welcome', '/contact', '/privacy', '/terms', '/login', '/signup', '/forgot-password', '/reset-password', '/verify-email',
+  '/faq', '/welcome', '/contact', '/privacy', '/terms', '/login', '/signup', '/forgot-password', '/reset-password', '/verify-email',
   '/subscription', // allow deep-link from email verification: routecast2://subscription
 ]);
 
@@ -99,10 +99,11 @@ function NativeAuthGuard() {
 
     const seg = '/' + (pathname.split('/').filter(Boolean)[0] ?? '');
 
-    // Unauthenticated users: force landing unless already on an allowlisted marketing/auth route.
+    // Unauthenticated users: send to /login on native, /landing on web.
+    // /landing is website-only — no Android path may route there.
     if (!accessToken) {
       if (pathname === '/' || (!UNAUTHED_OPEN_ROUTES.has(pathname) && !UNAUTHED_OPEN_ROUTES.has(seg))) {
-        router.replace('/landing');
+        router.replace(Platform.OS === 'web' ? '/landing' : '/login');
       }
       return;
     }
