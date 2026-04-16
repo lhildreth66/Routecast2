@@ -77,5 +77,9 @@ export function verifySuccessRoute({
   if (isWeb) {
     return verifySuccessHandoffUrl(email);
   }
-  return `/login?verified=1${email ? `&email=${encodeURIComponent(email)}` : ''}`;
+  // Native: take the user directly to the subscription screen so they can
+  // start a Google Play trial/subscription immediately after verification.
+  // They are not yet logged in at this point — the subscription screen handles
+  // the unauthenticated case (saves the pending purchase and routes to /login).
+  return '/subscription';
 }

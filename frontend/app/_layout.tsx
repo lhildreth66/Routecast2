@@ -107,9 +107,20 @@ function NativeAuthGuard() {
       return;
     }
 
-    // Restored entitled sessions should bypass landing/auth/paywall entry routes.
-    if (pathname !== '/' && hasActiveSubscription(user) && (AUTH_ENTRY_ROUTES.has(pathname) || AUTH_ENTRY_ROUTES.has(seg))) {
+    // Hard rule: never show /landing to a session with stored tokens, even while
+    // the user profile is still in flight (passive hydration race window).
+    // Redirect to / immediately — PaywallGuard handles entitlement routing once
+    // the user profile loads. This prevents the web marketing page from appearing
+    // to authenticated users on app reopen.
+    if (accessToken && pathname === '/landing') {
       router.replace('/');
+      return;
+    }
+
+    // User profile loaded: route based on entitlement.
+    // Premium → main app (/). Expired/non-premium → subscription paywall.
+    if (pathname !== '/' && user && (AUTH_ENTRY_ROUTES.has(pathname) || AUTH_ENTRY_ROUTES.has(seg))) {
+      router.replace(hasActiveSubscription(user) ? '/' : '/subscription');
     }
   }, [accessToken, authLoading, hasHydrated, pathname, rootNavState?.key, user?.email_verified, user?.is_premium, user?.subscription_status]);
 

@@ -274,7 +274,7 @@ _ERROR_REDIRECT = f"{os.environ.get('FRONTEND_URL', '')}/signup?error=invalid_to
 def _build_native_verify_success_response(email: str = "") -> HTMLResponse:
         safe_email = html_escape(email or "")
         encoded_email = urlquote(email or "", safe="")
-        app_url = f"{MOBILE_APP_SCHEME}://verify-email?verified=1&email={encoded_email}"
+        app_url = f"{MOBILE_APP_SCHEME}://subscription"
         html = f"""
         <!doctype html>
         <html>
@@ -291,7 +291,7 @@ def _build_native_verify_success_response(email: str = "") -> HTMLResponse:
 
                         <!-- Opening state: shown immediately while deep link is attempted -->
                         <div id=\"rc-opening\">
-                            <p style=\"margin:0 0 16px; color:#e5e7eb;\">Opening RouteCast app to continue your billing setup...</p>
+                            <p style=\"margin:0 0 16px; color:#e5e7eb;\">Opening RouteCast app to choose a subscription plan...</p>
                             <a href=\"{app_url}\" style=\"display:inline-block; background:#eab308; color:#111827; text-decoration:none; font-weight:700; border-radius:10px; padding:12px 18px;\">Open RouteCast App</a>
                         </div>
 
