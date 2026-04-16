@@ -120,7 +120,16 @@ function NativeAuthGuard() {
 
     // User profile loaded: route based on entitlement.
     // Premium → main app (/). Expired/non-premium → subscription paywall.
+    // Exception: /login manages its own post-login navigation via loginPending and
+    // verifyPending state in login.tsx. A non-premium user on /login who just
+    // completed a Google Play purchase (before signing in) must NOT be redirected
+    // here — that would race with the pending-purchase verification flow and send
+    // the user back to /subscription before their receipt can be verified.
+    // Only redirect away from /login when the user already has an active subscription.
     if (pathname !== '/' && user && (AUTH_ENTRY_ROUTES.has(pathname) || AUTH_ENTRY_ROUTES.has(seg))) {
+      if ((pathname === '/login' || seg === '/login') && !hasActiveSubscription(user)) {
+        return;
+      }
       router.replace(hasActiveSubscription(user) ? '/' : '/subscription');
     }
   }, [accessToken, authLoading, hasHydrated, pathname, rootNavState?.key, user?.email_verified, user?.is_premium, user?.subscription_status]);
