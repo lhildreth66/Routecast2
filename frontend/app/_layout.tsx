@@ -35,7 +35,7 @@ const UNAUTHED_OPEN_ROUTES = new Set([
 ]);
 
 const AUTH_ENTRY_ROUTES = new Set([
-  '/', '/landing', '/login', '/signup', '/verify-email', '/forgot-password', '/reset-password', '/subscription', '/welcome',
+  '/', '/login', '/signup', '/verify-email', '/forgot-password', '/reset-password', '/subscription', '/welcome',
 ]);
 
 // Global paywall guard: renders null (never blocks Stack from mounting).
@@ -178,7 +178,7 @@ export default function RootLayout() {
         }}
       >
         <Stack.Screen name="landing" />
-        <Stack.Screen name="index" redirect={false} options={{ href: '/landing' }} />
+        <Stack.Screen name="index" redirect={false} />
         <Stack.Screen name="route" />
         {/* Auth Screens */}
         <Stack.Screen name="login" />

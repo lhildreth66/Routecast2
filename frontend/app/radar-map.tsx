@@ -432,10 +432,7 @@ export default function RadarMapScreen() {
         />
       ) : (
         <WebView
-          source={{ 
-            html: generateMapHTML(),
-            baseUrl: 'https://routecastweather.com'
-          }}
+          source={{ html: generateMapHTML() }}
           style={styles.webview}
           javaScriptEnabled={true}
           domStorageEnabled={true}

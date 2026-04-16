@@ -5,6 +5,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   ScrollView,
+  Platform,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router } from 'expo-router';
@@ -49,23 +50,25 @@ export default function FAQPage() {
 
   return (
     <View style={styles.container}>
-      {/* Navbar */}
-      <View style={styles.navbar}>
-        <View style={styles.navContent}>
-          <TouchableOpacity style={styles.logoRow} onPress={() => router.push('/landing')}>
-            <MaterialCommunityIcons name="weather-lightning-rainy" size={26} color="#eab308" />
-            <Text style={styles.logoText}>RouteCast</Text>
-          </TouchableOpacity>
-          <View style={styles.navLinks}>
-            <TouchableOpacity onPress={() => router.push('/landing')}>
-              <Text style={styles.navLink}>Home</Text>
+      {/* Navbar — website only: the app has its own back navigation */}
+      {Platform.OS === 'web' && (
+        <View style={styles.navbar}>
+          <View style={styles.navContent}>
+            <TouchableOpacity style={styles.logoRow} onPress={() => router.push('/landing')}>
+              <MaterialCommunityIcons name="weather-lightning-rainy" size={26} color="#eab308" />
+              <Text style={styles.logoText}>RouteCast</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => router.push('/contact')}>
-              <Text style={styles.navLink}>Contact</Text>
-            </TouchableOpacity>
+            <View style={styles.navLinks}>
+              <TouchableOpacity onPress={() => router.push('/landing')}>
+                <Text style={styles.navLink}>Home</Text>
+              </TouchableOpacity>
+              <TouchableOpacity onPress={() => router.push('/contact')}>
+                <Text style={styles.navLink}>Contact</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
-      </View>
+      )}
 
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.pageTitle}>Frequently Asked Questions</Text>

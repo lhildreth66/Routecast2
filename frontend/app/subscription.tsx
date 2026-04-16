@@ -6,8 +6,6 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   ScrollView,
-  Linking,
-  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,8 +17,7 @@ import { buildUrl } from './apiConfig';
 import { runPostPurchaseFlow } from './utils/postPurchaseFlow';
 import { savePendingPurchase } from './utils/pendingPurchase';
 
-const GOOGLE_PLAY_URL = 'https://play.google.com/store/apps/details?id=com.routecast.app';
-const isWeb = Platform.OS === 'web';
+
 
 type OfferInfo = {
   offerToken?: string;
@@ -135,14 +132,6 @@ export default function SubscriptionScreen() {
     }));
     console.log('[billing] render product', { productId, offers, monthlyOffer, annualOffer });
   }, [product, monthlyOffer, annualOffer]);
-
-  useEffect(() => {
-    if (isWeb) {
-      router.replace('/landing');
-    }
-  }, []);
-
-  const openGooglePlay = () => Linking.openURL(GOOGLE_PLAY_URL);
 
   const verifyGooglePurchase = async (payload: { purchaseToken: string; productId: string; packageName: string }) => {
     if (!accessToken) {
@@ -338,29 +327,6 @@ export default function SubscriptionScreen() {
     );
   }
 
-  if (isWeb) {
-    return (
-      <View style={styles.webContainer}>
-        <SafeAreaView style={styles.safeArea}>
-          <View style={styles.webContent}>
-            <Text style={styles.webTitle}>Get RouteCast on Android</Text>
-            <Text style={styles.webSubtitle}>
-              Subscriptions are available in the Android app through Google Play. Download to manage billing and premium access securely in-app.
-            </Text>
-            <TouchableOpacity style={styles.webCta} onPress={openGooglePlay}>
-              <Ionicons name="logo-google-playstore" size={22} color="#0f0f0f" />
-              <Text style={styles.webCtaText}>Download on Google Play</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.webSecondary} onPress={() => router.replace('/landing')}>
-              <Text style={styles.webSecondaryText}>Return to Landing</Text>
-              <Ionicons name="arrow-forward" size={18} color="#eab308" />
-            </TouchableOpacity>
-          </View>
-        </SafeAreaView>
-      </View>
-    );
-  }
-
   return (
     <View style={styles.container}>
       <SafeAreaView style={styles.safeArea}>
@@ -520,22 +486,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 24,
   },
-  webContainer: { flex: 1, backgroundColor: '#0f0f0f' },
-  webContent: { flex: 1, padding: 24, gap: 16, maxWidth: 520, marginHorizontal: 'auto', justifyContent: 'center' },
-  webTitle: { color: '#ffffff', fontSize: 28, fontWeight: '800', textAlign: 'center' },
-  webSubtitle: { color: '#a1a1aa', fontSize: 16, textAlign: 'center', lineHeight: 24 },
-  webCta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-    backgroundColor: '#eab308',
-    paddingVertical: 14,
-    borderRadius: 14,
-  },
-  webCtaText: { color: '#0f0f0f', fontWeight: '700', fontSize: 16 },
-  webSecondary: { flexDirection: 'row', alignItems: 'center', gap: 8, justifyContent: 'center' },
-  webSecondaryText: { color: '#eab308', fontSize: 15 },
   header: { gap: 8, marginBottom: 18 },
   iconContainer: {
     width: 56,
