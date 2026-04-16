@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, HTTPException, Header, Request, status, Query
+from fastapi import FastAPI, APIRouter, HTTPException, Header, Request, status, Query, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, RedirectResponse
 from dotenv import load_dotenv
@@ -4457,16 +4457,31 @@ async def get_route_weather_alerts(
 
 
 @api_router.get("/routes/history", response_model=List[SavedRoute])
-async def get_route_history():
-    """Get recent route history."""
+async def get_route_history(
+    authorization: Optional[str] = Header(None),
+):
+    """Get recent route history for the authenticated user."""
     if db is None:
         logger.warning("Database not available for route history")
         return []
+
+    # Extract user_id from JWT — silently return empty list for unauthenticated requests.
+    user_id: Optional[str] = None
+    if authorization and authorization.startswith("Bearer ") and _verify_token:
+        token = authorization.split(" ")[1]
+        payload = _verify_token(token, "access")
+        if payload:
+            user_id = payload.get("sub")
+
+    if not user_id:
+        return []
+
     try:
-        routes = await db.routes.find().sort("created_at", -1).limit(10).to_list(length=10)
+        routes = await db.routes.find({"user_id": user_id}).sort("created_at", -1).limit(10).to_list(length=10)
         logger.info(
             "route_history_fetched",
             extra={
+                "user_id": user_id,
                 "count": len(routes),
                 "ids": [str(r.get('_id', r.get('id'))) for r in routes[:5]],
             },
@@ -8984,6 +8999,11 @@ async def startup_db_client():
                 logger.info("[startup] route_contexts TTL index ensured")
             except Exception as e:
                 logger.warning("[startup] route_contexts index failed: %s", e)
+            try:
+                await db.routes.create_index([("user_id", 1), ("created_at", -1)])
+                logger.info("[startup] routes user_id+created_at index ensured")
+            except Exception as e:
+                logger.warning("[startup] routes index failed: %s", e)
     except Exception as exc:
         logger.warning("[startup] MongoDB init failed: %s", exc)
 

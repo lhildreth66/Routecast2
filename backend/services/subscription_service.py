@@ -27,6 +27,10 @@ if _STRIPE_API_KEY:
 # Set to 0 to disable live checks entirely.
 STRIPE_CHECK_TTL_SECONDS = int(os.environ.get('STRIPE_CHECK_TTL_SECONDS', '300'))  # 5 min default
 
+# How often to re-verify a Google Play token against Google API (seconds).
+# Applied only when cached status is non-premium (expired/inactive) to restore silently lapsed entitlements.
+GOOGLE_CHECK_TTL_SECONDS = int(os.environ.get('GOOGLE_CHECK_TTL_SECONDS', '300'))  # 5 min default
+
 # Statuses that mean the user currently has paid access.
 # "canceling" = Stripe active + cancel_at_period_end; user paid for the period.
 PREMIUM_STATUSES = frozenset({"active", "trialing", "canceling"})
@@ -328,6 +332,60 @@ async def check_subscription_status(db: AsyncIOMotorDatabase, user_id: str) -> d
             except Exception as e:
                 # Transient network / API error — fall through to DB-cached value.
                 logger.warning(f"[STRIPE LIVE] check failed for user={user_id}: {e}")
+
+    # ── Google Play live re-verify (catches missed/delayed renewal webhooks) ──
+    # Only fires when provider is Google, a token is stored, and the cached
+    # status is non-premium. This restores valid subscribers without re-purchase.
+    google_purchase_token = user.get("google_purchase_token")
+    if (
+        provider == "google"
+        and google_purchase_token
+        and status in NON_PREMIUM_STATUSES
+        and GOOGLE_CHECK_TTL_SECONDS > 0
+    ):
+        google_verified_at = user.get("google_status_verified_at")
+        if isinstance(google_verified_at, datetime) and google_verified_at.tzinfo is None:
+            google_verified_at = google_verified_at.replace(tzinfo=timezone.utc)
+        google_age = (
+            (now - google_verified_at).total_seconds()
+            if google_verified_at
+            else GOOGLE_CHECK_TTL_SECONDS + 1
+        )
+        if google_age > GOOGLE_CHECK_TTL_SECONDS:
+            try:
+                product_id = user.get("google_product_id", "")
+                g_result = await verify_google_receipt(
+                    purchase_token=google_purchase_token,
+                    product_id=product_id,
+                    package_name=GOOGLE_PLAY_PACKAGE_NAME,
+                )
+                g_verified = g_result.get("verified_with_google", False)
+                g_valid = g_result.get("valid", False)
+                g_status = g_result.get("subscription_status", status)
+                g_expiration = g_result.get("expiration")
+                g_plan = g_result.get("plan", "free")
+                g_is_premium = g_valid and g_status in PREMIUM_STATUSES
+
+                db_update: dict = {"google_status_verified_at": now, "updated_at": now}
+                if g_verified:
+                    db_update["subscription_status"] = g_status
+                    db_update["is_premium"] = g_is_premium
+                    db_update["subscription_plan"] = g_plan if g_valid else "free"
+                    if g_expiration:
+                        db_update["subscription_expiration"] = g_expiration
+
+                await db.users.update_one({"user_id": user_id}, {"$set": db_update})
+
+                logger.info(
+                    "[GOOGLE LIVE] user=%s g_verified=%s g_valid=%s g_status=%s g_is_premium=%s",
+                    user_id, g_verified, g_valid, g_status, g_is_premium,
+                )
+
+                if g_verified:
+                    status = g_status
+                    expiration = g_expiration if g_expiration else expiration
+            except Exception as _g_err:
+                logger.warning("[GOOGLE LIVE] check failed user=%s: %s", user_id, _g_err)
 
     # ── Local expiration check (catches period rollovers without a webhook) ─
     if expiration and isinstance(expiration, datetime):
