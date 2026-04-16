@@ -2,7 +2,7 @@
   "expo": {
     "name": "Routecast",
     "slug": "routecast2",
-    "version": "1.0.158",
+    "version": "1.0.159",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "routecast2",
@@ -35,7 +35,7 @@
     "android": {
       "package": "com.routecast.app",
       "googleServicesFile": "./google-services.json",
-      "versionCode": 229,
+      "versionCode": 230,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/adaptive-icon.png",
         "backgroundColor": "#0a0a0a"
