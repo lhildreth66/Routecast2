@@ -367,12 +367,24 @@ async def check_subscription_status(db: AsyncIOMotorDatabase, user_id: str) -> d
                 g_is_premium = g_valid and g_status in PREMIUM_STATUSES
 
                 db_update: dict = {"google_status_verified_at": now, "updated_at": now}
-                if g_verified:
+                if g_verified and g_valid:
+                    # Google confirmed active entitlement — write full state.
                     db_update["subscription_status"] = g_status
                     db_update["is_premium"] = g_is_premium
-                    db_update["subscription_plan"] = g_plan if g_valid else "free"
+                    db_update["subscription_plan"] = g_plan
                     if g_expiration:
                         db_update["subscription_expiration"] = g_expiration
+                elif g_verified and not g_valid:
+                    # Google was reached but reported invalid/expired.
+                    # Rule: verification failure → preserve existing subscription state.
+                    # Only update the cache timestamp so we re-verify on next TTL cycle.
+                    logger.info(
+                        "[GOOGLE LIVE] verification skipped — preserving existing state "
+                        "user=%s google_status=%s",
+                        user_id,
+                        g_status,
+                    )
+                # g_verified=False: couldn't reach Google — only timestamps written (safe)
 
                 await db.users.update_one({"user_id": user_id}, {"$set": db_update})
 
@@ -381,7 +393,7 @@ async def check_subscription_status(db: AsyncIOMotorDatabase, user_id: str) -> d
                     user_id, g_verified, g_valid, g_status, g_is_premium,
                 )
 
-                if g_verified:
+                if g_verified and g_valid:
                     status = g_status
                     expiration = g_expiration if g_expiration else expiration
             except Exception as _g_err:
@@ -391,18 +403,28 @@ async def check_subscription_status(db: AsyncIOMotorDatabase, user_id: str) -> d
     if expiration and isinstance(expiration, datetime):
         if expiration.tzinfo is None:
             expiration = expiration.replace(tzinfo=timezone.utc)
-        # Any of the "still paid" statuses should expire when the period ends
+        # Any of the "still paid" statuses should expire when the period ends.
+        # Guard: never downgrade if an active trial window exists — the user may
+        # still have earned access even if subscription_expiration has passed.
         if expiration < now and status in PREMIUM_STATUSES:
-            await db.users.update_one(
-                {"user_id": user_id},
-                {"$set": {
-                    "subscription_status": "expired",
-                    "is_premium": False,
-                    "subscription_plan": "free",
-                    "updated_at": now,
-                }},
-            )
-            status = "expired"
+            trial_end_db = user.get("trial_end")
+            if trial_end_db and isinstance(trial_end_db, datetime):
+                if trial_end_db.tzinfo is None:
+                    trial_end_db = trial_end_db.replace(tzinfo=timezone.utc)
+            else:
+                trial_end_db = None
+            within_trial = trial_end_db is not None and trial_end_db > now
+            if not within_trial:
+                await db.users.update_one(
+                    {"user_id": user_id},
+                    {"$set": {
+                        "subscription_status": "expired",
+                        "is_premium": False,
+                        "subscription_plan": "free",
+                        "updated_at": now,
+                    }},
+                )
+                status = "expired"
 
     # Derive is_premium: canceling is premium only while period is still valid
     if status == "canceling":

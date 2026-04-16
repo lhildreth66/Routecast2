@@ -347,15 +347,20 @@ async def verify_google_purchase(
     if not existing_user:
         raise HTTPException(status_code=404, detail="User not found")
 
+    # Base update: only safe/non-downgrading fields.
+    # subscription_status and subscription_expiration are added only when
+    # Google confirms a valid active entitlement — verification failure must
+    # never overwrite existing subscription state.
     update_data = {
-        "subscription_status": status,
         "subscription_provider": "google",
-        "subscription_expiration": expiration,
         "google_purchase_token": data.purchase_token,
         "updated_at": now,
     }
 
     if result["valid"]:
+        # Google confirmed active entitlement — write full state.
+        update_data["subscription_status"] = status
+        update_data["subscription_expiration"] = expiration
         update_data["is_premium"] = status in ["trialing", "active", "canceling"]
         update_data["subscription_plan"] = plan
         if status == "trialing":
@@ -371,26 +376,32 @@ async def verify_google_purchase(
             if not existing_user.get("trial_end"):
                 update_data["trial_end"] = expiration or (now + timedelta(days=7))
     else:
-        # Google reports no active entitlement (e.g. token not yet indexed → 404).
-        # Protect any trial window already granted: if the user is still within
-        # their trial period, keep trialing/premium and do NOT null trial fields.
+        # Google did not confirm an active entitlement.
+        # Rule: verification failure → preserve existing subscription state.
+        # Never write subscription_status, is_premium, subscription_plan, or
+        # subscription_expiration on an inconclusive/failed result.
         user_trial_end = existing_user.get("trial_end")
         if isinstance(user_trial_end, datetime) and user_trial_end.tzinfo is None:
             user_trial_end = user_trial_end.replace(tzinfo=timezone.utc)
         within_trial = isinstance(user_trial_end, datetime) and user_trial_end > now
         if within_trial:
-            # Override Google's "expired/inactive" — trial grants access
+            # Explicit upgrade: trial is active, ensure DB reflects that.
             update_data["subscription_status"] = "trialing"
             update_data["is_premium"] = True
             logger.info(
-                "[GOOGLE_VERIFY] Google invalid but trial window active user_id=%s trial_end=%s",
+                "[GOOGLE_VERIFY] Google invalid but trial window active — "
+                "restoring trialing state user_id=%s trial_end=%s",
                 user_id,
                 user_trial_end,
             )
         else:
-            update_data["is_premium"] = False
-            update_data["subscription_plan"] = "free"
-            # Preserve trial timestamps for audit trail; do NOT null them out
+            # Inconclusive — do not touch existing subscription fields.
+            logger.info(
+                "[GOOGLE_VERIFY] verification skipped — preserving existing state "
+                "user_id=%s google_status=%s",
+                user_id,
+                result.get("subscription_status"),
+            )
 
     await db.users.update_one({"user_id": user_id}, {"$set": update_data})
 
@@ -398,7 +409,7 @@ async def verify_google_purchase(
         "[GOOGLE_VERIFY] persisted user_id=%s valid=%s status=%s plan=%s expiration=%s is_premium=%s",
         user_id,
         result.get("valid"),
-        status,
+        result.get("subscription_status"),
         update_data.get("subscription_plan"),
         update_data.get("subscription_expiration"),
         update_data.get("is_premium"),
@@ -534,16 +545,21 @@ async def google_play_webhook(request: Request):
     expiration = result.get("expiration")
     plan = result.get("plan") or ("yearly" if "yearly" in product_id.lower() else "monthly")
 
+    # Base update: only safe/non-downgrading fields.
+    # subscription_status and subscription_expiration are added only when
+    # Google confirms a valid active entitlement — verification failure must
+    # never overwrite existing subscription state.
     update_data = {
-        "subscription_status": status,
         "subscription_provider": "google",
-        "subscription_expiration": expiration,
         # Always write the current (newest) token so future renewals chain correctly.
         "google_purchase_token": purchase_token,
         "updated_at": now,
     }
 
     if result["valid"]:
+        # Google confirmed active entitlement — write full state.
+        update_data["subscription_status"] = status
+        update_data["subscription_expiration"] = expiration
         update_data["is_premium"] = status in ["trialing", "active", "canceling"]
         update_data["subscription_plan"] = plan
         if status == "trialing":
@@ -553,10 +569,34 @@ async def google_play_webhook(request: Request):
             if not existing_user.get("trial_start"):
                 update_data["trial_start"] = now
     else:
-        update_data["is_premium"] = False
-        update_data["subscription_plan"] = "free"
-        update_data["trial_end"] = None
-        update_data["trial_start"] = None
+        # Google did not confirm an active entitlement.
+        # Rule: verification failure → preserve existing subscription state.
+        # Never write subscription_status, is_premium, subscription_plan, or
+        # subscription_expiration on an inconclusive/failed result.
+        user_trial_end = existing_user.get("trial_end")
+        if isinstance(user_trial_end, datetime) and user_trial_end.tzinfo is None:
+            user_trial_end = user_trial_end.replace(tzinfo=timezone.utc)
+        within_trial = isinstance(user_trial_end, datetime) and user_trial_end > now
+        if within_trial:
+            # Explicit upgrade: trial is active, ensure DB reflects that.
+            update_data["subscription_status"] = "trialing"
+            update_data["subscription_expiration"] = user_trial_end
+            update_data["is_premium"] = True
+            logger.warning(
+                "[GOOGLE_WEBHOOK] Google invalid but trial window active — "
+                "restoring trialing state user_id=%s trial_end=%s",
+                user_id,
+                user_trial_end,
+            )
+        else:
+            # Inconclusive — do not touch existing subscription fields.
+            logger.info(
+                "[GOOGLE_WEBHOOK] verification skipped — preserving existing state "
+                "user_id=%s google_status=%s notificationType=%s",
+                user_id,
+                result.get("subscription_status"),
+                notification_type,
+            )
 
     await db.users.update_one({"user_id": user_id}, {"$set": update_data})
 
