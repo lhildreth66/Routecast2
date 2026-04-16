@@ -64,6 +64,105 @@ function webGetTokens(): [string | null, string | null] {
   } catch { return [null, null]; }
 }
 
+// ─── axios 401 interceptor ────────────────────────────────────────────────────
+// Catches any 401 from any axios call, attempts a silent token refresh, and
+// retries the original request once. If refresh fails, wipes tokens and
+// signals the AuthProvider to clear state (NativeAuthGuard then routes to /login).
+//
+// Lives at module level so it can read/write storage without needing React state.
+
+let _REFRESH_IN_FLIGHT: Promise<string | null> | null = null;
+let _axiosInterceptorId: number | null = null;
+
+function setupAxiosInterceptor(
+  onTokensRefreshed: (at: string, rt: string) => void,
+  onRefreshFailed: () => void,
+): () => void {
+  // Eject any previous interceptor (handles hot-reload / StrictMode double-mount)
+  if (_axiosInterceptorId !== null) {
+    axios.interceptors.response.eject(_axiosInterceptorId);
+  }
+
+  _axiosInterceptorId = axios.interceptors.response.use(
+    (response) => response,
+    async (error) => {
+      const originalRequest = error.config as any;
+
+      // Only intercept 401s that have NOT been retried yet
+      if (error?.response?.status !== 401 || originalRequest?._retry) {
+        return Promise.reject(error);
+      }
+
+      // Never intercept the refresh endpoint itself — would cause an infinite loop
+      if (originalRequest?.url?.includes('auth/refresh')) {
+        return Promise.reject(error);
+      }
+
+      // Mark so the retried request is not intercepted again
+      originalRequest._retry = true;
+      console.log('[auth-interceptor] 401 intercepted on', originalRequest?.url);
+
+      // Deduplicate concurrent 401s: if a refresh is already in flight from
+      // another simultaneous request, wait for that one instead of launching a second.
+      if (!_REFRESH_IN_FLIGHT) {
+        _REFRESH_IN_FLIGHT = (async (): Promise<string | null> => {
+          try {
+            // Read refresh token directly from storage — not from React state —
+            // so this works during hydration and across component re-renders.
+            const [[, storedRt]] = await AsyncStorage.multiGet(['refreshToken']);
+
+            if (!storedRt) {
+              console.warn('[auth-interceptor] no refresh token in storage → signing out');
+              await clearTokens();
+              onRefreshFailed();
+              return null;
+            }
+
+            console.log('[auth-interceptor] refresh started');
+            const res = await axios.post(buildUrl('auth/refresh'), {
+              refresh_token: storedRt,
+            });
+            const { access_token, refresh_token: new_rt } = res.data;
+
+            await persistTokens(access_token, new_rt);
+            onTokensRefreshed(access_token, new_rt);
+            console.log('[auth-interceptor] refresh succeeded — new tokens stored');
+            return access_token;
+          } catch (refreshErr) {
+            console.warn('[auth-interceptor] refresh failed → clearing tokens → signing out', refreshErr);
+            await clearTokens();
+            onRefreshFailed();
+            return null;
+          } finally {
+            _REFRESH_IN_FLIGHT = null;
+          }
+        })();
+      } else {
+        console.log('[auth-interceptor] refresh already in flight — queuing behind it');
+      }
+
+      const newAt = await _REFRESH_IN_FLIGHT;
+      if (!newAt) {
+        // Refresh failed — onRefreshFailed already handled cleanup
+        return Promise.reject(error);
+      }
+
+      // Retry the original request with the new access token
+      originalRequest.headers = originalRequest.headers ?? {};
+      originalRequest.headers['Authorization'] = `Bearer ${newAt}`;
+      console.log('[auth-interceptor] retrying original request with refreshed token');
+      return axios(originalRequest);
+    },
+  );
+
+  return () => {
+    if (_axiosInterceptorId !== null) {
+      axios.interceptors.response.eject(_axiosInterceptorId);
+      _axiosInterceptorId = null;
+    }
+  };
+}
+
 // ─── types ────────────────────────────────────────────────────────────────────
 interface User {
   user_id: string;
@@ -137,6 +236,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if ('refreshToken' in next) setRefreshToken(next.refreshToken ?? null);
   };
 
+  // ── axios 401 interceptor — wired up once on mount ────────────────────────
+  // When any axios request gets a 401, the interceptor silently refreshes the
+  // access token and retries the request. The user stays logged in as long as
+  // the refresh token (7 days) is still valid — regardless of subscription state.
+  useEffect(() => {
+    const teardown = setupAxiosInterceptor(
+      // onTokensRefreshed: push new tokens into React state
+      (at, rt) => {
+        setAuthState({ accessToken: at, refreshToken: rt });
+      },
+      // onRefreshFailed: wipe auth state; NativeAuthGuard sees accessToken=null
+      // and redirects to /login automatically — no navigation needed here.
+      () => {
+        console.warn('[auth-interceptor] onRefreshFailed → clearing auth state → /login');
+        setAuthState({ user: null, accessToken: null, refreshToken: null });
+      },
+    );
+    return teardown;
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── PASSIVE hydration – no API calls ──────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
@@ -209,12 +328,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       console.warn('[auth] /auth/me failed', status ?? err?.message);
 
       if (status === 401) {
-        // Token is invalid/expired – wipe everything so the app shows signed-out
-        // UI immediately and never loops on this token again.
+        // The axios interceptor is the primary handler for 401s: it already
+        // attempted a token refresh and retried this request. We reach here only
+        // when the interceptor's refresh also failed (tokens already cleared) or
+        // when this was the retried request itself (_retry=true, passed through).
+        // Belt-and-suspenders: ensure all state is wiped.
         LAST_AUTH_ME_401_AT = Date.now();
         try { await clearTokens(); } catch { /* best-effort */ }
         setAuthState({ user: null, accessToken: null, refreshToken: null });
-        __DEV__ && console.log('[auth] /auth/me 401 – tokens cleared, signed out');
+        console.warn('[auth] /auth/me 401 fallback — fully signed out');
       }
 
       return false;
