@@ -47,10 +47,12 @@ const ensureAndroidChannel = async () => {
 };
 
 const doRegister = async () => {
+  log('doRegister called', { platform: Platform.OS, isDevice: Device.isDevice });
   if (shouldSkip()) return;
 
   try {
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
+    log('Requesting push permission', { existingStatus });
     let finalStatus = existingStatus;
 
     if (existingStatus !== 'granted') {
@@ -58,7 +60,11 @@ const doRegister = async () => {
       finalStatus = permissionResponse.status;
     }
 
-    log('permission status', { status: finalStatus });
+    if (finalStatus === 'granted') {
+      log('Permission granted');
+    } else {
+      log('Permission denied', { status: finalStatus });
+    }
     if (finalStatus !== 'granted') return;
 
     const projectId = getProjectId();
@@ -66,6 +72,7 @@ const doRegister = async () => {
       log('missing EAS projectId - set EXPO_PUBLIC_EAS_PROJECT_ID');
       return;
     }
+    log('Using projectId', { projectId });
 
     const tokenResponse = await Notifications.getExpoPushTokenAsync({ projectId });
     const token = tokenResponse?.data;
@@ -73,19 +80,19 @@ const doRegister = async () => {
       log('no push token returned');
       return;
     }
+    log('Expo token retrieved', { token });
 
     await ensureAndroidChannel();
     await AsyncStorage.setItem('expoPushToken', token);
 
     const url = buildUrl('notifications/register');
-    log('registering token with backend', { url });
-    await axios.post(url, {
+    log('Sending token to backend', { url });
+    const response = await axios.post(url, {
       expoPushToken: token,
     });
-
-    log('token registered successfully');
-  } catch (err) {
-    log('error during auto registration', { error: String(err) });
+    log('Register success', { status: response.status, data: response.data });
+  } catch (err: any) {
+    log('Register failure', { error: String(err), status: err?.response?.status, data: err?.response?.data });
   }
 };
 

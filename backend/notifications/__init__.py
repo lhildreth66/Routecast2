@@ -326,17 +326,20 @@ async def stop_route_monitor(request: StopRouteMonitorRequest):
 async def register_push_token(request: ExpoRegisterRequest):
     """Register or update a user's Expo push token."""
     token = request.expoPushToken
+    logger.info("[push-register] received request token=%s userId=%s", token[:20] + "...", request.userId)
     if not token.startswith("ExponentPushToken"):
+        logger.warning("[push-register] rejected invalid token prefix: %s", token[:20])
         raise HTTPException(status_code=400, detail="Invalid Expo push token")
 
     try:
         _store_token(token, request.userId, request.enabled)
+        logger.info("[push-register] token stored successfully token=%s", token[:20] + "...")
         return {
             "ok": True,
             "token": token[:20] + "...",
         }
     except Exception as exc:
-        logger.error("Error registering push token: %s", exc)
+        logger.error("[push-register] error storing token: %s", exc)
         raise HTTPException(status_code=500, detail=f"Error registering token: {exc}")
 
 
