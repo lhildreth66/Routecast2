@@ -417,6 +417,46 @@ def send_signup_reminder_email(
     return _send_email(email, subject, html_content)
 
 
+def send_signup_notification_email(
+    user_id: str,
+    email: str,
+    name: Optional[str],
+    created_at: str,
+    email_verified: bool = False,
+) -> bool:
+    """Send an internal notification to support when a new user signs up."""
+    subject = "New RouteCast Signup"
+    name_display = name or "(not provided)"
+    verified_label = "Yes" if email_verified else "No"
+
+    html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; color: #333; }}
+        .container {{ max-width: 500px; margin: 0 auto; padding: 20px; }}
+        table {{ width: 100%; border-collapse: collapse; margin-top: 16px; }}
+        td {{ padding: 8px 12px; border: 1px solid #e5e7eb; }}
+        td:first-child {{ font-weight: bold; background: #f9fafb; width: 40%; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>&#128228; New RouteCast Signup</h2>
+        <table>
+            <tr><td>Name</td><td>{name_display}</td></tr>
+            <tr><td>Email</td><td>{email}</td></tr>
+            <tr><td>User ID</td><td>{user_id}</td></tr>
+            <tr><td>Created At</td><td>{created_at}</td></tr>
+            <tr><td>Email Verified</td><td>{verified_label}</td></tr>
+        </table>
+    </div>
+</body>
+</html>"""
+
+    return _send_email(CONTACT_TO_EMAIL, subject, html_content)
+
+
 def send_test_email(to: str, subject: str, text: str) -> bool:
     """Send a simple test email for operational checks."""
     html_content = f"<p>{text}</p>"

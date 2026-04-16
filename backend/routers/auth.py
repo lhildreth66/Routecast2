@@ -41,7 +41,7 @@ from services.auth_service import (
     authenticate_user
 )
 from services.email_service import (
-    send_verification_email, send_password_reset_email
+    send_verification_email, send_password_reset_email, send_signup_notification_email
 )
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -131,6 +131,32 @@ async def signup(
             verification_token,
             user_data.name
         )
+
+        # Internal signup notification — fire-and-forget, never blocks signup
+        try:
+            created_at_str = str(user.get("created_at", ""))
+            sent = send_signup_notification_email(
+                user_id=user["user_id"],
+                email=user["email"],
+                name=user.get("name"),
+                created_at=created_at_str,
+                email_verified=bool(user.get("email_verified", False)),
+            )
+            if sent:
+                logger.info(
+                    "signup notification sent user_id=%s",
+                    user["user_id"],
+                )
+            else:
+                logger.warning(
+                    "signup notification failed user_id=%s reason=send_returned_false",
+                    user["user_id"],
+                )
+        except Exception as _notify_exc:
+            logger.error(
+                "signup notification failed user_id=%s error=%s",
+                user["user_id"], _notify_exc,
+            )
 
         return JSONResponse(
             status_code=201,
