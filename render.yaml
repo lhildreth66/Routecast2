@@ -40,3 +40,25 @@ services:
       - key: NODE_VERSION
         value: 18.19.0
     autoDeploy: true
+
+  # Signup reminder emails – runs every hour
+  - type: cron
+    name: routecast-signup-reminders
+    runtime: python
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    schedule: "0 * * * *"
+    command: python run_signup_reminders.py
+    envVars:
+      - key: MONGODB_URI
+        sync: false
+      - key: DB_NAME
+        value: routecast_db
+      - key: BACKEND_PUBLIC_URL
+        value: https://api.routecastweather.com
+      - key: SENDGRID_API_KEY
+        sync: false
+      - key: SEND_FROM_EMAIL
+        sync: false
+      - key: PYTHON_VERSION
+        value: 3.11.0

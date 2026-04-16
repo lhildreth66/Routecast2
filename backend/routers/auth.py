@@ -9,6 +9,8 @@ from fastapi.responses import JSONResponse, RedirectResponse, HTMLResponse
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timedelta, timezone
+import hmac
+import hashlib
 import logging
 import os
 from html import escape as html_escape
@@ -755,3 +757,62 @@ async def logout(current_user: dict = Depends(get_current_user)):
     """Logout user (client should discard tokens)"""
     # In a more advanced implementation, you could blacklist the token
     return {"message": "Logged out successfully"}
+
+
+# ---------------------------------------------------------------------------
+# Email opt-out (unsubscribe from reminder emails)
+# ---------------------------------------------------------------------------
+
+_EMAIL_UNSUBSCRIBE_SECRET = (
+    os.environ.get("EMAIL_UNSUBSCRIBE_SECRET")
+    or os.environ.get("SECRET_KEY", "")
+)
+
+
+def _verify_unsubscribe_token(user_id: str, token: str) -> bool:
+    """Constant-time HMAC verification for unsubscribe tokens."""
+    if not _EMAIL_UNSUBSCRIBE_SECRET:
+        return False
+    secret = _EMAIL_UNSUBSCRIBE_SECRET.encode("utf-8")
+    expected = hmac.new(secret, user_id.encode("utf-8"), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, token)
+
+
+@router.get("/email-opt-out")
+async def email_opt_out(token: str, uid: str, request: Request):
+    """One-click unsubscribe from signup reminder emails.
+
+    Linked from reminder emails. Sets email_opt_out=True on the matching user
+    so no further reminder emails are sent.
+    """
+    db = get_db(request)
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    if not _verify_unsubscribe_token(uid, token):
+        raise HTTPException(status_code=400, detail="Invalid or expired unsubscribe link")
+
+    result = await db.users.update_one(
+        {"user_id": uid},
+        {"$set": {"email_opt_out": True}},
+    )
+
+    if result.matched_count == 0:
+        # Try by _id string as fallback
+        await db.users.update_one(
+            {"_id": uid},
+            {"$set": {"email_opt_out": True}},
+        )
+
+    logger.info("[email_opt_out] user_id=%s opted out of reminder emails", uid)
+    return HTMLResponse(
+        content=(
+            "<html><body style='font-family:sans-serif;text-align:center;padding:40px;'>"
+            "<h2>&#10003; You have been unsubscribed</h2>"
+            "<p>You will no longer receive signup reminder emails from RouteCast.</p>"
+            "<p>You can still log in and manage your account at "
+            "<a href='https://routecastweather.com'>routecastweather.com</a>.</p>"
+            "</body></html>"
+        ),
+        status_code=200,
+    )

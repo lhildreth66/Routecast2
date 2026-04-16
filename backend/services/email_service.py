@@ -313,6 +313,110 @@ def send_subscription_confirmation_email(email: str, plan: str, name: Optional[s
     return _send_email(email, f"Your RouteCast {plan_display} subscription is active!", html_content)
 
 
+def send_signup_reminder_email(
+    email: str,
+    name: Optional[str],
+    stage: int,
+    unsubscribe_url: str,
+) -> bool:
+    """Send an abandoned-signup reminder email.
+
+    stage: 1 = ~1 hour after signup (gentle nudge)
+            2 = ~24 hours after signup (feature highlight)
+            3 = ~72 hours after signup (last-chance / urgency)
+    """
+    greeting = f"Hi {name}," if name else "Hi there,"
+    subscription_url = f"{FRONTEND_URL}/subscription"
+
+    if stage == 1:
+        subject = "You're almost set up on RouteCast 🌦️"
+        headline = "You're Almost Set Up"
+        header_gradient = "linear-gradient(135deg, #eab308 0%, #f59e0b 100%)"
+        button_color = "#eab308"
+        button_text_color = "#000"
+        body_intro = (
+            "You signed up for RouteCast but haven't started a free trial yet. "
+            "It only takes 30 seconds — start planning weather-smart routes today."
+        )
+        body_extra = ""
+        cta_label = "Start My Free Trial"
+    elif stage == 2:
+        subject = "Don't miss out on smarter route planning 🚗"
+        headline = "See What You're Missing"
+        header_gradient = "linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)"
+        button_color = "#3b82f6"
+        button_text_color = "#fff"
+        body_intro = (
+            "Thousands of drivers use RouteCast to dodge hazards, check bridge clearances, "
+            "and get AI-powered weather summaries for every mile of their trip."
+        )
+        body_extra = """
+                <ul style="margin: 12px 0; padding-left: 20px; color: #374151;">
+                    <li>⚠️ Real-time hazard alerts along your route</li>
+                    <li>🌉 Bridge height clearances for RVs &amp; trucks</li>
+                    <li>🤖 AI weather summaries for the whole journey</li>
+                    <li>🛎️ Push notifications before you leave</li>
+                </ul>"""
+        cta_label = "Start Free Trial — No Credit Card Needed"
+    else:
+        subject = "Last chance: your free RouteCast trial is waiting ⏰"
+        headline = "Your Free Trial Is Waiting"
+        header_gradient = "linear-gradient(135deg, #ef4444 0%, #dc2626 100%)"
+        button_color = "#ef4444"
+        button_text_color = "#fff"
+        body_intro = (
+            "This is a friendly reminder that your free 7-day trial is just one tap away. "
+            "After the trial you can cancel anytime — no strings attached."
+        )
+        body_extra = ""
+        cta_label = "Claim My Free Trial Now"
+
+    html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8"/>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ background: {header_gradient}; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }}
+        .header h1 {{ color: #fff; margin: 0; font-size: 26px; }}
+        .content {{ background: #f9fafb; padding: 30px; border-radius: 0 0 10px 10px; }}
+        .button {{ display: inline-block; background: {button_color}; color: {button_text_color}; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: bold; margin: 20px 0; font-size: 16px; }}
+        .footer {{ text-align: center; padding: 20px; color: #9ca3af; font-size: 12px; }}
+        .unsubscribe {{ color: #9ca3af; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🌦️ {headline}</h1>
+        </div>
+        <div class="content">
+            <p>{greeting}</p>
+            <p>{body_intro}</p>{body_extra}
+            <p style="text-align: center;">
+                <a href="{subscription_url}" class="button">{cta_label}</a>
+            </p>
+            <p style="color: #6b7280; font-size: 14px;">
+                Already subscribed or not interested? You can
+                <a href="{unsubscribe_url}" style="color: #6b7280;">unsubscribe from these reminders</a>.
+            </p>
+        </div>
+        <div class="footer">
+            <p>&copy; 2025 RouteCast Weather. All rights reserved.</p>
+            <p><a href="{unsubscribe_url}" class="unsubscribe">Unsubscribe from reminder emails</a></p>
+        </div>
+    </div>
+</body>
+</html>"""
+
+    logger.info(
+        "[reminder_email] sending stage=%d to=%s",
+        stage, email,
+    )
+    return _send_email(email, subject, html_content)
+
+
 def send_test_email(to: str, subject: str, text: str) -> bool:
     """Send a simple test email for operational checks."""
     html_content = f"<p>{text}</p>"
