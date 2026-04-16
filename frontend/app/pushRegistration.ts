@@ -7,6 +7,9 @@ import { Platform } from 'react-native';
 import { API_BASE, buildUrl } from './apiConfig';
 
 let inFlight: Promise<void> | null = null;
+// Tracks which userId has already been registered in this process lifetime.
+// Prevents duplicate POSTs when the auth-gated effect re-evaluates.
+let registeredForUserId: string | null = null;
 
 const log = (message: string, extra?: Record<string, any>) => {
   if (extra) {
@@ -46,8 +49,8 @@ const ensureAndroidChannel = async () => {
   }
 };
 
-const doRegister = async () => {
-  log('doRegister called', { platform: Platform.OS, isDevice: Device.isDevice });
+const doRegister = async (userId: string, accessToken: string) => {
+  log('doRegister called', { platform: Platform.OS, isDevice: Device.isDevice, userId });
   if (shouldSkip()) return;
 
   try {
@@ -86,19 +89,26 @@ const doRegister = async () => {
     await AsyncStorage.setItem('expoPushToken', token);
 
     const url = buildUrl('notifications/register');
-    log('Sending token to backend', { url });
-    const response = await axios.post(url, {
-      expoPushToken: token,
-    });
+    log('Sending token to backend', { url, userId });
+    const response = await axios.post(
+      url,
+      { expoPushToken: token, userId },
+      { headers: { Authorization: `Bearer ${accessToken}` } },
+    );
     log('Register success', { status: response.status, data: response.data });
+    registeredForUserId = userId;
   } catch (err: any) {
     log('Register failure', { error: String(err), status: err?.response?.status, data: err?.response?.data });
   }
 };
 
-export const registerDevicePushTokenOnce = async () => {
+export const registerDevicePushTokenOnce = async (userId: string, accessToken: string) => {
+  if (registeredForUserId === userId) {
+    log('already registered for this user', { userId });
+    return;
+  }
   if (inFlight) return inFlight;
-  inFlight = doRegister().finally(() => {
+  inFlight = doRegister(userId, accessToken).finally(() => {
     inFlight = null;
   });
   return inFlight;

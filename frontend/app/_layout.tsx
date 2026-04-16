@@ -148,25 +148,26 @@ Notifications.setNotificationHandler({
   }),
 });
 
-export default function RootLayout() {
+/**
+ * Runs inside AuthProvider so it can access useAuth().
+ * Fires only after the user is authenticated; passes userId so the backend
+ * can associate the token with the account. Deduped by userId across re-renders.
+ */
+function NativePushRegistrar() {
+  const { accessToken, user } = useAuth();
   useEffect(() => {
-    // Request notification permissions
-    async function requestPermissions() {
-      if (Platform.OS !== 'web') {
-        const { status } = await Notifications.requestPermissionsAsync();
-        if (status !== 'granted') {
-          console.log('Notification permissions not granted');
-        } else {
-          await registerDevicePushTokenOnce();
-        }
-      }
-    }
-    requestPermissions();
-  }, []);
+    if (Platform.OS === 'web') return;
+    if (!accessToken || !user?.user_id) return;
+    registerDevicePushTokenOnce(user.user_id, accessToken);
+  }, [accessToken, user?.user_id]);
+  return null;
+}
 
+export default function RootLayout() {
   return (
     <AuthProvider>
       <StatusBar style="light" />
+      <NativePushRegistrar />
       <WebGate />
       <NativeAuthGuard />
       <PaywallGuard />
