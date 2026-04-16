@@ -92,7 +92,7 @@ interface AutocompleteSuggestion {
 }
 
 export default function HomeScreen() {
-  const { user, isAuthenticated, accessToken, isPremium, isLoading: authLoading, hasHydrated, refreshUser } = useAuth();
+  const { user, isAuthenticated, accessToken, isPremium, isLoading: authLoading, hasHydrated, refreshUser, refreshAccessToken } = useAuth();
   const isMobileWeb = IS_WEB && SCREEN_WIDTH < 768;
   const pathname = usePathname();
 
@@ -341,11 +341,31 @@ export default function HomeScreen() {
         await AsyncStorage.removeItem('expoPushToken');
       }
 
-      await axios.post(
-        `${API_BASE}/api/push/settings`,
-        { push_enabled: nextEnabled, push_token: pushToken, platform: Platform.OS },
-        { headers: { Authorization: `Bearer ${authToken}` }, withCredentials: true },
-      );
+      await (async () => {
+        const doPost = async (token: string) =>
+          axios.post(
+            `${API_BASE}/api/push/settings`,
+            { push_enabled: nextEnabled, push_token: pushToken, platform: Platform.OS },
+            { headers: { Authorization: `Bearer ${token}` }, withCredentials: true },
+          );
+        try {
+          await doPost(authToken!);
+        } catch (firstErr: any) {
+          if (firstErr?.response?.status === 401) {
+            // Token expired — refresh once and retry
+            __DEV__ && console.log('[push-toggle] 401 on settings — refreshing token');
+            const refreshed = await refreshAccessToken();
+            const freshToken = refreshed ? await getAuthToken() : null;
+            if (freshToken) {
+              await doPost(freshToken);
+            } else {
+              throw firstErr;
+            }
+          } else {
+            throw firstErr;
+          }
+        }
+      })();
       setAlertsEnabled(nextEnabled && !!pushToken);
       __DEV__ && console.log('[push-toggle] saved to backend – push_enabled:', nextEnabled, 'hasToken:', !!pushToken);
     } catch (err: any) {
