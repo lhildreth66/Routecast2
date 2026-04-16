@@ -5,7 +5,7 @@ Handles Stripe checkout, webhooks, and subscription management
 """
 from fastapi import APIRouter, HTTPException, Depends, Header, Request
 from typing import Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import os
 import asyncio
 import logging
@@ -291,12 +291,45 @@ async def verify_google_purchase(
         logger.warning("[GOOGLE_VERIFY] malformed payload user_id=%s", user_id)
         raise HTTPException(status_code=400, detail="purchase_token and product_id are required")
 
+    # ── OPTIMISTIC TRIAL GRANT ───────────────────────────────────────────────
+    # Grant trial access BEFORE calling Google so the user has immediate premium
+    # access regardless of API latency, 404 (token not yet indexed), or transient
+    # failures.  Google verification then corrects/confirms the status afterward.
+    now_pre = datetime.now(timezone.utc)
+    pre_user = await db.users.find_one({"user_id": user_id})
+    if not pre_user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if pre_user.get("subscription_status") not in ("active", "canceling"):
+        plan_immediate = "yearly" if "yearly" in data.product_id.lower() else "monthly"
+        immediate_grant: dict = {
+            "subscription_status": "trialing",
+            "is_premium": True,
+            "subscription_plan": plan_immediate,
+            "subscription_provider": "google",
+            "google_purchase_token": data.purchase_token,
+            "updated_at": now_pre,
+        }
+        if not pre_user.get("trial_start"):
+            immediate_grant["trial_start"] = now_pre
+        if not pre_user.get("trial_end"):
+            trial_end_pre = now_pre + timedelta(days=7)
+            immediate_grant["trial_end"] = trial_end_pre
+            immediate_grant["subscription_expiration"] = trial_end_pre
+        await db.users.update_one({"user_id": user_id}, {"$set": immediate_grant})
+        logger.info(
+            "[GOOGLE_VERIFY] optimistic trial granted user_id=%s plan=%s trial_end=%s",
+            user_id,
+            plan_immediate,
+            immediate_grant.get("trial_end"),
+        )
+
     result = await verify_google_receipt(data.purchase_token, data.product_id, data.package_name)
 
     if not result.get("verified_with_google", False):
-        # Do not mutate entitlement state on transient verification failures.
+        # Transient failure — optimistic trial already written above; preserve it.
         logger.warning(
-            "[GOOGLE_VERIFY] verification unavailable user_id=%s product_id=%s token=%s message=%s error_code=%s",
+            "[GOOGLE_VERIFY] verification unavailable user_id=%s product_id=%s token=%s message=%s error_code=%s — trial access preserved",
             user_id,
             data.product_id,
             token_preview,
@@ -331,11 +364,33 @@ async def verify_google_purchase(
                 update_data["trial_end"] = expiration
             if not existing_user.get("trial_start"):
                 update_data["trial_start"] = now
+        elif status in ("active", "canceling"):
+            # Active paid subscription — also capture trial timestamps if missing
+            if not existing_user.get("trial_start"):
+                update_data["trial_start"] = now
+            if not existing_user.get("trial_end"):
+                update_data["trial_end"] = expiration or (now + timedelta(days=7))
     else:
-        update_data["is_premium"] = False
-        update_data["subscription_plan"] = "free"
-        update_data["trial_end"] = None
-        update_data["trial_start"] = None
+        # Google reports no active entitlement (e.g. token not yet indexed → 404).
+        # Protect any trial window already granted: if the user is still within
+        # their trial period, keep trialing/premium and do NOT null trial fields.
+        user_trial_end = existing_user.get("trial_end")
+        if isinstance(user_trial_end, datetime) and user_trial_end.tzinfo is None:
+            user_trial_end = user_trial_end.replace(tzinfo=timezone.utc)
+        within_trial = isinstance(user_trial_end, datetime) and user_trial_end > now
+        if within_trial:
+            # Override Google's "expired/inactive" — trial grants access
+            update_data["subscription_status"] = "trialing"
+            update_data["is_premium"] = True
+            logger.info(
+                "[GOOGLE_VERIFY] Google invalid but trial window active user_id=%s trial_end=%s",
+                user_id,
+                user_trial_end,
+            )
+        else:
+            update_data["is_premium"] = False
+            update_data["subscription_plan"] = "free"
+            # Preserve trial timestamps for audit trail; do NOT null them out
 
     await db.users.update_one({"user_id": user_id}, {"$set": update_data})
 

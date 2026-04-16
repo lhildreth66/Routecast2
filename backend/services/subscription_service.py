@@ -410,6 +410,24 @@ async def check_subscription_status(db: AsyncIOMotorDatabase, user_id: str) -> d
     else:
         is_premium = status in PREMIUM_STATUSES
 
+    # ── Trial-end safety net ─────────────────────────────────────────────────
+    # If status checks above concluded is_premium=False but the user has an
+    # unexpired trial_end, they still have earned access (trial granted on
+    # purchase; verification may have lagged or failed transiently).
+    if not is_premium:
+        trial_end_db = user.get("trial_end")
+        if trial_end_db and isinstance(trial_end_db, datetime):
+            if trial_end_db.tzinfo is None:
+                trial_end_db = trial_end_db.replace(tzinfo=timezone.utc)
+            if trial_end_db > now:
+                is_premium = True
+                status = "trialing"
+                logger.info(
+                    "[SUBSCRIPTION] trial_end safety net activated user=%s trial_end=%s",
+                    user_id,
+                    trial_end_db,
+                )
+
     return {
         "status": status,
         "is_premium": is_premium,
