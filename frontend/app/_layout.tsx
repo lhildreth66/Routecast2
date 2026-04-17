@@ -1,4 +1,5 @@
 import { Stack, router, useRootNavigationState, usePathname } from 'expo-router';
+import Head from 'expo-router/head';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect } from 'react';
 import * as Notifications from 'expo-notifications';
@@ -166,6 +167,13 @@ function NativePushRegistrar() {
 export default function RootLayout() {
   return (
     <AuthProvider>
+      {Platform.OS === 'web' && (
+        <Head>
+          {/* Google tag (gtag.js) */}
+          <script async src="https://www.googletagmanager.com/gtag/js?id=AW-18004375571" />
+          <script>{`window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag('js',new Date());gtag('config','AW-18004375571');`}</script>
+        </Head>
+      )}
       <StatusBar style="light" />
       <NativePushRegistrar />
       <WebGate />
