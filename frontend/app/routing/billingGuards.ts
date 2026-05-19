@@ -2,6 +2,8 @@ export type GuardUser = {
   email_verified?: boolean;
   is_premium?: boolean;
   subscription_status?: string | null;
+  subscription_provider?: string | null;
+  subscription_expiration?: string | null;
 } | null;
 
 export const ACTIVE_SUBSCRIPTION_STATUSES = new Set(['trialing', 'active', 'canceling']);
@@ -20,8 +22,20 @@ function topSegment(pathname: string): string {
   return '/' + (pathname.split('/').filter(Boolean)[0] ?? '');
 }
 
+// Admin-only entitlement bypass.
+// ALL four conditions must be true. Any other provider value — including null,
+// undefined, "google_play", "stripe", "apple" — fails at the first check.
+function isAdminEntitled(user: NonNullable<GuardUser>): boolean {
+  if (user.subscription_provider !== 'admin') return false;   // strict equality
+  if (!user.is_premium) return false;
+  if ((user.subscription_status ?? '').toLowerCase() !== 'active') return false;
+  if (!user.subscription_expiration) return false;            // must exist
+  return new Date(user.subscription_expiration) > new Date(); // must be future
+}
+
 export function hasActiveSubscription(user: GuardUser): boolean {
   if (!user) return false;
+  if (isAdminEntitled(user)) return true;
   return Boolean(
     user.email_verified &&
     user.is_premium &&
