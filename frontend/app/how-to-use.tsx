@@ -5,7 +5,9 @@ import {
   StyleSheet, 
   TouchableOpacity, 
   ScrollView, 
-  Dimensions 
+  Dimensions,
+  Platform,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -329,15 +331,26 @@ export default function UserGuideScreen() {
           <Text style={styles.videoHeading}>Watch: How to Use RouteCast in Minutes</Text>
           <Text style={styles.videoSubtitle}>Plan your drive with weather & hazard foresight.</Text>
           <View style={styles.howtoVideoWrapper}>
-            <iframe
-              src="https://www.youtube.com/embed/fS-wJRoVlzc?rel=0"
-              title="RouteCast Tutorial"
-              frameBorder="0"
-              loading="lazy"
-              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-              allowFullScreen
-              style={styles.howtoVideoIframe as any}
-            />
+            {Platform.OS === 'web' ? (
+              <iframe
+                src="https://www.youtube.com/embed/Cn4cmvjykEY?start=21&rel=0"
+                title="RouteCast Tutorial"
+                frameBorder="0"
+                loading="lazy"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+                style={styles.howtoVideoIframe as any}
+              />
+            ) : (
+              <TouchableOpacity
+                style={styles.watchVideoBtn}
+                onPress={() => Linking.openURL('https://www.youtube.com/watch?v=Cn4cmvjykEY&t=21s')}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="logo-youtube" size={28} color="#ef4444" />
+                <Text style={styles.watchVideoText}>Watch Tutorial on YouTube</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
 
@@ -560,6 +573,23 @@ const styles = StyleSheet.create({
     height: '100%',
     borderRadius: 12,
     borderWidth: 0,
+  },
+  watchVideoBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    backgroundColor: '#1a1a1a',
+    borderRadius: 10,
+    paddingVertical: 18,
+    paddingHorizontal: 20,
+    borderWidth: 1,
+    borderColor: '#ef444440',
+  },
+  watchVideoText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
   },
   welcomeBanner: {
     backgroundColor: '#1a1a2e',
