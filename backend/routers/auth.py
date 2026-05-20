@@ -723,7 +723,7 @@ async def get_me(request: Request, current_user: dict = Depends(get_current_user
 
     mock_user = MockUser(user, sub_status)
     entitlements = get_user_entitlements(mock_user)
-    is_premium = user_is_premium(mock_user)
+    is_premium = sub_status["is_premium"]
 
     normalized_status = sub_status["status"]
     if normalized_status == "trialing" and is_premium:
