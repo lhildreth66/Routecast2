@@ -476,22 +476,22 @@ export default function UserGuideScreen() {
           </Text>
           
           <View style={styles.pricingOptions}>
-            <View style={styles.pricingOption}>
+            <TouchableOpacity style={styles.pricingOption} onPress={() => router.push('/subscription')} activeOpacity={0.75}>
               <Text style={styles.pricingAmount}>$9.99</Text>
               <Text style={styles.pricingPeriod}>per month</Text>
               <Text style={styles.pricingNote}>Billed monthly</Text>
-            </View>
+            </TouchableOpacity>
             
             <View style={styles.pricingDivider} />
             
-            <View style={[styles.pricingOption, styles.pricingBest]}>
+            <TouchableOpacity style={[styles.pricingOption, styles.pricingBest]} onPress={() => router.push('/subscription')} activeOpacity={0.75}>
               <View style={styles.saveBadge}>
                 <Text style={styles.saveBadgeText}>SAVE 50%</Text>
               </View>
               <Text style={styles.pricingAmount}>$59.99</Text>
               <Text style={styles.pricingPeriod}>per year</Text>
               <Text style={styles.pricingNote}>Just $5/month</Text>
-            </View>
+            </TouchableOpacity>
           </View>
           
           <Text style={styles.pricingFooter}>
@@ -500,7 +500,7 @@ export default function UserGuideScreen() {
         </View>
 
         {/* Support */}
-        <View style={styles.supportCard}>
+        <TouchableOpacity style={styles.supportCard} onPress={() => Linking.openURL('mailto:routecastapp@gmail.com?subject=RouteCast%20Support%20Request')} activeOpacity={0.75}>
           <Ionicons name="help-buoy" size={24} color="#8b5cf6" />
           <View style={styles.supportInfo}>
             <Text style={styles.supportTitle}>Need Help?</Text>
@@ -508,7 +508,7 @@ export default function UserGuideScreen() {
               Contact support for assistance with any feature.
             </Text>
           </View>
-        </View>
+        </TouchableOpacity>
 
         <View style={{ height: 40 }} />
       </ScrollView>
