@@ -457,6 +457,86 @@ def send_signup_notification_email(
     return _send_email(CONTACT_TO_EMAIL, subject, html_content)
 
 
+def send_verification_reminder_email(
+    email: str,
+    name: Optional[str],
+    stage: int,
+    verify_url: str,
+    unsubscribe_url: str,
+) -> bool:
+    """Send a verification nudge email with a fresh verify link.
+
+    stage 1: ~1 h after signup  — gentle nudge, link is valid (within 24 h)
+    stage 2: ~24 h after signup — stronger nudge, fresh token issued by caller
+
+    Called only by run_verification_reminders.py. Never touches billing or
+    subscription logic.
+    """
+    greeting = f"Hi {name}," if name else "Hi there,"
+
+    if stage == 1:
+        subject  = "Please verify your RouteCast email \U0001f326️"
+        headline = "One Step Left"
+        gradient = "linear-gradient(135deg, #eab308 0%, #f59e0b 100%)"
+        btn_bg   = "#eab308"
+        btn_fg   = "#000"
+        body     = (
+            "You're almost in! Click the button below to verify your "
+            "email address and unlock RouteCast's weather-smart route planning."
+        )
+    else:
+        subject  = "Still waiting to verify your RouteCast email \u23f3"
+        headline = "Don't Forget to Verify"
+        gradient = "linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)"
+        btn_bg   = "#3b82f6"
+        btn_fg   = "#fff"
+        body     = (
+            "Your RouteCast account is ready \u2014 we just need you to verify "
+            "your email before you can start planning safer drives."
+        )
+
+    html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8"/>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 0; }}
+        .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+        .header {{ background: {gradient}; padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }}
+        .header h1 {{ color: #fff; margin: 0; font-size: 26px; }}
+        .content {{ background: #f9fafb; padding: 30px; border-radius: 0 0 10px 10px; }}
+        .button {{ display: inline-block; background: {btn_bg}; color: {btn_fg}; padding: 14px 32px; text-decoration: none; border-radius: 8px; font-weight: bold; margin: 20px 0; font-size: 16px; }}
+        .footer {{ text-align: center; padding: 20px; color: #9ca3af; font-size: 12px; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header"><h1>\U0001f326\ufe0f {headline}</h1></div>
+        <div class="content">
+            <p>{greeting}</p>
+            <p>{body}</p>
+            <p style="text-align: center;">
+                <a href="{verify_url}" class="button">Verify My Email</a>
+            </p>
+            <p style="color: #6b7280; font-size: 14px;">Or copy this link into your browser:<br/>
+                <span style="word-break: break-all;">{verify_url}</span></p>
+            <p style="color: #6b7280; font-size: 14px;">This link expires in 24 hours.</p>
+            <p style="color: #6b7280; font-size: 14px;">
+                <a href="{unsubscribe_url}" style="color: #9ca3af;">Unsubscribe from these reminders</a>
+            </p>
+        </div>
+        <div class="footer">
+            <p>&copy; 2025 RouteCast Weather. All rights reserved.</p>
+            <p><a href="{unsubscribe_url}" style="color: #9ca3af;">Unsubscribe</a></p>
+        </div>
+    </div>
+</body>
+</html>"""
+
+    logger.info("[verify_reminder_email] sending stage=%d to=%s", stage, email)
+    return _send_email(email, subject, html_content)
+
+
 def send_test_email(to: str, subject: str, text: str) -> bool:
     """Send a simple test email for operational checks."""
     html_content = f"<p>{text}</p>"
