@@ -9,6 +9,9 @@
       "android": {
         "autoIncrement": false
       },
+      "ios": {
+        "autoIncrement": false
+      },
       "env": {
         "EXPO_PUBLIC_BACKEND_URL": "https://api.routecastweather.com",
         "EXPO_PUBLIC_MAPBOX_ACCESS_TOKEN": "unset"
@@ -28,6 +31,11 @@
     "production": {
       "android": {
         "track": "internal"
+      },
+      "ios": {
+        "appleId": "routecastapp@gmail.com",
+        "ascAppId": "",
+        "appleTeamId": "2688QVM8T9"
       }
     }
   }

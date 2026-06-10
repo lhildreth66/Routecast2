@@ -20,8 +20,9 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.promedtrans01.weatherredo",
+      "bundleIdentifier": "com.routecast.app",
       "buildNumber": "1",
+      "name": "RouteCast Weather",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Routecast needs your location to show weather along your route.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Routecast needs your location to provide weather updates during your trip.",
