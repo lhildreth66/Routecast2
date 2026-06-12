@@ -1,6 +1,16 @@
 import React, { useState } from 'react';
-import { View, Text, ScrollView, SafeAreaView, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRoute, useNavigation } from '@react-navigation/native';
+import { router } from 'expo-router';
+
+function goBack() {
+  if (router.canGoBack()) {
+    router.back();
+  } else {
+    router.replace('/');
+  }
+}
 import { Ionicons } from '@expo/vector-icons';
 
 interface RouteData {
@@ -20,7 +30,7 @@ export default function TruckerAlertsScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={() => navigation.goBack()}>
+          <TouchableOpacity onPress={goBack}>
             <Ionicons name="chevron-back" size={24} color="#e4e4e7" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>🚛 Trucker Alerts</Text>
@@ -40,7 +50,7 @@ export default function TruckerAlertsScreen() {
     <SafeAreaView style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()}>
+        <TouchableOpacity onPress={goBack}>
           <Ionicons name="chevron-back" size={24} color="#e4e4e7" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>🚛 Trucker Alerts</Text>

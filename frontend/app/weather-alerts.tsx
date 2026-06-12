@@ -5,9 +5,17 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  SafeAreaView,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
+
+function goBack() {
+  if (router.canGoBack()) {
+    router.back();
+  } else {
+    router.replace('/');
+  }
+}
 import { Ionicons } from '@expo/vector-icons';
 
 function pickAlertDetails(a: any): string {
@@ -135,7 +143,7 @@ export default function WeatherAlertsScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+      <TouchableOpacity onPress={goBack} style={styles.backButton}>
         <Ionicons name="arrow-back" size={24} color="#fff" />
         <Text style={styles.backText}>Back to Route</Text>
       </TouchableOpacity>

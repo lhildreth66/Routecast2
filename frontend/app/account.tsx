@@ -503,6 +503,7 @@ export default function AccountScreen() {
               </>
             )}
           </TouchableOpacity>
+          <Text style={styles.buildLabel}>v1.0.166 (build 9)</Text>
         </ScrollView>
       </SafeAreaView>
     </View>
@@ -743,6 +744,12 @@ const styles = StyleSheet.create({
     color: '#ef4444',
     fontSize: 15,
     fontWeight: '600',
+  },
+  buildLabel: {
+    color: '#52525b',
+    fontSize: 11,
+    textAlign: 'center',
+    paddingVertical: 12,
   },
   // Not logged in state
   notLoggedIn: {
