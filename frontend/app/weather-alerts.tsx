@@ -5,11 +5,10 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
-
-const goHome = () => router.replace('/');
 import { Ionicons } from '@expo/vector-icons';
 
 function pickAlertDetails(a: any): string {
@@ -57,6 +56,8 @@ interface TruckerWarning {
 }
 
 export default function WeatherAlertsScreen() {
+  const insets = useSafeAreaInsets();
+  const goHome = () => router.replace('/');
   const params = useLocalSearchParams();
   const routeData = params.routeData ? JSON.parse(params.routeData as string) : null;
   const bridgeAlertsEnabled = params.bridgeAlertsEnabled === 'true';
@@ -127,20 +128,29 @@ export default function WeatherAlertsScreen() {
 
   if (!routeData) {
     return (
-      <SafeAreaView style={styles.container}>
+      <View style={styles.container}>
+        <View style={[styles.header, { paddingTop: Platform.OS === 'ios' ? insets.top + 24 : 16 }]}>
+          <TouchableOpacity onPress={goHome} style={styles.backButton}>
+            <Ionicons name="home" size={22} color="#fff" />
+            <Text style={styles.backText}>Home</Text>
+          </TouchableOpacity>
+        </View>
         <View style={styles.errorContainer}>
           <Text style={styles.errorText}>No route data available</Text>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <TouchableOpacity onPress={goHome} style={styles.backButton}>
-        <Ionicons name="arrow-back" size={24} color="#fff" />
-        <Text style={styles.backText}>Back to Route</Text>
-      </TouchableOpacity>
+    <View style={styles.container}>
+      <View style={[styles.header, { paddingTop: Platform.OS === 'ios' ? insets.top + 24 : 16 }]}>
+        <TouchableOpacity onPress={goHome} style={styles.backButton}>
+          <Ionicons name="home" size={22} color="#fff" />
+          <Text style={styles.backText}>Home</Text>
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Weather Alerts</Text>
+      </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
         {/* Route Context */}
@@ -279,9 +289,14 @@ export default function WeatherAlertsScreen() {
 
         </View>
 
-        <View style={styles.bottomPadding} />
+        <TouchableOpacity onPress={goHome} style={styles.bottomHomeButton}>
+          <Ionicons name="home-outline" size={18} color="#a1a1aa" />
+          <Text style={styles.bottomHomeText}>Return to RouteCast Home</Text>
+        </TouchableOpacity>
+
+        <View style={[styles.bottomPadding, { paddingBottom: insets.bottom + 16 }]} />
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -289,6 +304,19 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#18181b',
+  },
+  header: {
+    backgroundColor: '#18181b',
+    paddingHorizontal: 8,
+    paddingBottom: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  headerTitle: {
+    color: '#e4e4e7',
+    fontSize: 17,
+    fontWeight: '600',
+    marginLeft: 8,
   },
   errorContainer: {
     flex: 1,
@@ -302,14 +330,30 @@ const styles = StyleSheet.create({
   backButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 6,
+    minHeight: 44,
   },
   backText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  bottomHomeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 16,
+    marginHorizontal: 16,
+    marginTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#27272a',
+  },
+  bottomHomeText: {
+    color: '#a1a1aa',
+    fontSize: 14,
   },
   content: {
     flex: 1,

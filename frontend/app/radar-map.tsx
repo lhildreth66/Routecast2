@@ -7,7 +7,7 @@ import {
   ActivityIndicator,
   Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { router } from 'expo-router';
 
@@ -34,6 +34,7 @@ interface AlertFeature {
 }
 
 export default function RadarMapScreen() {
+  const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
   const [alerts, setAlerts] = useState<AlertFeature[]>([]);
   const [userLocation, setUserLocation] = useState<{ lat: number; lon: number } | null>(null);
@@ -372,8 +373,8 @@ export default function RadarMapScreen() {
 
   if (loading) {
     return (
-      <SafeAreaView style={styles.loadingContainer}>
-        <View style={styles.header}>
+      <View style={styles.loadingContainer}>
+        <View style={[styles.header, { paddingTop: (Platform.OS === 'ios' ? insets.top + 24 : 16) }]}>
           <TouchableOpacity onPress={goHome}>
             <Ionicons name="chevron-back" size={24} color="#e4e4e7" />
           </TouchableOpacity>
@@ -384,14 +385,14 @@ export default function RadarMapScreen() {
           <ActivityIndicator size="large" color="#eab308" />
           <Text style={styles.loadingText}>Loading radar data...</Text>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
   if (error) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
+      <View style={styles.container}>
+        <View style={[styles.header, { paddingTop: (Platform.OS === 'ios' ? insets.top + 24 : 16) }]}>
           <TouchableOpacity onPress={goHome}>
             <Ionicons name="chevron-back" size={24} color="#e4e4e7" />
           </TouchableOpacity>
@@ -405,13 +406,13 @@ export default function RadarMapScreen() {
             <Text style={styles.retryButtonText}>Retry</Text>
           </TouchableOpacity>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
+    <View style={styles.container}>
+      <View style={[styles.header, { paddingTop: (Platform.OS === 'ios' ? insets.top + 24 : 16) }]}>
         <TouchableOpacity onPress={goHome}>
           <Ionicons name="chevron-back" size={24} color="#e4e4e7" />
         </TouchableOpacity>
@@ -491,7 +492,7 @@ export default function RadarMapScreen() {
           🌧️ Radar {alerts.length > 0 ? `& ${alerts.length} active alert${alerts.length !== 1 ? 's' : ''}` : '(alerts unavailable)'} • {API_BASE ? 'Live NWS data' : 'Limited mode - backend not connected'}
         </Text>
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 

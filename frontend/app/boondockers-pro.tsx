@@ -1,11 +1,13 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 
 export default function BoondockersProScreen() {
+  const insets = useSafeAreaInsets();
   const router = useRouter();
+  const goHome = () => router.replace('/');
 
   const features = [
     { id: 'checklist', icon: 'list', title: 'Camp Prep Checklist', route: '/camp-prep-checklist' },
@@ -31,11 +33,11 @@ export default function BoondockersProScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color="#fff" />
-          <Text style={styles.backText}>Back</Text>
+    <View style={styles.container}>
+      <View style={[styles.header, { paddingTop: Platform.OS === 'ios' ? insets.top + 24 : 16 }]}>
+        <TouchableOpacity onPress={goHome} style={styles.backButton}>
+          <Ionicons name="home" size={22} color="#fff" />
+          <Text style={styles.backText}>Home</Text>
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Boondockers</Text>
         <View style={styles.placeholder} />
@@ -67,7 +69,7 @@ export default function BoondockersProScreen() {
           ))}
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 

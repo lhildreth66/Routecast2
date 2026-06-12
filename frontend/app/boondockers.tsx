@@ -1,11 +1,12 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 
 import { Ionicons } from '@expo/vector-icons';
 
 export default function BoondockersScreen() {
+  const insets = useSafeAreaInsets();
   const router = useRouter();
   const goHome = () => router.replace('/');
 
@@ -36,8 +37,8 @@ export default function BoondockersScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
+    <View style={styles.container}>
+      <View style={[styles.header, { paddingTop: (Platform.OS === 'ios' ? insets.top + 24 : 16) }]}>
         <TouchableOpacity onPress={goHome} style={styles.backButton}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
           <Text style={styles.backText}>Back</Text>
@@ -72,7 +73,7 @@ export default function BoondockersScreen() {
           ))}
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 

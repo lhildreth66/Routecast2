@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRoute, useNavigation } from '@react-navigation/native';
 import { router } from 'expo-router';
 
@@ -14,6 +14,7 @@ interface RouteData {
 }
 
 export default function TruckerAlertsScreen() {
+  const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const route = useRoute();
   const routeData = (route.params as { routeData: string })?.routeData 
@@ -22,8 +23,8 @@ export default function TruckerAlertsScreen() {
 
   if (!routeData) {
     return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.header}>
+      <View style={styles.container}>
+        <View style={[styles.header, { paddingTop: (Platform.OS === 'ios' ? insets.top + 24 : 16) }]}>
           <TouchableOpacity onPress={goHome}>
             <Ionicons name="chevron-back" size={24} color="#e4e4e7" />
           </TouchableOpacity>
@@ -33,7 +34,7 @@ export default function TruckerAlertsScreen() {
         <View style={styles.centerContent}>
           <Text style={styles.emptyText}>No route data available</Text>
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
@@ -41,9 +42,9 @@ export default function TruckerAlertsScreen() {
   const hasWarnings = warnings && warnings.length > 0;
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: (Platform.OS === 'ios' ? insets.top + 24 : 16) }]}>
         <TouchableOpacity onPress={goHome}>
           <Ionicons name="chevron-back" size={24} color="#e4e4e7" />
         </TouchableOpacity>
@@ -105,7 +106,7 @@ export default function TruckerAlertsScreen() {
           </View>
         </View>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 

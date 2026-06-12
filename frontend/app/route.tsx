@@ -13,7 +13,7 @@ import {
   TextInput,
   Dimensions,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -386,6 +386,7 @@ const generateRadarMapHtml = (centerLat: number, centerLon: number): string => {
 };
 
 export default function RouteScreen() {
+  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams();
   const [isMounted, setIsMounted] = useState(false);
   const [routeData, setRouteData] = useState<RouteData | null>(null);
@@ -570,22 +571,22 @@ export default function RouteScreen() {
 
   if (!isMounted || loading) {
     return (
-      <SafeAreaView style={styles.loadingContainer}>
+      <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color="#eab308" />
         <Text style={styles.loadingText}>Loading route conditions...</Text>
-      </SafeAreaView>
+      </View>
     );
   }
 
   if (!routeData) {
     return (
-      <SafeAreaView style={styles.errorContainer}>
+      <View style={styles.errorContainer}>
         <Ionicons name="alert-circle" size={48} color="#ef4444" />
         <Text style={styles.errorText}>Unable to load route data</Text>
         <TouchableOpacity style={styles.backButton} onPress={() => router.replace('/')}>
           <Text style={styles.backButtonText}>Go Back</Text>
         </TouchableOpacity>
-      </SafeAreaView>
+      </View>
     );
   }
 
@@ -597,9 +598,9 @@ export default function RouteScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       {/* Compact Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: (Platform.OS === 'ios' ? insets.top + 24 : 16) }]}>
         <TouchableOpacity onPress={() => router.replace('/')} style={styles.backBtn}>
           <Ionicons name="arrow-back" size={24} color="#fff" />
           <Text style={styles.backText}>Back</Text>
@@ -993,7 +994,7 @@ export default function RouteScreen() {
         </TouchableOpacity>
       </View>
 
-    </SafeAreaView>
+    </View>
   );
 }
 
