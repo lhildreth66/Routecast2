@@ -624,23 +624,103 @@ async def grant_subscription(
 
 async def verify_apple_receipt(receipt_data: str, product_id: str) -> dict:
     """
-    Verify an Apple App Store receipt.
-    In production, this would call Apple's verifyReceipt endpoint.
+    Verify Apple In-App Purchase using StoreKit 2 JWS signed transaction.
+    `receipt_data` is the JWS from expo-iap's purchaseToken field on iOS
+    (a base64url-encoded header.payload.signature JWT from Apple).
+
+    NOTE: This implementation decodes the JWS payload without verifying the
+    cryptographic signature. For TestFlight/sandbox this is sufficient.
+    Full ECDSA signature verification against Apple's certificate chain should
+    be added before App Store production launch.
     """
-    # Production URL: https://buy.itunes.apple.com/verifyReceipt
-    # Sandbox URL: https://sandbox.itunes.apple.com/verifyReceipt
+    VALID_PRODUCTS = frozenset({"routecast_monthly", "routecast_annual"})
 
-    # TODO: Implement actual Apple receipt verification
-    # For now, return scaffold response
+    if not receipt_data:
+        return {
+            "valid": False,
+            "message": "No receipt data provided",
+            "subscription_status": "inactive",
+            "expiration": None,
+        }
 
-    logger.info(f"Apple receipt verification requested for product: {product_id}")
+    try:
+        parts = receipt_data.split(".")
+        if len(parts) < 2:
+            return {
+                "valid": False,
+                "message": "Invalid JWS format (expected header.payload.signature)",
+                "subscription_status": "inactive",
+                "expiration": None,
+            }
+        payload_b64 = parts[1]
+        # base64url may omit padding — restore it
+        padding = 4 - len(payload_b64) % 4
+        if padding != 4:
+            payload_b64 += "=" * padding
+        payload_json = base64.urlsafe_b64decode(payload_b64).decode("utf-8")
+        payload = json.loads(payload_json)
+    except Exception as exc:
+        logger.error("Failed to decode Apple JWS payload: %s", exc)
+        return {
+            "valid": False,
+            "message": "Failed to decode Apple receipt",
+            "subscription_status": "inactive",
+            "expiration": None,
+        }
 
-    # Scaffold response - implement when Apple IAP is configured
+    jws_product_id = payload.get("productId", "")
+    resolved_product_id = jws_product_id or product_id
+
+    if resolved_product_id and resolved_product_id not in VALID_PRODUCTS:
+        logger.warning("Apple receipt unknown product: %s", resolved_product_id)
+        return {
+            "valid": False,
+            "message": f"Unknown product: {resolved_product_id}",
+            "subscription_status": "inactive",
+            "expiration": None,
+        }
+
+    # expiresDate is milliseconds since epoch in StoreKit 2 JWS payloads
+    expires_ms = payload.get("expiresDate")
+    expiration = None
+    subscription_status = "active"
+    if expires_ms:
+        expiration = datetime.fromtimestamp(expires_ms / 1000, tz=timezone.utc)
+        if expiration < datetime.now(timezone.utc):
+            subscription_status = "expired"
+
+    # offerType 1 = introductory offer (free trial)
+    offer_type = payload.get("offerType")
+    if offer_type == 1 and subscription_status == "active":
+        subscription_status = "trialing"
+
+    plan = "yearly" if "annual" in resolved_product_id.lower() else "monthly"
+
+    # Prefer originalTransactionId for idempotent storage
+    original_transaction_id = (
+        payload.get("originalTransactionId")
+        or payload.get("originalTransactionIdentifier")
+        or payload.get("transactionId")
+        or payload.get("transactionIdentifier")
+    )
+
+    environment = payload.get("environment", "Production")
+    logger.info(
+        "Apple JWS decoded: product=%s env=%s status=%s expires=%s plan=%s",
+        resolved_product_id,
+        environment,
+        subscription_status,
+        expiration,
+        plan,
+    )
+
     return {
-        "valid": False,
-        "message": "Apple receipt verification not yet configured. Please contact support.",
-        "subscription_status": "inactive",
-        "expiration": None
+        "valid": subscription_status in ("active", "trialing"),
+        "message": "Apple receipt verified",
+        "subscription_status": subscription_status,
+        "expiration": expiration,
+        "plan": plan,
+        "transaction_id": original_transaction_id,
     }
 
 

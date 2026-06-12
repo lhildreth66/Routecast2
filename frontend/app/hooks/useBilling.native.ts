@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Platform } from 'react-native';
 import * as IAP from 'expo-iap';
 
-type BillingProduct = IAP.Subscription;
+type BillingProduct = IAP.ProductSubscription;
 
 export interface BillingState {
   products: BillingProduct[];
@@ -14,18 +15,33 @@ export interface BillingState {
 
 export interface BillingApi extends BillingState {
   connect: () => Promise<void>;
-  purchase: (offerToken?: string) => Promise<PurchaseVerificationPayload | null>;
+  purchase: (skuOrToken?: string) => Promise<PurchaseVerificationPayload | null>;
   restore: () => Promise<void>;
 }
 
 export interface PurchaseVerificationPayload {
-  purchaseToken: string;
+  // Required — structurally compatible with postPurchaseFlow.ts
+  purchaseToken: string;  // Android: Play token;  iOS: transactionId (compat)
   productId: string;
   packageName: string;
+  // Discriminant
+  platform: 'android' | 'ios';
+  // iOS-specific extras
+  receiptData?: string;          // JWS signed transaction (purchaseToken from expo-iap on iOS)
+  transactionId?: string;
+  originalTransactionId?: string;
 }
 
-// Single Play subscription SKU with base plans (monthly, annual) and optional offers (e.g., trial7d).
-const SUBSCRIPTION_SKU = 'routecast_vs1';
+// Android: single subscription SKU with base plans (monthly, annual) and optional offers.
+const ANDROID_SUBSCRIPTION_SKU = 'routecast_vs1';
+
+// iOS: separate product IDs for each plan (matches App Store Connect).
+const IOS_SKU_MONTHLY = 'routecast_monthly';
+const IOS_SKU_ANNUAL  = 'routecast_annual';
+const IOS_SKUS        = [IOS_SKU_MONTHLY, IOS_SKU_ANNUAL];
+
+/** @deprecated Use ANDROID_SUBSCRIPTION_SKU. Kept for external callers. */
+const SUBSCRIPTION_SKU = ANDROID_SUBSCRIPTION_SKU;
 
 export function useBilling(): BillingApi {
   const [products, setProducts] = useState<BillingProduct[]>([]);
@@ -35,16 +51,23 @@ export function useBilling(): BillingApi {
   const [error, setError] = useState<string | null>(null);
   const [purchases, setPurchases] = useState<Array<IAP.Purchase | IAP.ActiveSubscription>>([]);
 
-  // Entitlement: any completed purchase (state PURCHASED, acknowledged) for our SKUs
+  // Entitlement: active purchase for any of our SKUs
   const entitlementActive = useMemo(() => {
     return purchases.some((p: any) => {
       const pid = p.id ?? p.productId ?? p.sku;
-      // ActiveSubscription uses isActive; Purchase uses purchaseState === 'purchased'
-      if (pid !== SUBSCRIPTION_SKU && p.sku !== SUBSCRIPTION_SKU) return false;
-      if (p.isActive === true) return true;
-      if (p.purchaseState === 'purchased') return true;
-      if (p.purchaseStateAndroid === IAP.PurchaseState.PURCHASED) return true;
-      if (p.acknowledged === true) return true;
+      // Android SKU
+      if (pid === ANDROID_SUBSCRIPTION_SKU || p.sku === ANDROID_SUBSCRIPTION_SKU) {
+        if (p.isActive === true) return true;
+        if (p.purchaseState === 'purchased') return true;
+        if (p.purchaseState === 'restored') return true;
+        if (p.acknowledged === true) return true;
+      }
+      // iOS SKUs
+      if (IOS_SKUS.includes(pid)) {
+        if (p.isActive === true) return true;
+        if (p.purchaseState === 'purchased') return true;
+        if (p.transactionId) return true;
+      }
       return false;
     });
   }, [purchases]);
@@ -84,23 +107,31 @@ export function useBilling(): BillingApi {
     setError(null);
     try {
       await IAP.initConnection();
-      const fetched = await IAP.fetchProducts({ skus: [SUBSCRIPTION_SKU], type: 'subs' });
-      const normalized = (fetched ?? []).map((p: any) => ({
-        ...p,
-        id: p.id ?? p.productId,
-        subscriptionOfferDetailsAndroid: p.subscriptionOfferDetailsAndroid ?? p.subscriptionOfferDetails,
-      }));
-      console.log('[billing] fetched products summary', normalized?.map((p) => ({
-        productId: p.id,
-        title: p.title,
-        offers: p.subscriptionOfferDetailsAndroid?.map((o: any) => ({
-          basePlanId: o.basePlanId,
-          offerId: o.offerId,
-          hasToken: Boolean(o.offerToken),
-          pricingPhases: o.pricingPhases?.pricingPhaseList?.length,
-        })),
-      })));
-      setProducts(normalized ?? []);
+
+      if (Platform.OS === 'ios') {
+        // iOS: fetch each plan as a separate product.
+        const fetched = await IAP.fetchProducts({ skus: IOS_SKUS, type: 'subs' });
+        setProducts((fetched ?? []) as unknown as IAP.ProductSubscription[]);
+      } else {
+        // Android: single SKU with base plans; normalize offer details field name.
+        const fetched = await IAP.fetchProducts({ skus: [ANDROID_SUBSCRIPTION_SKU], type: 'subs' });
+        const normalized = (fetched ?? []).map((p: any) => ({
+          ...p,
+          id: p.id ?? p.productId,
+          subscriptionOfferDetailsAndroid: p.subscriptionOfferDetailsAndroid ?? p.subscriptionOfferDetails,
+        }));
+        console.log('[billing] fetched products summary', normalized?.map((p) => ({
+          productId: p.id,
+          title: p.title,
+          offers: p.subscriptionOfferDetailsAndroid?.map((o: any) => ({
+            basePlanId: o.basePlanId,
+            offerId: o.offerId,
+            hasToken: Boolean(o.offerToken),
+            pricingPhases: o.pricingPhases?.pricingPhaseList?.length,
+          })),
+        })));
+        setProducts(normalized ?? []);
+      }
 
       // Hydrate active subs to infer entitlement
       const active = await IAP.getAvailablePurchases();
@@ -112,7 +143,15 @@ export function useBilling(): BillingApi {
     }
   };
 
-  const purchase = async (offerToken?: string) => {
+  const purchase = async (skuOrToken?: string): Promise<PurchaseVerificationPayload | null> => {
+    if (Platform.OS === 'ios') {
+      return purchaseIos(skuOrToken);
+    }
+    return purchaseAndroid(skuOrToken);
+  };
+
+  // ── Android purchase ──────────────────────────────────────────────────────
+  const purchaseAndroid = async (offerToken?: string): Promise<PurchaseVerificationPayload | null> => {
     if (!offerToken) {
       setError('Offer unavailable');
       return null;
@@ -124,8 +163,8 @@ export function useBilling(): BillingApi {
         type: 'subs',
         request: {
           google: {
-            skus: [SUBSCRIPTION_SKU],
-            subscriptionOffers: [{ sku: SUBSCRIPTION_SKU, offerToken }],
+            skus: [ANDROID_SUBSCRIPTION_SKU],
+            subscriptionOffers: [{ sku: ANDROID_SUBSCRIPTION_SKU, offerToken }],
           },
         },
       });
@@ -140,16 +179,17 @@ export function useBilling(): BillingApi {
             .reverse()
             .find((p: any) => {
               const pid = p.productId ?? p.sku ?? p.id;
-              return pid === SUBSCRIPTION_SKU;
+              return pid === ANDROID_SUBSCRIPTION_SKU;
             });
 
           const purchaseToken = (latest as any)?.purchaseToken ?? (latest as any)?.purchaseTokenAndroid ?? '';
-          const productId = (latest as any)?.productId ?? (latest as any)?.sku ?? (latest as any)?.id ?? SUBSCRIPTION_SKU;
+          const productId = (latest as any)?.productId ?? (latest as any)?.sku ?? (latest as any)?.id ?? ANDROID_SUBSCRIPTION_SKU;
           if (purchaseToken) {
             return {
               purchaseToken,
               productId,
               packageName: 'com.routecast.app',
+              platform: 'android',
             };
           }
         }
@@ -158,6 +198,67 @@ export function useBilling(): BillingApi {
       }
 
       setError('Purchase finished, but receipt token was unavailable. Tap Restore purchases and try again.');
+      return null;
+    } catch (e: any) {
+      setError(e?.message ?? 'Purchase failed');
+      return null;
+    } finally {
+      setPurchasing(false);
+    }
+  };
+
+  // ── iOS purchase ──────────────────────────────────────────────────────────
+  const purchaseIos = async (sku?: string): Promise<PurchaseVerificationPayload | null> => {
+    if (!sku) {
+      setError('No product selected');
+      return null;
+    }
+    setPurchasing(true);
+    setError(null);
+    try {
+      await IAP.requestPurchase({
+        type: 'subs',
+        request: {
+          apple: { sku },
+        },
+      });
+
+      // Poll for the completed StoreKit transaction.
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const active = await IAP.getAvailablePurchases();
+        if (active?.length) {
+          setPurchases(active);
+          const latest = [...active]
+            .reverse()
+            .find((p: any) => {
+              const pid = p.productId ?? p.sku ?? p.id;
+              return IOS_SKUS.includes(pid);
+            });
+
+          if (latest) {
+            const jws      = (latest as any)?.purchaseToken ?? '';   // JWS signed transaction
+            const txId     = (latest as any)?.transactionId ?? '';
+            const origTxId = (latest as any)?.originalTransactionIdentifierIOS ?? txId;
+            const pid      = (latest as any)?.productId ?? (latest as any)?.sku ?? (latest as any)?.id ?? sku;
+
+            if (jws || txId) {
+              return {
+                purchaseToken: txId,              // compat field
+                productId: pid,
+                packageName: 'com.routecast.app',
+                platform: 'ios',
+                receiptData: jws,
+                transactionId: txId,
+                originalTransactionId: origTxId,
+              };
+            }
+          }
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, 700));
+      }
+
+      setError('Purchase finished, but receipt was unavailable. Tap Restore purchases and try again.');
       return null;
     } catch (e: any) {
       setError(e?.message ?? 'Purchase failed');
@@ -193,4 +294,4 @@ export function useBilling(): BillingApi {
     restore,
   };
 }
-export const billingSku = SUBSCRIPTION_SKU;
+export const billingSku = ANDROID_SUBSCRIPTION_SKU;

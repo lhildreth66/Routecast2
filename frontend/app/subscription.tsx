@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   ScrollView,
+  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -45,7 +46,7 @@ const formatTrialPeriod = (period?: string) => {
   return humanizePeriod(period);
 };
 
-const selectOfferForBasePlan = (product: IAP.Subscription | undefined, basePlanId: string): OfferInfo | null => {
+const selectOfferForBasePlan = (product: any, basePlanId: string): OfferInfo | null => {
   const offerDetails = (product as any)?.subscriptionOfferDetailsAndroid ?? (product as any)?.subscriptionOfferDetails;
   if (!offerDetails?.length) return { error: 'Billing unavailable for this plan' };
 
@@ -53,13 +54,13 @@ const selectOfferForBasePlan = (product: IAP.Subscription | undefined, basePlanI
   if (!offers.length) return { error: `No offers found for ${basePlanId} plan` };
 
   // Enforce base-plan specific offer preference rules
-  const filtered = basePlanId === 'annual' ? offers.filter((offer) => offer.offerId !== 'trial7d') : offers;
+  const filtered = basePlanId === 'annual' ? offers.filter((offer: any) => offer.offerId !== 'trial7d') : offers;
   if (!filtered.length) {
     return { error: basePlanId === 'annual' ? 'Annual plan unavailable right now' : `No valid offers for ${basePlanId}` };
   }
 
   const preferred = basePlanId === 'monthly'
-    ? filtered.find((offer) => offer.offerId === 'trial7d') ?? filtered[0]
+    ? filtered.find((offer: any) => offer.offerId === 'trial7d') ?? filtered[0]
     : filtered[0];
 
   const pricingPhases = preferred.pricingPhases?.pricingPhaseList ?? [];
@@ -110,12 +111,36 @@ export default function SubscriptionScreen() {
     return () => clearTimeout(t);
   }, [purchasePending]);
 
+  // ── Android: single product with base plans ──────────────────────────────
   const product = billing.products[0];
   const monthlyOffer = useMemo(() => selectOfferForBasePlan(product, 'monthly'), [product]);
-  const annualOffer = useMemo(() => selectOfferForBasePlan(product, 'annual'), [product]);
+  const annualOffer  = useMemo(() => selectOfferForBasePlan(product, 'annual'),  [product]);
+
+  // ── iOS: separate products per plan ──────────────────────────────────────
+  const iosMonthlyProduct = useMemo(
+    () => billing.products.find((p: any) => (p.id ?? p.productId) === 'routecast_monthly'),
+    [billing.products],
+  );
+  const iosAnnualProduct = useMemo(
+    () => billing.products.find((p: any) => (p.id ?? p.productId) === 'routecast_annual'),
+    [billing.products],
+  );
+  type IosOfferInfo = { price?: string; error?: string };
+  const iosMonthlyOffer: IosOfferInfo = iosMonthlyProduct
+    ? { price: (iosMonthlyProduct as any).localizedPrice ?? '$9.99' }
+    : !billing.isLoading ? { error: 'App Store product unavailable' } : {};
+  const iosAnnualOffer: IosOfferInfo = iosAnnualProduct
+    ? { price: (iosAnnualProduct as any).localizedPrice ?? '$59.99' }
+    : !billing.isLoading ? { error: 'App Store product unavailable' } : {};
+
+  // ── Unified UI values (platform-aware) ───────────────────────────────────
   const [selectedPlan, setSelectedPlan] = useState<'monthly' | 'annual'>('monthly');
   const selectedOffer = selectedPlan === 'monthly' ? monthlyOffer : annualOffer;
-  const mainCtaText = selectedPlan === 'monthly' ? 'Start Subscription (7-Day Trial Included)' : 'Subscribe Annually';
+  const selectedIosOffer = selectedPlan === 'monthly' ? iosMonthlyOffer : iosAnnualOffer;
+
+  const mainCtaText = Platform.OS === 'ios'
+    ? (selectedPlan === 'monthly' ? 'Start Free Trial (7 Days)' : 'Subscribe Annually')
+    : (selectedPlan === 'monthly' ? 'Start Subscription (7-Day Trial Included)' : 'Subscribe Annually');
   const helperText = selectedPlan === 'monthly' ? 'Then $9.99/month unless canceled' : null;
 
   useEffect(() => {
@@ -123,16 +148,62 @@ export default function SubscriptionScreen() {
       console.log('[billing] no product loaded');
       return;
     }
-    const productId = product.id ?? (product as any).productId;
+    const productId = (product as any)?.id ?? (product as any)?.productId;
     const offers = (product as any).subscriptionOfferDetailsAndroid?.map((o: any) => ({
       basePlanId: o.basePlanId,
       offerId: o.offerId,
       offerToken: o.offerToken,
-      pricing: o.pricingPhases?.pricingPhaseList?.map((ph) => ({ price: ph.formattedPrice, billingPeriod: ph.billingPeriod })),
+      pricing: o.pricingPhases?.pricingPhaseList?.map((ph: any) => ({ price: ph.formattedPrice, billingPeriod: ph.billingPeriod })),
     }));
     console.log('[billing] render product', { productId, offers, monthlyOffer, annualOffer });
   }, [product, monthlyOffer, annualOffer]);
 
+  // ── Apple verification ───────────────────────────────────────────────────
+  const verifyApplePurchase = async (payload: { receiptData?: string; productId: string }) => {
+    if (!accessToken) {
+      throw new Error('Sign in is required before starting a trial/subscription.');
+    }
+    const response = await fetch(buildUrl('subscription/verify/apple'), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        receipt_data: payload.receiptData ?? '',
+        product_id: payload.productId,
+      }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(body?.detail || 'App Store verification failed');
+    }
+    if (!body?.valid) {
+      throw new Error(body?.message || 'App Store entitlement is not active.');
+    }
+  };
+
+  const verifyAllActiveApplePurchases = async () => {
+    if (!accessToken) {
+      throw new Error('Sign in is required to restore purchases.');
+    }
+    const active = await IAP.getAvailablePurchases();
+    const iosSkus = ['routecast_monthly', 'routecast_annual'];
+    const candidates = (active ?? []).filter((p: any) => {
+      const pid = p.productId ?? p.sku ?? p.id;
+      return iosSkus.includes(pid);
+    });
+    if (!candidates.length) {
+      throw new Error('No active App Store purchases found to restore.');
+    }
+    for (const p of candidates) {
+      const jws = (p as any)?.purchaseToken ?? '';
+      const pid = (p as any)?.productId ?? (p as any)?.sku ?? (p as any)?.id ?? '';
+      await verifyApplePurchase({ receiptData: jws, productId: pid });
+    }
+  };
+
+  // ── Google verification ──────────────────────────────────────────────────
   const verifyGooglePurchase = async (payload: { purchaseToken: string; productId: string; packageName: string }) => {
     if (!accessToken) {
       throw new Error('Sign in is required before starting a trial/subscription.');
@@ -194,10 +265,45 @@ export default function SubscriptionScreen() {
     }
   };
 
+  // ── iOS purchase handler ─────────────────────────────────────────────────
+  const handleIosPurchase = async (sku: string) => {
+    const receipt = await billing.purchase(sku);
+    if (!accessToken) {
+      await savePendingPurchase(receipt);
+      router.replace('/login');
+      return;
+    }
+    setVerifyLoading(true);
+    try {
+      if (receipt) {
+        await verifyApplePurchase({ receiptData: receipt.receiptData, productId: receipt.productId });
+      } else {
+        await verifyAllActiveApplePurchases();
+      }
+    } catch (err: any) {
+      setVerifyError(err?.message ?? 'Unable to verify purchase. Tap "Restore Purchases" to try again.');
+      setVerifyLoading(false);
+      return;
+    }
+    try { await refreshUser(); } catch { /* non-fatal */ }
+    setVerifyLoading(false);
+    setPurchasePending(true);
+  };
+
+  // ── Unified purchase handler ─────────────────────────────────────────────
   const handlePurchase = async (basePlanId: string, offerToken?: string) => {
-    const productId = product?.id ?? (product as any)?.productId;
-    console.log('[billing] CTA payload', { productId, basePlanId, offerToken });
     setVerifyError(null);
+
+    if (Platform.OS === 'ios') {
+      const sku = basePlanId === 'monthly' ? 'routecast_monthly' : 'routecast_annual';
+      console.log('[billing] iOS CTA', { sku });
+      await handleIosPurchase(sku);
+      return;
+    }
+
+    // ── Android path (unchanged) ────────────────────────────────────────────
+    const productId = (product as any)?.id ?? (product as any)?.productId;
+    console.log('[billing] CTA payload', { productId, basePlanId, offerToken });
 
     // billing.purchase() polls IAP.getAvailablePurchases() for the receipt token.
     // On Android the purchaseUpdatedListener can acknowledge (finish) the transaction
@@ -209,9 +315,6 @@ export default function SubscriptionScreen() {
     // Google Play completed but the user is not authenticated.
     // Store the receipt so it can be verified immediately after login, then
     // take the user to the login screen (step 8 of the required flow).
-    // Without this guard, verifyGooglePurchase() throws
-    // "Sign in is required before starting a trial/subscription." and the user
-    // is stuck on the subscription screen with an error (the reported bug).
     if (!accessToken) {
       await savePendingPurchase(receipt);
       router.replace('/login');
@@ -236,6 +339,23 @@ export default function SubscriptionScreen() {
   const handleRestore = async () => {
     setVerifyError(null);
     setVerifyLoading(true);
+
+    if (Platform.OS === 'ios') {
+      try {
+        await billing.restore();
+        await verifyAllActiveApplePurchases();
+      } catch (err: any) {
+        setVerifyError(err?.message ?? 'Restore failed');
+        setVerifyLoading(false);
+        return;
+      }
+      try { await refreshUser(); } catch { /* non-fatal */ }
+      setVerifyLoading(false);
+      setPurchasePending(true);
+      return;
+    }
+
+    // Android restore path
     const { error } = await runPostPurchaseFlow(null, {
       verifyWithReceipt: verifyGooglePurchase,
       verifyWithRestore: async () => {
@@ -284,7 +404,7 @@ export default function SubscriptionScreen() {
               <View style={styles.premiumInfoRow}>
                 <Ionicons name="calendar" size={20} color="#a1a1aa" />
                 <Text style={styles.premiumInfoText}>
-                  Plan: {user?.subscription_plan?.charAt(0).toUpperCase() + user?.subscription_plan?.slice(1)}
+                  Plan: {((user?.subscription_plan ?? '') as string).charAt(0).toUpperCase() + ((user?.subscription_plan ?? '') as string).slice(1)}
                 </Text>
               </View>
               {isTrialing && (
@@ -340,15 +460,15 @@ export default function SubscriptionScreen() {
               <Ionicons name="rocket" size={32} color="#1a1a1a" />
             </View>
             <Text style={styles.title}>Continue Full Access</Text>
-            <Text style={styles.subtitle}>Start a Google Play subscription to activate your included 7-day full-access trial.</Text>
+            <Text style={styles.subtitle}>{Platform.OS === 'ios' ? 'Start a free 7-day trial, then choose your plan.' : 'Start a Google Play subscription to activate your included 7-day full-access trial.'}</Text>
           </View>
 
           <Text style={styles.sectionTitle}>Choose Your Plan</Text>
 
           <View style={styles.plansContainer}>
             {[
-              { label: 'Monthly', basePlanId: 'monthly', offer: monthlyOffer, subtitle: 'Keeps access after your included 7-day full-access period', badge: 'Recommended' },
-              { label: 'Annual', basePlanId: 'annual', offer: annualOffer, subtitle: '$59.99/year' },
+              { label: 'Monthly', basePlanId: 'monthly', offer: Platform.OS === 'ios' ? iosMonthlyOffer : monthlyOffer, subtitle: 'Keeps access after your included 7-day full-access period', badge: 'Recommended' },
+              { label: 'Annual', basePlanId: 'annual', offer: Platform.OS === 'ios' ? iosAnnualOffer : annualOffer, subtitle: '$59.99/year' },
             ].map(({ label, basePlanId, offer, subtitle, badge }) => {
               const price = offer?.price ?? (basePlanId === 'annual' ? '$59.99' : '$9.99');
               const interval = basePlanId === 'annual' ? 'year' : 'month';
@@ -394,9 +514,9 @@ export default function SubscriptionScreen() {
           </View>
 
           <TouchableOpacity
-            style={[styles.planButton, (!selectedOffer?.offerToken || !!selectedOffer?.error || billing.isPurchasing || verifyLoading) && styles.buttonDisabled, styles.mainCta]}
+            style={[styles.planButton, (billing.isPurchasing || verifyLoading || (Platform.OS === 'android' && !selectedOffer?.offerToken) || !!(Platform.OS === 'ios' ? selectedIosOffer?.error : selectedOffer?.error)) && styles.buttonDisabled, styles.mainCta]}
             onPress={() => handlePurchase(selectedPlan, selectedOffer?.offerToken)}
-            disabled={billing.isPurchasing || verifyLoading || !selectedOffer?.offerToken || !!selectedOffer?.error}
+            disabled={billing.isPurchasing || verifyLoading || (Platform.OS === 'android' && !selectedOffer?.offerToken) || !!(Platform.OS === 'ios' ? selectedIosOffer?.error : selectedOffer?.error)}
             data-testid="purchase-selected"
           >
             {(billing.isPurchasing || verifyLoading) ? (
@@ -450,7 +570,9 @@ export default function SubscriptionScreen() {
             <View style={styles.errorContainer}>
               <Ionicons name="alert-circle" size={18} color="#ef4444" />
               <Text style={styles.errorText}>
-                Unable to load Google Play products. Please ensure Play Store is available and try again.
+                {Platform.OS === 'ios'
+                  ? 'Unable to load App Store products. Please ensure you are signed in to the App Store and try again.'
+                  : 'Unable to load Google Play products. Please ensure Play Store is available and try again.'}
               </Text>
             </View>
           )}
@@ -464,7 +586,9 @@ export default function SubscriptionScreen() {
           </TouchableOpacity>
 
           <Text style={styles.termsText}>
-            Billing handled securely via Google Play. Subscriptions auto-renew unless canceled.
+            {Platform.OS === 'ios'
+              ? 'Billing handled securely via the App Store. Subscriptions auto-renew unless canceled at least 24 hours before the end of the current period.'
+              : 'Billing handled securely via Google Play. Subscriptions auto-renew unless canceled.'}
           </Text>
         </ScrollView>
       </SafeAreaView>

@@ -249,8 +249,11 @@ async def verify_apple_purchase(
     result = await verify_apple_receipt(data.receipt_data, data.product_id)
 
     if result["valid"]:
-        # Determine plan from product_id
-        plan = "yearly" if "yearly" in data.product_id.lower() else "monthly"
+        # Prefer the plan resolved by verify_apple_receipt (extracted from JWS).
+        # Fall back to product_id inspection: routecast_annual → yearly.
+        plan = result.get("plan") or (
+            "yearly" if any(t in data.product_id.lower() for t in ("annual", "year", "yearly")) else "monthly"
+        )
 
         await activate_subscription(
             db=db,
