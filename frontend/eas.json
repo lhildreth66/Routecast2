@@ -10,8 +10,8 @@
         "autoIncrement": false
       },
       "ios": {
-        "autoIncrement": false,
-        "image": "macos-sequoia-15.6-xcode-26.0"
+        "autoIncrement": true,
+        "image": "latest"
       },
       "env": {
         "EXPO_PUBLIC_BACKEND_URL": "https://api.routecastweather.com",
