@@ -292,11 +292,7 @@ export default function HomeScreen() {
       return;
     }
 
-    // Android/mobile path only
-    if (Platform.OS !== 'android') {
-      Alert.alert('Unsupported', 'Push alerts are currently supported on Android mobile only.');
-      return;
-    }
+    // Native (iOS + Android): use Expo push tokens
 
     setPushLoading(true);
     try {
@@ -1268,40 +1264,70 @@ export default function HomeScreen() {
                 )}
               </TouchableOpacity>
 
-              {/* Quick Access Buttons */}
-              <View style={styles.quickAccessRow}>
-                <TouchableOpacity
-                  style={styles.quickAccessBtn}
-                  onPress={() => router.push('/boondockers')}
-                  activeOpacity={0.85}
-                >
-                  <View style={styles.quickAccessIconCircle}>
-                    <Ionicons name="bonfire" size={22} color="#10b981" />
-                  </View>
-                  <Text style={styles.quickAccessText} numberOfLines={1}>Boondockers</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.quickAccessBtn}
-                  onPress={() => router.push('/tractor-trailer')}
-                  activeOpacity={0.85}
-                >
-                  <View style={styles.quickAccessIconCircle}>
-                    <Ionicons name="bus" size={22} color="#f59e0b" />
-                  </View>
-                  <Text style={styles.quickAccessText} numberOfLines={1}>Truck Drivers</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.quickAccessBtn}
-                  onPress={() => router.push('/how-to-use')}
-                  activeOpacity={0.85}
-                  data-testid="how-to-use-btn"
-                >
-                  <View style={styles.quickAccessIconCircle}>
-                    <Ionicons name="help-circle" size={22} color="#8b5cf6" />
-                  </View>
-                  <Text style={styles.quickAccessText} numberOfLines={1}>How To Use</Text>
-                </TouchableOpacity>
-              </View>
+              {/* Feature Access */}
+              {Platform.OS === 'ios' ? (
+                // iOS: prominent 2-column feature card grid
+                <View style={styles.iosFeaturesGrid}>
+                  {[
+                    { label: 'Boondockers', icon: 'bonfire', color: '#10b981', bg: '#064e3b', onPress: () => router.push('/boondockers') },
+                    { label: 'Truck Drivers', icon: 'bus', color: '#f59e0b', bg: '#451a03', onPress: () => router.push('/tractor-trailer') },
+                    { label: 'Push Alerts', icon: alertsEnabled ? 'notifications' : 'notifications-outline', color: alertsEnabled ? '#22c55e' : '#eab308', bg: '#1c1917', onPress: () => handleAlertsToggle(!alertsEnabled) },
+                    { label: 'Radar Map', icon: 'radio-outline', color: '#22c55e', bg: '#052e16', onPress: () => setShowRadarMap(true) },
+                    { label: 'Account', icon: 'person', color: '#60a5fa', bg: '#172554', onPress: () => router.push('/account') },
+                    { label: 'How To Use', icon: 'help-circle', color: '#8b5cf6', bg: '#2e1065', onPress: () => router.push('/how-to-use') },
+                  ].map(({ label, icon, color, bg, onPress }) => (
+                    <TouchableOpacity
+                      key={label}
+                      style={[styles.iosFeatureCard, { backgroundColor: bg }]}
+                      onPress={onPress}
+                      activeOpacity={0.8}
+                    >
+                      <View style={[styles.iosFeatureIconCircle, { borderColor: color + '55' }]}>
+                        <Ionicons name={icon as any} size={26} color={color} />
+                      </View>
+                      <Text style={[styles.iosFeatureLabel, { color }]}>{label}</Text>
+                      {label === 'Push Alerts' && alertsEnabled && (
+                        <View style={styles.iosFeatureActiveDot} />
+                      )}
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              ) : (
+                // Android: existing quick access buttons (unchanged)
+                <View style={styles.quickAccessRow}>
+                  <TouchableOpacity
+                    style={styles.quickAccessBtn}
+                    onPress={() => router.push('/boondockers')}
+                    activeOpacity={0.85}
+                  >
+                    <View style={styles.quickAccessIconCircle}>
+                      <Ionicons name="bonfire" size={22} color="#10b981" />
+                    </View>
+                    <Text style={styles.quickAccessText} numberOfLines={1}>Boondockers</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.quickAccessBtn}
+                    onPress={() => router.push('/tractor-trailer')}
+                    activeOpacity={0.85}
+                  >
+                    <View style={styles.quickAccessIconCircle}>
+                      <Ionicons name="bus" size={22} color="#f59e0b" />
+                    </View>
+                    <Text style={styles.quickAccessText} numberOfLines={1}>Truck Drivers</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={styles.quickAccessBtn}
+                    onPress={() => router.push('/how-to-use')}
+                    activeOpacity={0.85}
+                    data-testid="how-to-use-btn"
+                  >
+                    <View style={styles.quickAccessIconCircle}>
+                      <Ionicons name="help-circle" size={22} color="#8b5cf6" />
+                    </View>
+                    <Text style={styles.quickAccessText} numberOfLines={1}>How To Use</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             </View>
 
             {/* Tabs for Recent/Favorites */}
@@ -2452,5 +2478,47 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 8,
     textAlign: 'center',
+  },
+  // iOS feature card grid
+  iosFeaturesGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 12,
+    justifyContent: 'space-between',
+  },
+  iosFeatureCard: {
+    width: '48%',
+    borderRadius: 14,
+    padding: 16,
+    alignItems: 'flex-start',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.07)',
+    minHeight: 96,
+    justifyContent: 'center',
+    gap: 8,
+    position: 'relative',
+  },
+  iosFeatureIconCircle: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+  },
+  iosFeatureLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  iosFeatureActiveDot: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+    backgroundColor: '#22c55e',
   },
 });
