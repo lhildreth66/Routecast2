@@ -11,13 +11,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { WebView } from 'react-native-webview';
 import { router } from 'expo-router';
 
-function goBack() {
-  if (router.canGoBack()) {
-    router.back();
-  } else {
-    router.replace('/');
-  }
-}
+const goHome = () => router.replace('/');
 import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
 import * as Location from 'expo-location';
@@ -380,7 +374,7 @@ export default function RadarMapScreen() {
     return (
       <SafeAreaView style={styles.loadingContainer}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={goBack}>
+          <TouchableOpacity onPress={goHome}>
             <Ionicons name="chevron-back" size={24} color="#e4e4e7" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Weather Radar</Text>
@@ -398,7 +392,7 @@ export default function RadarMapScreen() {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.header}>
-          <TouchableOpacity onPress={goBack}>
+          <TouchableOpacity onPress={goHome}>
             <Ionicons name="chevron-back" size={24} color="#e4e4e7" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Weather Radar</Text>
@@ -418,7 +412,7 @@ export default function RadarMapScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={goBack}>
+        <TouchableOpacity onPress={goHome}>
           <Ionicons name="chevron-back" size={24} color="#e4e4e7" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Weather Radar & Alerts</Text>
