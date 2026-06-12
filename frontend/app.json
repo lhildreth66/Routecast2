@@ -21,7 +21,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.routecast.app",
-      "buildNumber": "5",
+      "buildNumber": "7",
       "name": "RouteCast Weather",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Routecast needs your location to show weather along your route.",
