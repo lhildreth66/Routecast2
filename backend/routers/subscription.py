@@ -254,13 +254,19 @@ async def verify_apple_purchase(
         plan = result.get("plan") or (
             "yearly" if any(t in data.product_id.lower() for t in ("annual", "year", "yearly")) else "monthly"
         )
+        # Pass through JWS-derived subscription_status ("trialing" vs "active")
+        # and expiration so the DB accurately reflects the trial window.
+        jws_status = result.get("subscription_status")   # "trialing" | "active"
+        jws_expiration = result.get("expiration")         # datetime | None
 
         await activate_subscription(
             db=db,
             user_id=user_id,
             plan=plan,
             provider="apple",
-            apple_transaction_id=result.get("transaction_id")
+            apple_transaction_id=result.get("transaction_id"),
+            subscription_status_override=jws_status if jws_status in ("trialing", "active") else None,
+            expiration_override=jws_expiration,
         )
 
     return ReceiptVerifyResponse(

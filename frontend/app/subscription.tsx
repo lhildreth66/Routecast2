@@ -46,6 +46,13 @@ const formatTrialPeriod = (period?: string) => {
   return humanizePeriod(period);
 };
 
+// Returns the localized price from an iOS StoreKit product.
+// expo-iap's ProductSubscriptionIOS exposes `displayPrice` (typed).
+// Some runtime versions also set `localizedPrice` for RN IAP compatibility.
+// We check both; never use hardcoded fallbacks — show an error instead.
+const getIosProductPrice = (product: any): string | undefined =>
+  product?.displayPrice || product?.localizedPrice || undefined;
+
 const selectOfferForBasePlan = (product: any, basePlanId: string): OfferInfo | null => {
   const offerDetails = (product as any)?.subscriptionOfferDetailsAndroid ?? (product as any)?.subscriptionOfferDetails;
   if (!offerDetails?.length) return { error: 'Billing unavailable for this plan' };
@@ -126,22 +133,61 @@ export default function SubscriptionScreen() {
     [billing.products],
   );
   type IosOfferInfo = { price?: string; error?: string };
+  // No hardcoded price fallbacks. If the product loads but StoreKit returns no
+  // price, show an error so the paywall cannot silently display wrong pricing.
   const iosMonthlyOffer: IosOfferInfo = iosMonthlyProduct
-    ? { price: (iosMonthlyProduct as any).localizedPrice ?? '$9.99' }
+    ? (() => {
+        const p = getIosProductPrice(iosMonthlyProduct);
+        return p ? { price: p } : { error: 'App Store price unavailable — please restart the app' };
+      })()
     : !billing.isLoading ? { error: 'App Store product unavailable' } : {};
   const iosAnnualOffer: IosOfferInfo = iosAnnualProduct
-    ? { price: (iosAnnualProduct as any).localizedPrice ?? '$59.99' }
+    ? (() => {
+        const p = getIosProductPrice(iosAnnualProduct);
+        return p ? { price: p } : { error: 'App Store price unavailable — please restart the app' };
+      })()
     : !billing.isLoading ? { error: 'App Store product unavailable' } : {};
+
+  // Trial subtitles — price derives from StoreKit, never hardcoded
+  const iosMonthlyTrialSubtitle = `7-day free trial — then ${iosMonthlyOffer.price ?? '—'}/month`;
+  const iosAnnualTrialSubtitle  = `7-day free trial — then ${iosAnnualOffer.price ?? '—'}/year · Best value`;
 
   // ── Unified UI values (platform-aware) ───────────────────────────────────
   const [selectedPlan, setSelectedPlan] = useState<'monthly' | 'annual'>('monthly');
   const selectedOffer = selectedPlan === 'monthly' ? monthlyOffer : annualOffer;
   const selectedIosOffer = selectedPlan === 'monthly' ? iosMonthlyOffer : iosAnnualOffer;
 
+  // Both iOS plans include a 7-day free trial
   const mainCtaText = Platform.OS === 'ios'
-    ? (selectedPlan === 'monthly' ? 'Start Free Trial (7 Days)' : 'Subscribe Annually')
+    ? 'Start 7-Day Free Trial'
     : (selectedPlan === 'monthly' ? 'Start Subscription (7-Day Trial Included)' : 'Subscribe Annually');
-  const helperText = selectedPlan === 'monthly' ? 'Then $9.99/month unless canceled' : null;
+  const helperText = Platform.OS === 'ios'
+    ? (selectedPlan === 'monthly'
+        ? `7-day free trial · then ${iosMonthlyOffer.price ?? '—'}/month · Cancel anytime`
+        : `7-day free trial · then ${iosAnnualOffer.price ?? '—'}/year · Cancel anytime`)
+    : (selectedPlan === 'monthly' ? 'Then $9.99/month unless canceled' : null);
+
+  // iOS product field diagnostics — visible in Xcode console and EAS logs
+  useEffect(() => {
+    if (Platform.OS !== 'ios' || !billing.products.length) return;
+    billing.products.forEach((p: any) => {
+      console.log('[iOS IAP product]', JSON.stringify({
+        id: p.id,
+        title: p.title,
+        displayPrice: p.displayPrice,
+        localizedPrice: p.localizedPrice,
+        price: p.price,
+        currency: p.currency,
+        subscriptionPeriodNumberIOS: p.subscriptionPeriodNumberIOS,
+        subscriptionPeriodUnitIOS: p.subscriptionPeriodUnitIOS,
+        introductoryPricePaymentModeIOS: p.introductoryPricePaymentModeIOS,
+        introductoryPriceIOS: p.introductoryPriceIOS,
+        introductoryPriceNumberOfPeriodsIOS: p.introductoryPriceNumberOfPeriodsIOS,
+        introductoryPriceSubscriptionPeriodIOS: p.introductoryPriceSubscriptionPeriodIOS,
+        subscriptionInfoIOS: p.subscriptionInfoIOS,
+      }));
+    });
+  }, [billing.products]);
 
   useEffect(() => {
     if (!product) {
@@ -465,12 +511,41 @@ export default function SubscriptionScreen() {
 
           <Text style={styles.sectionTitle}>Choose Your Plan</Text>
 
+          {/* RouteCast Pro feature list */}
+          {Platform.OS === 'ios' && (
+            <View style={styles.featuresSection}>
+              <Text style={styles.featuresSectionTitle}>Everything included in Pro</Text>
+              {[
+                'Route Weather Intelligence',
+                'Push Weather Alerts',
+                'Bridge Height & Truck Restriction Alerts',
+                'Truck Parking Finder',
+                'Boondocking & Free Camping Tools',
+                'Campground & Overnight Parking',
+                'Live Weather Radar',
+                'Connectivity Forecast',
+                'Solar Energy Forecast',
+                'Water Budget Advisor',
+                'Propane Usage Advisor',
+              ].map((feature) => (
+                <View key={feature} style={styles.featureRow}>
+                  <Ionicons name="checkmark-circle" size={16} color="#22c55e" />
+                  <Text style={styles.featureText}>{feature}</Text>
+                </View>
+              ))}
+              <View style={styles.featuresTrialBanner}>
+                <Ionicons name="gift-outline" size={16} color="#eab308" />
+                <Text style={styles.featuresTrialNote}>All features unlocked free for 7 days</Text>
+              </View>
+            </View>
+          )}
+
           <View style={styles.plansContainer}>
             {[
-              { label: 'Monthly', basePlanId: 'monthly', offer: Platform.OS === 'ios' ? iosMonthlyOffer : monthlyOffer, subtitle: 'Keeps access after your included 7-day full-access period', badge: 'Recommended' },
-              { label: 'Annual', basePlanId: 'annual', offer: Platform.OS === 'ios' ? iosAnnualOffer : annualOffer, subtitle: '$59.99/year' },
+              { label: 'Monthly', basePlanId: 'monthly', offer: Platform.OS === 'ios' ? iosMonthlyOffer : monthlyOffer, subtitle: Platform.OS === 'ios' ? iosMonthlyTrialSubtitle : 'Keeps access after your included 7-day full-access period', badge: 'Recommended' },
+              { label: 'Annual', basePlanId: 'annual', offer: Platform.OS === 'ios' ? iosAnnualOffer : annualOffer, subtitle: Platform.OS === 'ios' ? iosAnnualTrialSubtitle : '$59.99/year' },
             ].map(({ label, basePlanId, offer, subtitle, badge }) => {
-              const price = offer?.price ?? (basePlanId === 'annual' ? '$59.99' : '$9.99');
+              const price = offer?.price ?? '—';
               const interval = basePlanId === 'annual' ? 'year' : 'month';
               const selected = selectedPlan === basePlanId;
 
@@ -623,6 +698,49 @@ const styles = StyleSheet.create({
   subtitle: { color: '#a1a1aa', fontSize: 16, lineHeight: 22 },
   sectionTitle: { color: '#fff', fontSize: 18, fontWeight: '700', marginBottom: 12, marginTop: 8 },
   plansContainer: { gap: 16 },
+  // Feature list (iOS paywall)
+  featuresSection: {
+    backgroundColor: '#1c1917',
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 18,
+    borderWidth: 1,
+    borderColor: '#22c55e30',
+  },
+  featuresSectionTitle: {
+    color: '#a1a1aa',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    marginBottom: 12,
+  },
+  featureRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 5,
+  },
+  featureText: {
+    color: '#e4e4e7',
+    fontSize: 13,
+    fontWeight: '500',
+    flex: 1,
+  },
+  featuresTrialBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#3f3f46',
+  },
+  featuresTrialNote: {
+    color: '#eab308',
+    fontSize: 13,
+    fontWeight: '600',
+  },
   planCard: {
     backgroundColor: '#18181b',
     borderRadius: 18,

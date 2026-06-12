@@ -496,13 +496,17 @@ async def activate_subscription(
     stripe_subscription_id: Optional[str] = None,
     stripe_customer_id: Optional[str] = None,
     apple_transaction_id: Optional[str] = None,
-    google_purchase_token: Optional[str] = None
+    google_purchase_token: Optional[str] = None,
+    subscription_status_override: Optional[str] = None,
+    expiration_override: Optional[datetime] = None,
 ) -> bool:
     """Activate a subscription for a user"""
     now = datetime.now(timezone.utc)
 
-    # Calculate expiration
-    if duration_days:
+    # Use JWS/receipt-derived expiration when available (e.g. Apple trial = 7 d)
+    if expiration_override:
+        expiration = expiration_override
+    elif duration_days:
         expiration = now + timedelta(days=duration_days)
     else:
         # Default durations
@@ -513,8 +517,12 @@ async def activate_subscription(
         else:
             expiration = now + timedelta(days=30)
 
+    # Use receipt-derived status (e.g. "trialing") when available; default "active"
+    resolved_status = subscription_status_override or "active"
+
     update_data = {
-        "subscription_status": "active",
+        "subscription_status": resolved_status,
+        "is_premium": True,       # explicit — don't rely on derived value at /auth/me
         "subscription_plan": plan,
         "subscription_provider": provider,
         "subscription_expiration": expiration,
