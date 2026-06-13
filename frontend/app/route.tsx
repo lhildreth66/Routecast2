@@ -637,7 +637,7 @@ export default function RouteScreen() {
         <Modal transparent animationType="slide">
           <View style={styles.radarModalOverlay}>
             <View style={styles.radarModalContent}>
-              <View style={styles.radarHeader}>
+              <View style={[styles.radarHeader, Platform.OS === 'ios' ? { paddingTop: insets.top + 8 } : {}]}>
                 <View style={styles.radarHeaderLeft}>
                   <Ionicons name="radio-outline" size={24} color="#22c55e" />
                   <Text style={styles.radarTitle}>Live Weather Radar</Text>

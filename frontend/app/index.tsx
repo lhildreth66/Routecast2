@@ -38,7 +38,7 @@ const NoAutofillInput = forwardRef<any, TextInputProps>((props, ref) => {
   }
   return <TextInput {...props} ref={ref} />;
 });
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { router, usePathname, useRootNavigationState } from 'expo-router';
 import axios from 'axios';
@@ -93,6 +93,7 @@ interface AutocompleteSuggestion {
 
 export default function HomeScreen() {
   const { user, isAuthenticated, accessToken, isPremium, isLoading: authLoading, hasHydrated, refreshUser, refreshAccessToken } = useAuth();
+  const insets = useSafeAreaInsets();
   const isMobileWeb = IS_WEB && SCREEN_WIDTH < 768;
   const pathname = usePathname();
 
@@ -1567,7 +1568,7 @@ export default function HomeScreen() {
         <Modal transparent animationType="slide">
           <View style={styles.radarModalOverlay}>
             <View style={styles.radarModalContent}>
-              <View style={styles.radarHeader}>
+              <View style={[styles.radarHeader, Platform.OS === 'ios' ? { paddingTop: insets.top + 8 } : {}]}>
                 <View style={styles.radarHeaderLeft}>
                   <Ionicons name="radio-outline" size={24} color="#22c55e" />
                   <Text style={styles.radarTitle}>Live Weather Radar</Text>
