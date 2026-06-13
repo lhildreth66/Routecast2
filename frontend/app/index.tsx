@@ -147,6 +147,9 @@ export default function HomeScreen() {
   const [showOriginSuggestions, setShowOriginSuggestions] = useState(false);
   const [showDestSuggestions, setShowDestSuggestions] = useState(false);
   const [autocompleteLoading, setAutocompleteLoading] = useState(false);
+  const [stopSuggestions, setStopSuggestions] = useState<AutocompleteSuggestion[]>([]);
+  const [showStopSuggestions, setShowStopSuggestions] = useState(false);
+  const [stopAutocompleteLoading, setStopAutocompleteLoading] = useState(false);
   
   // Vehicle & Trucker mode
   const [vehicleType, setVehicleType] = useState('car');
@@ -429,6 +432,7 @@ export default function HomeScreen() {
   // Debounce timer refs
   const originDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const destDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const stopDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleOriginChange = (text: string) => {
     setOrigin(text);
@@ -464,6 +468,36 @@ export default function HomeScreen() {
     setDestination(suggestion.place_name);
     setShowDestSuggestions(false);
     setDestSuggestions([]);
+  };
+
+  const handleStopLocationChange = (text: string) => {
+    setNewStopLocation(text);
+    if (stopDebounceRef.current) clearTimeout(stopDebounceRef.current);
+    if (text.length < 2) {
+      setStopSuggestions([]);
+      setShowStopSuggestions(false);
+      return;
+    }
+    stopDebounceRef.current = setTimeout(async () => {
+      setStopAutocompleteLoading(true);
+      try {
+        const response = await axios.get(`${API_BASE}/api/geocode/autocomplete`, {
+          params: { query: text, limit: 5 }
+        });
+        setStopSuggestions(response.data);
+        setShowStopSuggestions(response.data.length > 0);
+      } catch (err) {
+        console.log('Stop autocomplete error:', err);
+      } finally {
+        setStopAutocompleteLoading(false);
+      }
+    }, 300);
+  };
+
+  const selectStopSuggestion = (suggestion: AutocompleteSuggestion) => {
+    setNewStopLocation(suggestion.place_name);
+    setShowStopSuggestions(false);
+    setStopSuggestions([]);
   };
 
   const fetchRecentRoutes = async () => {
@@ -709,6 +743,8 @@ export default function HomeScreen() {
     if (newStopLocation.trim()) {
       setStops([...stops, { location: newStopLocation.trim(), type: newStopType }]);
       setNewStopLocation('');
+      setStopSuggestions([]);
+      setShowStopSuggestions(false);
       setShowAddStop(false);
     }
   };
@@ -1574,19 +1610,52 @@ export default function HomeScreen() {
             <View style={styles.modalContent}>
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Add Stop</Text>
-                <TouchableOpacity onPress={() => setShowAddStop(false)}>
+                <TouchableOpacity onPress={() => { setShowAddStop(false); setStopSuggestions([]); setShowStopSuggestions(false); }}>
                   <Ionicons name="close" size={24} color="#fff" />
                 </TouchableOpacity>
               </View>
               
-              <NoAutofillInput
-                style={styles.modalInput}
-                placeholder="Enter stop location"
-                placeholderTextColor="#6b7280"
-                value={newStopLocation}
-                onChangeText={setNewStopLocation}
-              />
-              
+              <View>
+                <View style={styles.modalInputWrapper}>
+                  <NoAutofillInput
+                    style={styles.modalInput}
+                    placeholder="Enter stop location"
+                    placeholderTextColor="#6b7280"
+                    value={newStopLocation}
+                    onChangeText={handleStopLocationChange}
+                    onBlur={() => setTimeout(() => setShowStopSuggestions(false), 200)}
+                  />
+                  {stopAutocompleteLoading && (
+                    <ActivityIndicator size="small" color="#eab308" style={{ marginRight: 8 }} />
+                  )}
+                  {newStopLocation.length > 0 && (
+                    <TouchableOpacity
+                      onPress={() => { setNewStopLocation(''); setStopSuggestions([]); setShowStopSuggestions(false); }}
+                      style={styles.clearButton}
+                    >
+                      <Ionicons name="close-circle" size={18} color="#6b7280" />
+                    </TouchableOpacity>
+                  )}
+                </View>
+                {showStopSuggestions && stopSuggestions.length > 0 && (
+                  <View style={styles.suggestionsDropdown}>
+                    {stopSuggestions.map((suggestion, index) => (
+                      <TouchableOpacity
+                        key={index}
+                        style={styles.suggestionItem}
+                        onPress={() => selectStopSuggestion(suggestion)}
+                      >
+                        <Ionicons name="location-outline" size={16} color="#a1a1aa" />
+                        <View style={styles.suggestionTextContainer}>
+                          <Text style={styles.suggestionShortName}>{suggestion.short_name}</Text>
+                          <Text style={styles.suggestionFullName} numberOfLines={1}>{suggestion.place_name}</Text>
+                        </View>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+              </View>
+
               <Text style={styles.stopTypeLabel}>Stop Type</Text>
               <View style={styles.stopTypes}>
                 {[
@@ -2028,14 +2097,21 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '700',
   },
-  modalInput: {
+  modalInputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#3f3f46',
+    borderRadius: 10,
+    marginBottom: 4,
+  },
+  modalInput: {
+    flex: 1,
+    backgroundColor: 'transparent',
     borderRadius: 10,
     paddingHorizontal: 14,
     paddingVertical: 12,
     fontSize: 15,
     color: '#fff',
-    marginBottom: 16,
   },
   stopTypeLabel: {
     color: '#a1a1aa',
