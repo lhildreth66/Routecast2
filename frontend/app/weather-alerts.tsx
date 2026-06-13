@@ -129,14 +129,15 @@ export default function WeatherAlertsScreen() {
   if (!routeData) {
     return (
       <View style={styles.container}>
-        <View style={[styles.header, { paddingTop: Platform.OS === 'ios' ? insets.top + 24 : 16 }]}>
-          <TouchableOpacity onPress={goHome} style={styles.backButton}>
-            <Ionicons name="home" size={22} color="#fff" />
-            <Text style={styles.backText}>Home</Text>
-          </TouchableOpacity>
+        <View style={[styles.header, { paddingTop: Platform.OS === 'ios' ? insets.top + 8 : 16 }]}>
+          <Text style={styles.headerTitle}>Weather Alerts</Text>
         </View>
         <View style={styles.errorContainer}>
           <Text style={styles.errorText}>No route data available</Text>
+          <TouchableOpacity onPress={goHome} style={styles.errorHomeButton}>
+            <Ionicons name="home" size={20} color="#fff" />
+            <Text style={styles.errorHomeText}>Return to Home</Text>
+          </TouchableOpacity>
         </View>
       </View>
     );
@@ -144,12 +145,8 @@ export default function WeatherAlertsScreen() {
 
   return (
     <View style={styles.container}>
-      <View style={[styles.header, { paddingTop: Platform.OS === 'ios' ? insets.top + 24 : 16 }]}>
-        <TouchableOpacity onPress={goHome} style={styles.backButton}>
-          <Ionicons name="home" size={22} color="#fff" />
-          <Text style={styles.backText}>Home</Text>
-        </TouchableOpacity>
-        <Text style={styles.headerTitle}>Weather Alerts</Text>
+      <View style={[styles.header, { paddingTop: Platform.OS === 'ios' ? insets.top + 8 : 16 }]}>
+        <Text style={styles.headerTitle}>⚠️ Weather Alerts</Text>
       </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
@@ -322,10 +319,26 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    gap: 16,
   },
   errorText: {
     color: '#e5e7eb',
     fontSize: 16,
+  },
+  errorHomeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    backgroundColor: '#27272a',
+    borderRadius: 8,
+    marginTop: 8,
+  },
+  errorHomeText: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
   },
   backButton: {
     flexDirection: 'row',
