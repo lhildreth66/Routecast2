@@ -17,8 +17,9 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import axios from 'axios';
@@ -93,6 +94,9 @@ const fmtTime = (iso?: string): string | null => {
 // ─── screen ─────────────────────────────────────────────────────────────────
 export default function RouteAlertsScreen() {
   const params = useLocalSearchParams();
+  const insets = useSafeAreaInsets();
+  const goBackToRoute = () =>
+    router.replace({ pathname: '/route', params: { routeData: params.routeData as string } });
 
   const [routeData, setRouteData] = useState<RouteData | null>(null);
   const [alertsLoading, setAlertsLoading] = useState(false);
@@ -164,11 +168,13 @@ export default function RouteAlertsScreen() {
   return (
     <SafeAreaView style={styles.container} edges={['bottom']}>
       {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <Ionicons name="arrow-back" size={24} color="#fff" />
-          <Text style={styles.backText}>Back</Text>
-        </TouchableOpacity>
+      <View style={[styles.header, Platform.OS === 'ios' ? { paddingTop: insets.top + 8 } : {}]}>
+        {Platform.OS !== 'ios' && (
+          <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
+            <Ionicons name="arrow-back" size={24} color="#fff" />
+            <Text style={styles.backText}>Back</Text>
+          </TouchableOpacity>
+        )}
         <Text style={styles.headerTitle}>⛅ Weather Alerts</Text>
         {alertsLoading ? (
           <ActivityIndicator size="small" color="#f59e0b" style={styles.spinner} />
@@ -374,6 +380,12 @@ export default function RouteAlertsScreen() {
           </View>
         )}
 
+        {Platform.OS === 'ios' && (
+          <TouchableOpacity onPress={goBackToRoute} style={styles.iosBackToRouteBtn}>
+            <Ionicons name="arrow-back" size={18} color="#a1a1aa" />
+            <Text style={styles.iosBackToRouteText}>Back to Route Results</Text>
+          </TouchableOpacity>
+        )}
         <View style={{ height: 40 }} />
       </ScrollView>
     </SafeAreaView>
@@ -415,6 +427,21 @@ const styles = StyleSheet.create({
   headerBadgePlaceholder: {
     width: 32,
     alignItems: 'flex-end',
+  },
+  iosBackToRouteBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 16,
+    marginHorizontal: 16,
+    marginTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#27272a',
+  },
+  iosBackToRouteText: {
+    color: '#a1a1aa',
+    fontSize: 14,
   },
   headerBadge: {
     backgroundColor: '#ef4444',
@@ -690,7 +717,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(239,68,68,0.1)',
     paddingHorizontal: 12,
     paddingVertical: 9,
-    gap: 7,
   },
   bridgeWarningText: {
     color: '#fca5a5',
