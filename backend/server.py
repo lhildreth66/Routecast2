@@ -3412,6 +3412,39 @@ async def send_test_email_endpoint(payload: TestEmailRequest, x_admin_token: Opt
 
     return {"sent": sent}
 
+@api_router.post("/admin/setup-reviewer")
+async def setup_reviewer_account(request: Request, x_admin_token: Optional[str] = Header(None)):
+    """One-time: verify email + grant premium for appreview@routecastweather.com"""
+    if not ADMIN_TOKEN or x_admin_token != ADMIN_TOKEN:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    db = get_db(request)
+    target_email = "appreview@routecastweather.com"
+    user = await db.users.find_one({"email": target_email})
+    if not user:
+        raise HTTPException(status_code=404, detail="Reviewer account not found")
+    user_id = user["user_id"]
+    from datetime import timezone, timedelta
+    expiration = datetime.now(timezone.utc) + timedelta(days=365)
+    await db.users.update_one(
+        {"user_id": user_id},
+        {"$set": {
+            "email_verified": True,
+            "is_premium": True,
+            "subscription_status": "active",
+            "subscription_expiration": expiration.isoformat(),
+        }}
+    )
+    return {
+        "ok": True,
+        "user_id": user_id,
+        "email": target_email,
+        "email_verified": True,
+        "is_premium": True,
+        "subscription_status": "active",
+        "expires": expiration.isoformat(),
+    }
+
+
 @api_router.get("/")
 async def root():
     # Redirect root requests to the public landing page
