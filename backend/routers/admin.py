@@ -21,7 +21,7 @@ router = APIRouter(prefix="/admin", tags=["Admin"])
 logger = logging.getLogger(__name__)
 
 # Simple admin authentication - in production use proper RBAC
-ADMIN_API_KEY = os.environ.get('ADMIN_API_KEY', 'routecast-admin-key-2025')
+ADMIN_API_KEY = os.environ.get('ADMIN_API_KEY') or os.environ.get('ADMIN_TOKEN', 'routecast-admin-key-2025')
 
 _STRIPE_API_KEY = os.environ.get('STRIPE_API_KEY', '')
 if _STRIPE_API_KEY:
