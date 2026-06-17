@@ -3417,13 +3417,12 @@ async def setup_reviewer_account(request: Request, x_admin_token: Optional[str] 
     """One-time: verify email + grant premium for appreview@routecastweather.com"""
     if not ADMIN_TOKEN or x_admin_token != ADMIN_TOKEN:
         raise HTTPException(status_code=403, detail="Forbidden")
-    db = get_db(request)
+    db = request.app.state.db
     target_email = "appreview@routecastweather.com"
     user = await db.users.find_one({"email": target_email})
     if not user:
         raise HTTPException(status_code=404, detail="Reviewer account not found")
     user_id = user["user_id"]
-    from datetime import timezone, timedelta
     expiration = datetime.now(timezone.utc) + timedelta(days=365)
     await db.users.update_one(
         {"user_id": user_id},
