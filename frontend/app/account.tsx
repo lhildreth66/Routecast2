@@ -25,6 +25,7 @@ export default function AccountScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [logoutLoading, setLogoutLoading] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   // AuthContext hydration is passive: it restores tokens without calling
   // /auth/me. Screens that need the user object must call refreshUser().
@@ -109,6 +110,64 @@ export default function AccountScreen() {
     }
   };
   */
+
+  const performDeleteAccount = async () => {
+    setError('');
+    setDeleteLoading(true);
+    try {
+      await axios.delete(`${API_BASE}/api/auth/account`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      await logout();
+      router.replace('/login');
+    } catch (err: any) {
+      const message = err.response?.data?.detail || 'Failed to delete account. Please try again.';
+      setError(message);
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
+  const handleDeleteAccount = () => {
+    if (deleteLoading) return;
+
+    const confirmMessage =
+      'This will permanently delete your RouteCast account and all associated data. This action cannot be undone.';
+
+    if (Platform.OS === 'web') {
+      if (typeof window !== 'undefined' && window.confirm(`Delete Account\n\n${confirmMessage}`)) {
+        performDeleteAccount();
+      }
+      return;
+    }
+
+    if (Platform.OS === 'ios') {
+      ActionSheetIOS.showActionSheetWithOptions(
+        {
+          title: 'Delete Account',
+          message: confirmMessage,
+          options: ['Cancel', 'Delete Account'],
+          destructiveButtonIndex: 1,
+          cancelButtonIndex: 0,
+        },
+        (buttonIndex) => {
+          if (buttonIndex === 1) {
+            performDeleteAccount();
+          }
+        }
+      );
+      return;
+    }
+
+    Alert.alert(
+      'Delete Account',
+      confirmMessage,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete Account', style: 'destructive', onPress: performDeleteAccount },
+      ]
+    );
+  };
 
   const performLogout = async () => {
     setError('');
@@ -503,6 +562,23 @@ export default function AccountScreen() {
               </>
             )}
           </TouchableOpacity>
+
+          {/* Delete Account */}
+          <TouchableOpacity
+            style={[styles.deleteAccountButton, deleteLoading && styles.buttonDisabled]}
+            onPress={handleDeleteAccount}
+            disabled={deleteLoading}
+            data-testid="delete-account-btn"
+          >
+            {deleteLoading ? (
+              <ActivityIndicator size="small" color="#6b7280" />
+            ) : (
+              <>
+                <Ionicons name="trash-outline" size={18} color="#6b7280" />
+                <Text style={styles.deleteAccountText}>Delete Account</Text>
+              </>
+            )}
+          </TouchableOpacity>
           <Text style={styles.buildLabel}>v1.0.166 (build 9)</Text>
         </ScrollView>
       </SafeAreaView>
@@ -744,6 +820,19 @@ const styles = StyleSheet.create({
     color: '#ef4444',
     fontSize: 15,
     fontWeight: '600',
+  },
+  deleteAccountButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 12,
+    marginBottom: 16,
+  },
+  deleteAccountText: {
+    color: '#6b7280',
+    fontSize: 13,
+    fontWeight: '500',
   },
   buildLabel: {
     color: '#52525b',

@@ -52,7 +52,7 @@ FRONTEND_URL = (
     or "https://routecastweather.com"
 ).rstrip("/")
 MOBILE_APP_SCHEME = os.environ.get("MOBILE_APP_SCHEME", "routecast2")
-ANDROID_PLAY_URL = "https://play.google.com/store/apps/details?id=com.routecast.app"
+ROUTECAST_WEBSITE_URL = "https://routecastweather.com"
 
 # STRIPE DISABLED - Google Play submission - do not delete
 # STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "")
@@ -301,7 +301,6 @@ _ERROR_REDIRECT = f"{os.environ.get('FRONTEND_URL', '')}/signup?error=invalid_to
 
 def _build_native_verify_success_response(email: str = "") -> HTMLResponse:
         safe_email = html_escape(email or "")
-        encoded_email = urlquote(email or "", safe="")
         app_url = f"{MOBILE_APP_SCHEME}://subscription"
         html = f"""
         <!doctype html>
@@ -314,19 +313,23 @@ def _build_native_verify_success_response(email: str = "") -> HTMLResponse:
             <body style=\"font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:#0f0f0f; color:#fff; margin:0;\">
                 <div style=\"max-width:560px; margin:0 auto; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px;\">
                     <div style=\"width:100%; background:#1f2937; border:1px solid #374151; border-radius:14px; padding:24px; text-align:center;\">
-                        <h1 style=\"margin:0 0 8px; color:#22c55e;\">Email Verified</h1>
+                        <h1 style=\"margin:0 0 8px; color:#22c55e;\">Email Verified ✓</h1>
                         <p style=\"margin:0 0 20px; color:#d1d5db;\">{safe_email if safe_email else 'Your account is verified.'}</p>
 
                         <!-- Opening state: shown immediately while deep link is attempted -->
                         <div id=\"rc-opening\">
-                            <p style=\"margin:0 0 16px; color:#e5e7eb;\">Opening RouteCast app to choose a subscription plan...</p>
+                            <p style=\"margin:0 0 16px; color:#e5e7eb;\">Opening RouteCast app...</p>
                             <a href=\"{app_url}\" style=\"display:inline-block; background:#eab308; color:#111827; text-decoration:none; font-weight:700; border-radius:10px; padding:12px 18px;\">Open RouteCast App</a>
                         </div>
 
                         <!-- Fallback state: shown after 1500ms if page is still visible (app didn't open) -->
                         <div id=\"rc-fallback\" style=\"display:none;\">
-                            <p style=\"margin:0 0 16px; color:#e5e7eb; font-size:16px; line-height:1.5;\">The app didn&apos;t open automatically.<br>Tap below to install or open RouteCast.</p>
-                            <a onclick=\"window.location='{MOBILE_APP_SCHEME}://subscription';setTimeout(function(){{if(document.visibilityState!=='hidden'){{window.location='{ANDROID_PLAY_URL}';}}}},1500);return false;\" href=\"{ANDROID_PLAY_URL}\" style=\"display:block; background:#eab308; color:#111827; text-decoration:none; font-weight:700; border-radius:10px; padding:16px 24px; font-size:17px; box-sizing:border-box; cursor:pointer;\">Get RouteCast on Google Play</a>
+                            <p style=\"margin:0 0 16px; color:#e5e7eb; font-size:16px; line-height:1.5;\">
+                                Your email has been verified successfully!<br><br>
+                                Return to the RouteCast app on your device to continue,
+                                or visit our website to get started.
+                            </p>
+                            <a href=\"{ROUTECAST_WEBSITE_URL}\" style=\"display:block; background:#eab308; color:#111827; text-decoration:none; font-weight:700; border-radius:10px; padding:16px 24px; font-size:17px; box-sizing:border-box;\">Visit RouteCast</a>
                         </div>
                     </div>
                 </div>
@@ -337,7 +340,7 @@ def _build_native_verify_success_response(email: str = "") -> HTMLResponse:
                         window.location.replace(appUrl);
                         // After 1500ms, check if the page is still visible.
                         // If visibilityState is 'hidden', the app opened and took focus — do nothing.
-                        // If still visible, the deep link failed — show the Google Play fallback.
+                        // If still visible, the deep link failed — show the neutral fallback.
                         setTimeout(function() {{
                             if (document.visibilityState !== 'hidden') {{
                                 var opening = document.getElementById('rc-opening');
@@ -842,3 +845,41 @@ async def email_opt_out(token: str, uid: str, request: Request):
         ),
         status_code=200,
     )
+
+
+# ---------------------------------------------------------------------------
+# Account deletion (Apple App Store requirement)
+# ---------------------------------------------------------------------------
+
+@router.delete("/account")
+async def delete_account(
+    request: Request,
+    current_user: dict = Depends(get_current_user),
+):
+    """Permanently delete the authenticated user's account and all associated data.
+
+    Apple App Store Review requires that apps supporting account creation also
+    provide an in-app mechanism to initiate account deletion (guideline 5.1.1).
+    This endpoint handles the server-side deletion after the user confirms in-app.
+    """
+    db = get_db(request)
+    user_id = current_user.get("sub")
+
+    user = await get_user_by_id(db, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    # Delete user record and all associated data in parallel
+    await db.users.delete_one({"user_id": user_id})
+    await db.verification_tokens.delete_many({"user_id": user_id})
+    await db.web_push_subscriptions.delete_many({"user_id": user_id})
+    await db.push_registrations.delete_many({"user_id": user_id})
+    await db.subscription_logs.delete_many({"user_id": user_id})
+
+    logger.info(
+        "[DELETE-ACCOUNT] user_id=%s email=%s account_deleted",
+        user_id,
+        user.get("email", "unknown"),
+    )
+
+    return {"message": "Account deleted successfully"}

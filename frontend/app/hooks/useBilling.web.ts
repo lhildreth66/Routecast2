@@ -11,7 +11,7 @@ export interface BillingState {
 
 export interface BillingApi extends BillingState {
   connect: () => Promise<void>;
-  purchase: (offerToken?: string) => Promise<PurchaseVerificationPayload | null>;
+  purchase: (skuOrToken?: string) => Promise<PurchaseVerificationPayload | null>;
   restore: () => Promise<void>;
 }
 
@@ -19,6 +19,10 @@ export interface PurchaseVerificationPayload {
   purchaseToken: string;
   productId: string;
   packageName: string;
+  platform?: 'android' | 'ios';
+  receiptData?: string;
+  transactionId?: string;
+  originalTransactionId?: string;
 }
 
 const noopAsync = async () => {};
