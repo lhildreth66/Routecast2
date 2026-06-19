@@ -7,6 +7,7 @@ import {
   ActivityIndicator,
   ScrollView,
   Platform,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -422,8 +423,20 @@ export default function SubscriptionScreen() {
 
   if (billing.isLoading && !billing.error) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#eab308" />
+      <View style={styles.container}>
+        <SafeAreaView style={styles.safeArea}>
+          <View style={styles.loadingContainer}>
+            <TouchableOpacity
+              style={styles.loadingBackButton}
+              onPress={() => router.back()}
+              hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            >
+              <Ionicons name="arrow-back" size={24} color="#fff" />
+            </TouchableOpacity>
+            <ActivityIndicator size="large" color="#eab308" />
+            <Text style={styles.loadingText}>Loading subscription info…</Text>
+          </View>
+        </SafeAreaView>
       </View>
     );
   }
@@ -557,6 +570,11 @@ export default function SubscriptionScreen() {
                   activeOpacity={0.9}
                   data-testid={`plan-${basePlanId}`}
                 >
+                  {Platform.OS === 'ios' && (
+                    <Text style={styles.planSubscriptionTitle}>
+                      {basePlanId === 'monthly' ? 'RouteCast Premium Monthly' : 'RouteCast Premium Annual'}
+                    </Text>
+                  )}
                   <View style={styles.planHeader}>
                     <View style={styles.planNameRow}>
                       <Text style={styles.planName}>{label}</Text>
@@ -607,9 +625,9 @@ export default function SubscriptionScreen() {
           {helperText && <Text style={styles.ctaHelper}>{helperText}</Text>}
 
           <TouchableOpacity
-            style={[styles.restoreButton, billing.isRestoring && styles.buttonDisabled]}
+            style={[styles.restoreButton, (billing.isRestoring || verifyLoading) && styles.buttonDisabled]}
             onPress={handleRestore}
-            disabled={billing.isRestoring}
+            disabled={billing.isRestoring || verifyLoading}
           >
             {billing.isRestoring ? (
               <ActivityIndicator color="#eab308" size="small" />
@@ -665,6 +683,16 @@ export default function SubscriptionScreen() {
               ? 'Billing handled securely via the App Store. Subscriptions auto-renew unless canceled at least 24 hours before the end of the current period.'
               : 'Billing handled securely via Google Play. Subscriptions auto-renew unless canceled.'}
           </Text>
+
+          <View style={styles.legalLinks}>
+            <TouchableOpacity onPress={() => Linking.openURL('https://routecastweather.com/privacy')}>
+              <Text style={styles.legalLinkText}>Privacy Policy</Text>
+            </TouchableOpacity>
+            <Text style={styles.legalSeparator}> · </Text>
+            <TouchableOpacity onPress={() => Linking.openURL('https://www.apple.com/legal/internet-services/itunes/dev/stdeula/')}>
+              <Text style={styles.legalLinkText}>Terms of Use</Text>
+            </TouchableOpacity>
+          </View>
         </ScrollView>
       </SafeAreaView>
     </View>
@@ -673,9 +701,21 @@ export default function SubscriptionScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0f0f0f' },
-  loadingContainer: { flex: 1, backgroundColor: '#0f0f0f', justifyContent: 'center', alignItems: 'center' },
+  loadingContainer: { flex: 1, backgroundColor: '#0f0f0f', justifyContent: 'center', alignItems: 'center', gap: 16, padding: 20 },
+  loadingBackButton: {
+    position: 'absolute',
+    top: 16,
+    left: 20,
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: '#27272a',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: { color: '#a1a1aa', fontSize: 14 },
   safeArea: { flex: 1 },
-  scrollContent: { padding: 20, paddingTop: 12 },
+  scrollContent: { padding: 20, paddingTop: 12, paddingBottom: 48 },
   backButton: {
     width: 44,
     height: 44,
@@ -836,4 +876,31 @@ const styles = StyleSheet.create({
   },
   continueButtonText: { color: '#0f0f0f', fontWeight: '700', fontSize: 16 },
   buttonDisabled: { opacity: 0.6 },
+  planSubscriptionTitle: {
+    color: '#a1a1aa',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    marginBottom: 2,
+  },
+  legalLinks: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 10,
+    marginBottom: 8,
+    flexWrap: 'wrap',
+  },
+  legalLinkText: {
+    color: '#a1a1aa',
+    fontSize: 12,
+    textDecorationLine: 'underline',
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+  },
+  legalSeparator: {
+    color: '#52525b',
+    fontSize: 12,
+  },
 });

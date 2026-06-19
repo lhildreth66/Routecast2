@@ -105,6 +105,18 @@ export function useBilling(): BillingApi {
     console.log('IAP initConnection starting...');
     setLoading(true);
     setError(null);
+
+    // Safety: if StoreKit/Play hangs and never resolves, force-clear loading
+    // after 15 seconds so the screen never traps the user.
+    const loadingTimeout = setTimeout(() => {
+      setLoading((prev) => {
+        if (prev) {
+          setError('Store connection timed out. Please go back and try again.');
+        }
+        return false;
+      });
+    }, 15000);
+
     try {
       await IAP.initConnection();
 
@@ -139,6 +151,7 @@ export function useBilling(): BillingApi {
     } catch (e: any) {
       setError(e?.message ?? 'Billing unavailable');
     } finally {
+      clearTimeout(loadingTimeout);
       setLoading(false);
     }
   };
