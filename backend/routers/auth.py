@@ -300,61 +300,39 @@ _ERROR_REDIRECT = f"{os.environ.get('FRONTEND_URL', '')}/signup?error=invalid_to
 
 
 def _build_native_verify_success_response(email: str = "") -> HTMLResponse:
-        safe_email = html_escape(email or "")
-        app_url = f"{MOBILE_APP_SCHEME}://subscription"
-        html = f"""
+    # NOTE: No deep-link / app-open attempt here.
+    # Auto-opening an unregistered custom-scheme URL causes iOS to show
+    # "The app could not be opened" which is a poor UX and risks App Store
+    # rejection. The user is instructed to return to the app manually.
+    html = """
         <!doctype html>
-        <html>
+        <html lang="en">
             <head>
-                <meta charset=\"utf-8\" />
-                <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\" />
-                <title>RouteCast Verification Complete</title>
+                <meta charset="utf-8" />
+                <meta name="viewport" content="width=device-width, initial-scale=1" />
+                <title>Email Verified — RouteCast Weather</title>
             </head>
-            <body style=\"font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:#0f0f0f; color:#fff; margin:0;\">
-                <div style=\"max-width:560px; margin:0 auto; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px;\">
-                    <div style=\"width:100%; background:#1f2937; border:1px solid #374151; border-radius:14px; padding:24px; text-align:center;\">
-                        <h1 style=\"margin:0 0 8px; color:#22c55e;\">Email Verified ✓</h1>
-                        <p style=\"margin:0 0 20px; color:#d1d5db;\">{safe_email if safe_email else 'Your account is verified.'}</p>
-
-                        <!-- Opening state: shown immediately while deep link is attempted -->
-                        <div id=\"rc-opening\">
-                            <p style=\"margin:0 0 16px; color:#e5e7eb;\">Opening RouteCast app...</p>
-                            <a href=\"{app_url}\" style=\"display:inline-block; background:#eab308; color:#111827; text-decoration:none; font-weight:700; border-radius:10px; padding:12px 18px;\">Open RouteCast App</a>
-                        </div>
-
-                        <!-- Fallback state: shown after 1500ms if page is still visible (app didn't open) -->
-                        <div id=\"rc-fallback\" style=\"display:none;\">
-                            <p style=\"margin:0 0 16px; color:#e5e7eb; font-size:16px; line-height:1.5;\">
-                                Your email has been verified successfully!<br><br>
-                                Return to the RouteCast app on your device to continue,
-                                or visit our website to get started.
-                            </p>
-                            <a href=\"{ROUTECAST_WEBSITE_URL}\" style=\"display:block; background:#eab308; color:#111827; text-decoration:none; font-weight:700; border-radius:10px; padding:16px 24px; font-size:17px; box-sizing:border-box;\">Visit RouteCast</a>
-                        </div>
+            <body style="font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background:#0f0f0f; color:#fff; margin:0;">
+                <div style="max-width:560px; margin:0 auto; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px; box-sizing:border-box;">
+                    <div style="width:100%; background:#1f2937; border:1px solid #374151; border-radius:14px; padding:32px 24px; text-align:center;">
+                        <div style="font-size:48px; margin-bottom:16px;">&#10003;</div>
+                        <h1 style="margin:0 0 12px; color:#22c55e; font-size:24px;">Email Verified</h1>
+                        <p style="margin:0 0 8px; color:#d1d5db; font-size:16px; line-height:1.6;">
+                            Your email has been verified successfully.
+                        </p>
+                        <p style="margin:0 0 28px; color:#d1d5db; font-size:16px; line-height:1.6;">
+                            You may now return to the RouteCast Weather app and log in.
+                        </p>
+                        <a href="https://routecastweather.com/app"
+                           style="display:block; background:#eab308; color:#111827; text-decoration:none; font-weight:700; border-radius:10px; padding:16px 24px; font-size:17px; box-sizing:border-box;">
+                            Return to RouteCast Weather
+                        </a>
                     </div>
                 </div>
-                <script>
-                    (function() {{
-                        var appUrl = {app_url!r};
-                        // Attempt deep link immediately
-                        window.location.replace(appUrl);
-                        // After 1500ms, check if the page is still visible.
-                        // If visibilityState is 'hidden', the app opened and took focus — do nothing.
-                        // If still visible, the deep link failed — show the neutral fallback.
-                        setTimeout(function() {{
-                            if (document.visibilityState !== 'hidden') {{
-                                var opening = document.getElementById('rc-opening');
-                                var fallback = document.getElementById('rc-fallback');
-                                if (opening) opening.style.display = 'none';
-                                if (fallback) fallback.style.display = 'block';
-                            }}
-                        }}, 1500);
-                    }})();
-                </script>
             </body>
         </html>
-        """
-        return HTMLResponse(content=html, status_code=200)
+    """
+    return HTMLResponse(content=html, status_code=200)
 
 
 async def _verify_email_with_token(

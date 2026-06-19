@@ -81,7 +81,7 @@ export default function LandingPage() {
               
               <Text style={[styles.heroSubtitle, isMobile && styles.heroSubtitleMobile]}>
                 See conditions, alerts, and road hazards for your entire journey.
-                Download on Android to manage subscriptions securely through Google Play.
+                Available for iPhone and Android.
               </Text>
 
               <View style={[styles.heroCtas, isMobile && styles.heroCtasMobile]}>
@@ -91,7 +91,7 @@ export default function LandingPage() {
                   data-testid="hero-start-trial"
                 >
                   <Ionicons name="rocket" size={20} color="#0f0f0f" />
-                  <Text style={styles.primaryCtaText}>{Platform.OS === 'web' ? 'Get it on Google Play' : 'Start Free Trial'}</Text>
+                  <Text style={styles.primaryCtaText}>{Platform.OS === 'web' ? 'Download RouteCast Weather' : 'Start Free Trial'}</Text>
                 </TouchableOpacity>
               </View>
 
@@ -107,7 +107,7 @@ export default function LandingPage() {
               <View style={[styles.trustBullets, isMobile && styles.trustBulletsMobile]}>
                 <View style={styles.trustBullet}>
                   <Ionicons name="checkmark-circle" size={16} color="#22c55e" />
-                  <Text style={styles.trustBulletText}>Android app on Google Play</Text>
+                  <Text style={styles.trustBulletText}>Available for iPhone &amp; Android</Text>
                 </View>
                 <View style={styles.trustBullet}>
                   <Ionicons name="checkmark-circle" size={16} color="#22c55e" />
@@ -273,17 +273,17 @@ export default function LandingPage() {
             colors={['#1a1a2e', '#16213e', '#0f0f0f']}
             style={styles.finalCtaGradient}
           >
-            <Text style={styles.finalCtaTitle}>Get RouteCast on Android</Text>
+            <Text style={styles.finalCtaTitle}>Get RouteCast Weather</Text>
             <Text style={styles.finalCtaSubtitle}>
-              Download on Google Play. Manage billing and subscriptions directly in the app.
+              Available for iPhone and Android. Download the app and start a free 7-day trial.
             </Text>
             <TouchableOpacity 
               style={styles.finalCtaButton}
-              onPress={() => Linking.openURL(GOOGLE_PLAY_URL)}
+              onPress={handleStartTrial}
               data-testid="final-cta-btn"
             >
-              <Text style={styles.finalCtaButtonText}>Download on Google Play</Text>
-              <Ionicons name="logo-google-playstore" size={20} color="#0f0f0f" />
+              <Text style={styles.finalCtaButtonText}>Download RouteCast Weather</Text>
+              <Ionicons name="download" size={20} color="#0f0f0f" />
             </TouchableOpacity>
           </LinearGradient>
         </View>

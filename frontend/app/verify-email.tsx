@@ -169,14 +169,8 @@ export default function VerifyEmailScreen() {
                   <>
                     <Text style={styles.subtitle}>
                       {verifiedEmail ? `${verifiedEmail} is verified.` : 'Your email is verified.'}{' '}
-                      Open the RouteCast app on your Android device to sign in and start your subscription.
+                      You may now return to the RouteCast Weather app and log in.
                     </Text>
-                    <TouchableOpacity
-                      style={styles.resendButton}
-                      onPress={() => Linking.openURL('https://play.google.com/store/apps/details?id=com.routecast.app')}
-                    >
-                      <Text style={styles.resendButtonText}>Get RouteCast on Google Play</Text>
-                    </TouchableOpacity>
                   </>
                 ) : (
                   <>
@@ -254,16 +248,11 @@ export default function VerifyEmailScreen() {
                 <View style={styles.iconContainer}>
                   <Ionicons name="checkmark-circle" size={48} color="#22c55e" />
                 </View>
-                <Text style={styles.title}>Email Verified!</Text>
+                <Text style={styles.title}>Email Verified</Text>
                 <Text style={styles.subtitle}>
-                  Open the RouteCast app on your Android device to sign in and start your subscription.
+                  Your email has been verified successfully.{'\n\n'}
+                  You may now return to the RouteCast Weather app and log in.
                 </Text>
-                <TouchableOpacity
-                  style={styles.resendButton}
-                  onPress={() => Linking.openURL('https://play.google.com/store/apps/details?id=com.routecast.app')}
-                >
-                  <Text style={styles.resendButtonText}>Get RouteCast on Google Play</Text>
-                </TouchableOpacity>
               </>
             ) : (
               <>
