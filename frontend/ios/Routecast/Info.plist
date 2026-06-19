@@ -27,6 +27,7 @@
       <dict>
         <key>CFBundleURLSchemes</key>
         <array>
+          <string>routecast2</string>
           <string>com.routecast.app</string>
         </array>
       </dict>

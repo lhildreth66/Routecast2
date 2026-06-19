@@ -300,10 +300,10 @@ _ERROR_REDIRECT = f"{os.environ.get('FRONTEND_URL', '')}/signup?error=invalid_to
 
 
 def _build_native_verify_success_response(email: str = "") -> HTMLResponse:
-    # NOTE: No deep-link / app-open attempt here.
-    # Auto-opening an unregistered custom-scheme URL causes iOS to show
-    # "The app could not be opened" which is a poor UX and risks App Store
-    # rejection. The user is instructed to return to the app manually.
+    # Deep link uses a plain <a> tag — NO JavaScript auto-open.
+    # The user taps the button; iOS routes routecast2:// to the app via
+    # CFBundleURLSchemes. Auto-opening via JS triggers "application could not be
+    # opened" even when the app is installed, which Apple rejects.
     html = """
         <!doctype html>
         <html lang="en">
@@ -317,16 +317,18 @@ def _build_native_verify_success_response(email: str = "") -> HTMLResponse:
                     <div style="width:100%; background:#1f2937; border:1px solid #374151; border-radius:14px; padding:32px 24px; text-align:center;">
                         <div style="font-size:48px; margin-bottom:16px;">&#10003;</div>
                         <h1 style="margin:0 0 12px; color:#22c55e; font-size:24px;">Email Verified</h1>
-                        <p style="margin:0 0 8px; color:#d1d5db; font-size:16px; line-height:1.6;">
-                            Your email has been verified successfully.
+                        <p style="margin:0 0 24px; color:#d1d5db; font-size:16px; line-height:1.6;">
+                            Your email has been verified successfully.<br>
+                            Tap below to return to RouteCast Weather and continue.
                         </p>
-                        <p style="margin:0 0 28px; color:#d1d5db; font-size:16px; line-height:1.6;">
-                            You may now return to the RouteCast Weather app and log in.
-                        </p>
-                        <a href="https://routecastweather.com/app"
-                           style="display:block; background:#eab308; color:#111827; text-decoration:none; font-weight:700; border-radius:10px; padding:16px 24px; font-size:17px; box-sizing:border-box;">
-                            Return to RouteCast Weather
+                        <!-- User-tapped deep link — no JS, no auto-open -->
+                        <a href="routecast2://subscription"
+                           style="display:block; background:#eab308; color:#111827; text-decoration:none; font-weight:700; border-radius:10px; padding:16px 24px; font-size:17px; box-sizing:border-box; margin-bottom:20px;">
+                            Continue in RouteCast Weather
                         </a>
+                        <p style="margin:0; color:#9ca3af; font-size:14px; line-height:1.5;">
+                            If the app does not open, return to the RouteCast Weather app manually and log in.
+                        </p>
                     </div>
                 </div>
             </body>
