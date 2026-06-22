@@ -542,3 +542,95 @@ async def reconcile_subscriptions(
         "timestamp": now.isoformat(),
         "results": results,
     }
+
+
+@router.post("/setup-reviewer-account")
+async def setup_reviewer_account(
+    request: Request,
+    admin: bool = Depends(verify_admin),
+):
+    """
+    One-time setup: create or fix the Apple/Google review demo account.
+    Sets email_verified=True, subscription_status=active, is_premium=True
+    with expiration 2027-06-30. Safe to call multiple times (idempotent).
+    """
+    from services.auth_service import create_user, get_password_hash
+    db = get_db(request)
+
+    REVIEWER_EMAIL = "appreview@routecastweather.com"
+    REVIEWER_PASSWORD = "RouteCast2026!"
+    REVIEWER_NAME = "Apple App Review"
+    EXPIRATION = datetime(2027, 6, 30, 23, 59, 59, tzinfo=timezone.utc)
+
+    now = datetime.now(timezone.utc)
+    hashed_pw = get_password_hash(REVIEWER_PASSWORD)
+
+    # Check if account already exists
+    existing = await db.users.find_one({"email": REVIEWER_EMAIL})
+
+    if existing:
+        user_id = existing["user_id"]
+        action = "updated"
+    else:
+        # Create new user document
+        import uuid
+        user_id = str(uuid.uuid4())
+        await db.users.insert_one({
+            "user_id": user_id,
+            "email": REVIEWER_EMAIL,
+            "name": REVIEWER_NAME,
+            "hashed_password": hashed_pw,
+            "email_verified": True,
+            "created_at": now,
+            "updated_at": now,
+            "subscription_status": "active",
+            "subscription_provider": "admin",
+            "subscription_plan": "yearly",
+            "subscription_expiration": EXPIRATION,
+            "is_premium": True,
+            "stripe_subscription_id": None,
+            "stripe_customer_id": None,
+        })
+        action = "created"
+
+    # Always apply the full desired state (idempotent)
+    await db.users.update_one(
+        {"user_id": user_id},
+        {"$set": {
+            "hashed_password": hashed_pw,
+            "name": REVIEWER_NAME,
+            "email_verified": True,
+            "subscription_status": "active",
+            "subscription_provider": "admin",
+            "subscription_plan": "yearly",
+            "subscription_expiration": EXPIRATION,
+            "is_premium": True,
+            "updated_at": now,
+        }}
+    )
+
+    # Log the action
+    await db.subscription_logs.insert_one({
+        "user_id": user_id,
+        "action": "reviewer_account_setup",
+        "new_status": "active",
+        "new_is_premium": True,
+        "subscription_expiration": EXPIRATION,
+        "admin_action": True,
+        "timestamp": now,
+    })
+
+    logger.info(f"[REVIEWER SETUP] {action} reviewer account user_id={user_id} email={REVIEWER_EMAIL}")
+
+    return {
+        "action": action,
+        "user_id": user_id,
+        "email": REVIEWER_EMAIL,
+        "email_verified": True,
+        "subscription_status": "active",
+        "subscription_plan": "yearly",
+        "subscription_provider": "admin",
+        "is_premium": True,
+        "subscription_expiration": EXPIRATION.isoformat(),
+        "timestamp": now.isoformat(),
+    }
