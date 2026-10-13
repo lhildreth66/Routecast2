@@ -26,6 +26,9 @@ export default function AccountScreen() {
   const [error, setError] = useState('');
   const [logoutLoading, setLogoutLoading] = useState(false);
   const [deleteLoading, setDeleteLoading] = useState(false);
+  // Tracks whether the initial profile fetch has settled (success OR failure),
+  // so a slow/hanging /auth/me can never trap this screen on the spinner forever.
+  const [profileCheckDone, setProfileCheckDone] = useState(false);
 
   // AuthContext hydration is passive: it restores tokens without calling
   // /auth/me. Screens that need the user object must call refreshUser().
@@ -40,10 +43,17 @@ export default function AccountScreen() {
       });
     }
     if (accessToken && !user) {
-      refreshUser();
+      refreshUser().finally(() => setProfileCheckDone(true));
+    } else {
+      setProfileCheckDone(true);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken]);
+
+  const retryProfileLoad = () => {
+    setProfileCheckDone(false);
+    refreshUser().finally(() => setProfileCheckDone(true));
+  };
 
   // STRIPE DISABLED - Google Play submission - do not delete
   /*
@@ -301,12 +311,57 @@ export default function AccountScreen() {
     });
   };
 
-  if (!hasHydrated || authLoading || (isAuthenticated && !user)) {
+  if (!hasHydrated || authLoading || (isAuthenticated && !user && !profileCheckDone)) {
     // Still hydrating or loading the user profile – show a neutral spinner
     // so we never flash "Not Signed In" for an already-authenticated session.
     return (
       <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
         <ActivityIndicator size="large" color="#eab308" />
+      </View>
+    );
+  }
+
+  if (isAuthenticated && !user && profileCheckDone) {
+    // The profile fetch finished (failed or timed out) without ever giving us
+    // a user object. Never trap the user here — Log Out must always work.
+    return (
+      <View style={styles.container}>
+        <SafeAreaView style={styles.safeArea}>
+          <View style={styles.notLoggedIn}>
+            <View style={styles.notLoggedInContent}>
+              <Ionicons name="alert-circle-outline" size={64} color="#ef4444" />
+              <Text style={styles.notLoggedInTitle}>Could not load account details</Text>
+              <Text style={styles.notLoggedInSubtitle}>
+                Check your connection and try again.
+              </Text>
+
+              <TouchableOpacity
+                style={styles.signInButton}
+                onPress={retryProfileLoad}
+                data-testid="account-retry-btn"
+              >
+                <Ionicons name="refresh" size={22} color="#1a1a1a" />
+                <Text style={styles.signInButtonText}>RETRY</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.logoutButton, logoutLoading && styles.buttonDisabled]}
+                onPress={handleLogout}
+                disabled={logoutLoading}
+                data-testid="logout-btn"
+              >
+                {logoutLoading ? (
+                  <ActivityIndicator size="small" color="#ef4444" />
+                ) : (
+                  <>
+                    <Ionicons name="log-out-outline" size={20} color="#ef4444" />
+                    <Text style={styles.logoutButtonText}>Sign Out</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </SafeAreaView>
       </View>
     );
   }

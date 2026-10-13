@@ -6,6 +6,7 @@ Handles Stripe subscriptions, Apple/Google receipt verification, and entitlement
 import os
 import json
 import base64
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 from motor.motor_asyncio import AsyncIOMotorDatabase
@@ -772,7 +773,27 @@ async def verify_google_receipt(purchase_token: str, product_id: str, package_na
         }
 
     try:
-        access_token = _get_google_access_token()
+        # Offload the blocking Google OAuth token exchange to a thread with a
+        # hard timeout so a slow/stale token can never hang the event loop.
+        access_token = await asyncio.wait_for(
+            asyncio.to_thread(_get_google_access_token), timeout=8.0
+        )
+    except asyncio.TimeoutError:
+        logger.error(
+            "Google Play auth timed out product_id=%s package=%s token=%s",
+            prod,
+            pkg,
+            _mask_token(token),
+        )
+        return {
+            "valid": False,
+            "message": "Google Play verification timed out",
+            "subscription_status": "inactive",
+            "expiration": None,
+            "plan": "free",
+            "verified_with_google": False,
+            "error_code": "google_auth_timeout",
+        }
     except Exception as e:
         logger.error(
             "Google Play auth failure product_id=%s package=%s token=%s reason=%s",
