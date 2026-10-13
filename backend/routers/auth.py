@@ -30,7 +30,7 @@ from models.user import (
     UserCreate, UserLogin, UserResponse, UserMeResponse,
     TokenResponse, TokenRefreshRequest, PasswordResetRequest,
     PasswordResetConfirm, ChangePasswordRequest,
-    SubscriptionStatus, SubscriptionPlan, EntitlementState,
+    SubscriptionStatus, SubscriptionPlan, SubscriptionProvider, EntitlementState,
     get_user_entitlements, user_is_premium
 )
 from services.auth_service import (
@@ -726,7 +726,16 @@ async def get_me(request: Request, current_user: dict = Depends(get_current_user
         created_at=user["created_at"],
         subscription_status=SubscriptionStatus(sub_status["status"]) if sub_status["status"] in [s.value for s in SubscriptionStatus] else SubscriptionStatus.INACTIVE,
         subscription_plan=SubscriptionPlan(sub_status["plan"]) if sub_status["plan"] in [p.value for p in SubscriptionPlan] else SubscriptionPlan.FREE,
-        subscription_provider=sub_status.get("provider"),
+        # Unrecognized/legacy provider values (e.g. "manual") are normalized to
+        # "admin" — matches the existing "manually granted by admin" semantics —
+        # instead of raising a ValidationError. Falsy values (None/"") -> None.
+        subscription_provider=(
+            None
+            if not sub_status.get("provider")
+            else sub_status["provider"]
+            if sub_status["provider"] in [p.value for p in SubscriptionProvider]
+            else SubscriptionProvider.ADMIN
+        ),
         subscription_expiration=sub_status.get("expiration"),
         is_premium=is_premium,
         entitlements=entitlements,
