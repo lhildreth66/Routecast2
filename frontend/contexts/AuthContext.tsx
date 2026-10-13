@@ -318,6 +318,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const response = await axios.get(buildUrl('auth/me'), {
         headers: { Authorization: `Bearer ${token}` },
+        timeout: 8000, // never let a slow/hanging backend trap the UI forever
       });
       setUser(response.data);
       LAST_AUTH_ME_401_AT = 0; // clear guard on success
