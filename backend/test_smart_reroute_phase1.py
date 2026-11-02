@@ -24,7 +24,7 @@ from server import (
 )
 
 
-def _make_geometry(num_points: int = 5, span_degrees: float = 1.0) -> str:
+def _make_geometry(num_points: int = 20, span_degrees: float = 2.0) -> str:
     coords = [(40.0 + i * (span_degrees / num_points), -100.0) for i in range(num_points)]
     return polyline.encode(coords, precision=6)
 
@@ -98,7 +98,10 @@ def test_uncertain_alternate_is_never_declared_safer():
 
     assert result.recommended_route_index is None
     assert result.reroute_recommended is False
-    assert result.message == "No safer alternate route found."
+    # The only alternate couldn't be reliably evaluated — this is "insufficient evidence",
+    # distinct from "confidently evaluated, none were better".
+    assert result.comparison_outcome == "insufficient_evidence"
+    assert result.message == "Insufficient weather data to reliably compare alternate routes."
     assert result.uncertain is True
 
 
@@ -253,7 +256,7 @@ async def test_missing_weather_data_cannot_produce_perfect_score_or_confident_re
     assessment = select_weather_reroute([primary, result])
     assert assessment.recommended_route_index is None
     assert assessment.reroute_recommended is False
-    assert assessment.message == "No safer alternate route found."
+    assert assessment.comparison_outcome == "insufficient_evidence"
     assert assessment.uncertain is True
 
 
@@ -485,9 +488,22 @@ async def test_long_trip_coverage_spans_full_distance_not_just_the_start(monkeyp
 
     monkeypatch.setattr(server, "extract_waypoints_from_route", spying_extract)
 
-    result = await evaluate_route_weather_risk(1, geometry, 2000.0, 1800, dt.datetime.utcnow(), "car", False, None)
+    # Realistic production allocation for a single ~2000mi route (see
+    # weather_exposure.allocate_sample_budgets) instead of the old fixed 8-point default —
+    # this test's purpose is verifying FULL-route coverage, not the new coverage-gap flag.
+    budget = server.weather_exposure.allocate_sample_budgets([2000.0])[0]
+    result = await evaluate_route_weather_risk(
+        1, geometry, 2000.0, 1800, dt.datetime.utcnow(), "car", False, None, sample_budget=budget
+    )
 
-    assert result.uncertain is False
+    # Even at the max per-route sample budget (30), a lone 2000mi route's anchor spacing
+    # (~69mi) still exceeds the coverage-gap honesty threshold — this is the NEW, correct
+    # behavior (point 2/4: more sampling must not manufacture an unsupported "safe" claim
+    # for a trip this long), not a regression. The original intent of this test — that
+    # sampling spans the FULL route rather than stopping after the first few hundred miles —
+    # is still verified below.
+    assert result.uncertain is True
+    assert "coverage gap" in (result.uncertainty_reason or "").lower()
     # Coverage must reach near the end of the route, not stop after the first few hundred miles.
     assert max(sampled_distances) > 1500
 

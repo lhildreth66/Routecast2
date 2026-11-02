@@ -190,7 +190,12 @@ async def test_slow_but_successful_legacy_bridge_check_is_trusted_for_reuse(monk
     assert len(calls) == 3
     primary_risk = next(r for r in data["weather_reroute"]["routes"] if r["route_index"] == 0)
     assert primary_risk["vehicle_restriction_checked"] is True
-    assert primary_risk["uncertain"] is False
+    # NOTE: this demo fixture's geometry is a synthetic 3-point polyline (not a realistic
+    # dense Mapbox route), so the Phase 3 coverage-gap honesty check legitimately flags it as
+    # uncertain regardless of the bridge-check outcome this test is actually verifying —
+    # the bridge-check reuse behavior above (call count, vehicle_restriction_checked) is the
+    # real assertion of interest here.
+    assert primary_risk["uncertainty_reason"]
 
 
 @pytest.mark.asyncio
@@ -242,4 +247,8 @@ async def test_route_with_no_fixture_alternatives_returns_empty_list(monkeypatch
     data = response.json()
     assert data["route_alternatives"] == []
     assert data["weather_reroute"]["recommended_route_index"] is None
-    assert data["weather_reroute"]["message"] == "No safer alternate route found."
+    # This fixture's geometry is a synthetic 3-point polyline for a declared 174mi trip —
+    # too sparse to meet the Phase 3 coverage-gap confidence threshold, so the primary is
+    # honestly reported as insufficient_evidence rather than a confident "no safer route".
+    assert data["weather_reroute"]["comparison_outcome"] == "insufficient_evidence"
+    assert data["weather_reroute"]["message"] == "Insufficient weather data to reliably compare routes."
