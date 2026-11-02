@@ -63,6 +63,16 @@ class FakeDirectionsProvider(DirectionsProvider, _FixtureLoader):
         waypoints: Optional[List[Dict[str, float]]],
         options: Optional[Dict[str, Any]],
     ) -> Optional[Dict[str, float]]:
+        def _alternatives(route: Dict[str, Any]) -> List[Dict[str, Any]]:
+            return [
+                {
+                    "geometry": alt.get("geometry"),
+                    "duration": alt.get("duration_minutes"),
+                    "distance": alt.get("distance_miles"),
+                }
+                for alt in route.get("alternatives", [])
+            ]
+
         routes = self.data.get("routes", [])
         for route in routes:
             if route.get("origin_lat") is not None:
@@ -74,6 +84,7 @@ class FakeDirectionsProvider(DirectionsProvider, _FixtureLoader):
                         "geometry": route["geometry"],
                         "duration": route["duration_minutes"],
                         "distance": route["distance_miles"],
+                        "alternatives": _alternatives(route),
                     }
         if routes:
             fallback = routes[0]
@@ -81,6 +92,7 @@ class FakeDirectionsProvider(DirectionsProvider, _FixtureLoader):
                 "geometry": fallback["geometry"],
                 "duration": fallback["duration_minutes"],
                 "distance": fallback["distance_miles"],
+                "alternatives": _alternatives(fallback),
             }
         return None
 

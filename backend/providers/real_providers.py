@@ -157,6 +157,8 @@ class MapboxDirectionsProvider(DirectionsProvider):
                     "overview": "full",
                     "steps": "true",
                     "annotations": "distance,duration",
+                    # Smart Weather Rerouting Phase 0: ask Mapbox for up to 2 extra route options.
+                    "alternatives": "true",
                 }
                 if options:
                     exclude = options.get("exclude")
@@ -186,12 +188,22 @@ class MapboxDirectionsProvider(DirectionsProvider):
                         len(legs),
                         route_distance,
                     )
+                    # Smart Weather Rerouting Phase 0: surface up to 2 alternates; empty when Mapbox has none.
+                    alternates = []
+                    for alt_route in data["routes"][1:3]:
+                        if alt_route.get("geometry"):
+                            alternates.append({
+                                "geometry": alt_route.get("geometry"),
+                                "duration": alt_route.get("duration", 0),
+                                "distance": alt_route.get("distance", 0),
+                            })
                     return {
                         "geometry": route.get("geometry"),
                         # Mapbox returns duration in seconds; keep seconds so downstream conversions stay correct.
                         "duration": route.get("duration", 0),
                         "distance": route_distance,  # meters (per Mapbox)
                         "legs": legs,
+                        "alternatives": alternates,
                     }
         except Exception as exc:
             logger.error("Mapbox directions failed coords=%s: %s", coords_str[:120], exc)

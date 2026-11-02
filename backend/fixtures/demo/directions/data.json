@@ -9,7 +9,19 @@
       "dest_lon": -122.6784,
       "geometry": "}_p~F~ps|U_ulLnnqC_mqNvxq`@",
       "duration_minutes": 180,
-      "distance_miles": 174.0
+      "distance_miles": 174.0,
+      "alternatives": [
+        {
+          "geometry": "}_p~F~ps|U_ulLnnqC_mqNvxq`@",
+          "duration_minutes": 195,
+          "distance_miles": 182.0
+        },
+        {
+          "geometry": "}_p~F~ps|U_ulLnnqC_mqNvxq`@",
+          "duration_minutes": 200,
+          "distance_miles": 188.0
+        }
+      ]
     },
     {
       "origin": "Portland, OR",

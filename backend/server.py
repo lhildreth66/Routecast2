@@ -340,6 +340,21 @@ ALERTS_RETURN_LIMIT = 10
 DEFAULT_ROUTE_SPEED_MPH = 55
 MIN_STEPS_FOR_NATIVE = int(_env_float("MIN_STEPS_FOR_NATIVE", 30))
 
+# Smart Weather Rerouting Phase 0/1 tunables (env overrides; Android-only feature rollout)
+# Defaults OFF: Phase 1 (weather_reroute) stays disabled until the Android UI is built, tested,
+# and explicitly approved for deployment. Phase 0 (route_alternatives) is unaffected by this flag.
+SMART_REROUTE_ENABLED = os.environ.get("SMART_REROUTE_ENABLED", "0").lower() not in {"0", "false", "no", "off"}
+ALT_ROUTE_MAX_ALTERNATES = 2
+# Floor on sample spacing; the actual interval is computed per-route to spread samples evenly
+# across the full trip length (see _alt_route_sample_interval), not a fixed 1-size-fits-all value.
+ALT_ROUTE_MIN_SAMPLE_INTERVAL_MILES = _env_float("ALT_ROUTE_MIN_SAMPLE_INTERVAL_MILES", 10.0)
+ALT_ROUTE_MAX_SAMPLE_POINTS = int(_env_float("ALT_ROUTE_MAX_SAMPLE_POINTS", 8))
+ALT_ROUTE_EVAL_TIMEOUT_SECONDS = _env_float("ALT_ROUTE_EVAL_TIMEOUT_SECONDS", 8.0)
+ALT_ROUTE_WAYPOINT_CONCURRENCY = int(_env_float("ALT_ROUTE_WAYPOINT_CONCURRENCY", 4))
+# Minimum safety-score improvement (0-100 scale) an alternate must show before it is ever
+# recommended; override via env without a code change/redeploy.
+ALT_ROUTE_MIN_RISK_IMPROVEMENT = int(_env_float("ALT_ROUTE_MIN_RISK_IMPROVEMENT", 15))
+
 HAZARD_SCHEMA_VERSION = 2
 
 # Log hazard config once at startup for ops visibility
@@ -499,6 +514,43 @@ class AlternateRoute(BaseModel):
     safety_score: int
     recommendation: str
     avoids: List[str]  # What hazards this route avoids
+
+
+class RouteGeometryOption(BaseModel):
+    """Smart Weather Rerouting Phase 0: a candidate alternate route geometry from the directions provider."""
+    index: int  # 1-based; the primary route stays in the existing top-level route_geometry/total_* fields
+    route_geometry: str
+    distance_miles: float
+    duration_minutes: int
+
+
+class RouteWeatherRisk(BaseModel):
+    """Smart Weather Rerouting Phase 1: independent weather/hazard risk evaluation for one candidate route."""
+    route_index: int  # 0 = primary route, 1+ matches RouteGeometryOption.index
+    distance_miles: float
+    duration_minutes: int
+    risk_score: int  # 0-100, higher = safer (same scale as SafetyScore.overall_score)
+    risk_level: str  # low, moderate, high, extreme
+    hazard_count: int = 0
+    severe_weather: bool = False
+    worst_road_condition: Optional[str] = None
+    vehicle_restriction_checked: bool = True  # False when a required bridge/height check could not be completed
+    vehicle_restriction_blocked: bool = False  # True when a known clearance conflict rules this route out
+    uncertain: bool = False  # True when hazard data was incomplete; never claim this route is safer in that case
+    uncertainty_reason: Optional[str] = None
+    eta_adjusted: bool = False  # True if weather was matched to the waypoint's estimated arrival time
+    forecast_horizon_limited: bool = False  # True if the closest available forecast was still >1hr from the ETA
+    summary: str = ""
+
+
+class WeatherRerouteAssessment(BaseModel):
+    """Smart Weather Rerouting Phase 1: comparative recommendation across the primary route and its alternates."""
+    schema_version: int = 1
+    routes: List[RouteWeatherRisk] = []
+    recommended_route_index: Optional[int] = None  # None = keep the current/primary route
+    reroute_recommended: bool = False
+    message: str = "No safer alternate route found."
+    uncertain: bool = False  # True when some routes could not be confidently evaluated
 
 
 class RouteRequest(BaseModel):
@@ -693,6 +745,9 @@ class RouteWeatherResponse(BaseModel):
     coverage_gaps_miles: float = 0.0
     hazard_status: str = "ready"
     timings_ms: Optional[Dict[str, float]] = None
+    # Smart Weather Rerouting Phase 0/1: additive, default-empty so older clients are unaffected
+    route_alternatives: List[RouteGeometryOption] = []
+    weather_reroute: Optional[WeatherRerouteAssessment] = None
 
 class SavedRoute(BaseModel):
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
@@ -3267,6 +3322,253 @@ def analyze_route_conditions(waypoints_weather: List[WaypointWeather]) -> tuple:
     return summary, worst_condition, reroute_needed, reroute_reason, coverage_gaps_segments, round(coverage_gap_miles, 1)
 
 
+def _alt_route_distance_duration(alt: Dict[str, Any]) -> tuple:
+    """Convert a provider alternate-route dict to (distance_miles, duration_minutes), matching the
+    unit convention already used for the primary route (demo/test fixtures store miles/minutes;
+    prod Mapbox returns meters/seconds)."""
+    raw_distance = alt.get("distance") or 0.0
+    raw_duration = alt.get("duration") or 0.0
+    if ROUTECAST_MODE in {"demo", "test"}:
+        distance_miles = raw_distance
+        duration_minutes = int(round(raw_duration))
+    else:
+        distance_miles = raw_distance / 1609.344 if raw_distance else 0.0
+        duration_minutes = int(round(raw_duration / 60)) if raw_duration else 0
+    return round(distance_miles, 1), duration_minutes
+
+
+def _alt_route_sample_interval(distance_miles: float) -> float:
+    """Spread up to ALT_ROUTE_MAX_SAMPLE_POINTS samples evenly across the FULL route length.
+    A fixed interval would under-sample short trips (only start/end) and silently truncate long
+    trips to just their first N*interval miles, missing hazards later in the trip."""
+    if distance_miles <= 0:
+        return ALT_ROUTE_MIN_SAMPLE_INTERVAL_MILES
+    spread = distance_miles / max(1, ALT_ROUTE_MAX_SAMPLE_POINTS - 1)
+    return max(ALT_ROUTE_MIN_SAMPLE_INTERVAL_MILES, spread)
+
+
+def _pick_eta_weather(weather: Optional[WeatherData], eta_minutes: Optional[float], departure_time: datetime) -> tuple:
+    """Select the embedded hourly-forecast period closest to the waypoint's estimated arrival time,
+    instead of scoring every waypoint against "right now" conditions regardless of when the driver
+    will actually be there. Returns (effective_weather, forecast_horizon_limited); the horizon flag
+    is True when the closest available period is still over an hour away from the real ETA (the
+    embedded forecast window is short), so callers can treat that point's weather as approximate."""
+    if not weather or not weather.hourly_forecast:
+        return weather, False
+
+    target = (departure_time + timedelta(minutes=eta_minutes or 0)).replace(tzinfo=None)
+    best = None
+    best_delta = None
+    for period in weather.hourly_forecast:
+        try:
+            period_time = datetime.fromisoformat((period.time or "").replace("Z", "+00:00")).replace(tzinfo=None)
+        except Exception:
+            continue
+        delta = abs((period_time - target).total_seconds())
+        if best_delta is None or delta < best_delta:
+            best_delta = delta
+            best = period
+
+    if best is None:
+        return weather, False
+
+    horizon_limited = best_delta is not None and best_delta > 3600
+    adjusted = weather.model_copy(update={
+        "temperature": best.temperature,
+        "conditions": best.conditions,
+        "wind_speed": best.wind_speed,
+    })
+    return adjusted, horizon_limited
+
+
+async def _fetch_point_weather_and_alerts(lat: float, lon: float, semaphore: "asyncio.Semaphore") -> tuple:
+    """Fetch weather + alerts for one point, bounded by a shared concurrency semaphore."""
+    async with semaphore:
+        weather = await get_noaa_weather(lat, lon)
+        alerts, alerts_status = await get_noaa_alerts(lat, lon)
+    return weather, alerts, alerts_status
+
+
+async def evaluate_route_weather_risk(
+    route_index: int,
+    route_geometry: str,
+    distance_miles: float,
+    duration_minutes: int,
+    departure_time: datetime,
+    vehicle_type: str,
+    bridge_alerts_enabled: bool,
+    vehicle_height_ft: Optional[float],
+) -> RouteWeatherRisk:
+    """Independently evaluate weather/alert/bridge exposure for one candidate route (Smart Weather
+    Rerouting Phase 1), using the SAME methodology (sampling, ETA-aware forecast, vehicle-restriction
+    check) for every candidate route — including the primary — so comparisons are apples-to-apples.
+    Sparse sampling + bounded concurrency keep this cheap; NOAA caching is reused automatically for
+    overlapping segments between the primary route and its alternates."""
+
+    async def _run() -> RouteWeatherRisk:
+        interval = _alt_route_sample_interval(distance_miles)
+        sample_wps = extract_waypoints_from_route(
+            route_geometry, interval_miles=interval, departure_time=departure_time
+        )
+        sample_wps = sample_wps[:ALT_ROUTE_MAX_SAMPLE_POINTS] if sample_wps else []
+
+        if not sample_wps:
+            return RouteWeatherRisk(
+                route_index=route_index,
+                distance_miles=distance_miles,
+                duration_minutes=duration_minutes,
+                risk_score=0,
+                risk_level="extreme",
+                vehicle_restriction_checked=not bridge_alerts_enabled,
+                uncertain=True,
+                uncertainty_reason="Unable to sample route geometry for weather evaluation.",
+                summary="Insufficient route data to evaluate weather risk.",
+            )
+
+        semaphore = asyncio.Semaphore(ALT_ROUTE_WAYPOINT_CONCURRENCY)
+        results = await asyncio.gather(
+            *[_fetch_point_weather_and_alerts(wp.lat, wp.lon, semaphore) for wp in sample_wps],
+            return_exceptions=True,
+        )
+
+        waypoints_weather: List[WaypointWeather] = []
+        data_incomplete = False
+        eta_adjusted = False
+        forecast_horizon_limited = False
+        for wp, result in zip(sample_wps, results):
+            if isinstance(result, Exception):
+                data_incomplete = True
+                waypoints_weather.append(WaypointWeather(waypoint=wp, weather=None, alerts=[], alerts_status="error"))
+                continue
+            weather, alerts, alerts_status = result
+            if alerts_status != "ok":
+                data_incomplete = True
+            adjusted_weather, horizon_limited = _pick_eta_weather(weather, wp.eta_minutes, departure_time)
+            if adjusted_weather is not weather:
+                eta_adjusted = True
+            if horizon_limited:
+                forecast_horizon_limited = True
+            waypoints_weather.append(WaypointWeather(waypoint=wp, weather=adjusted_weather, alerts=alerts, alerts_status=alerts_status))
+
+        safety = calculate_safety_score(waypoints_weather, vehicle_type)
+        route_summary, worst_condition, _reroute_needed, _reroute_reason, _gaps, _gap_miles = analyze_route_conditions(waypoints_weather)
+        severe = any(a.severity in ("Extreme", "Severe") for wpw in waypoints_weather for a in wpw.alerts)
+        hazard_count = sum(len(wpw.alerts) for wpw in waypoints_weather)
+
+        vehicle_restriction_checked = True
+        vehicle_restriction_blocked = False
+        if bridge_alerts_enabled:
+            vehicle_restriction_checked = False
+            try:
+                vehicle_ht = vehicle_height_ft or 13.5
+                bridge_alerts = await asyncio.wait_for(
+                    _get_bridge_clearances(route_geometry, vehicle_ht), timeout=ALT_ROUTE_EVAL_TIMEOUT_SECONDS
+                )
+                vehicle_restriction_checked = True
+                vehicle_restriction_blocked = any((a.get("margin_ft", 1.0) < 0) for a in (bridge_alerts or []))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("alt_route_bridge_check_failed route_index=%s: %s", route_index, exc)
+
+        uncertain = data_incomplete or (bridge_alerts_enabled and not vehicle_restriction_checked)
+        uncertainty_reason = None
+        if data_incomplete:
+            uncertainty_reason = "Some weather/alert data was unavailable for this route."
+        elif bridge_alerts_enabled and not vehicle_restriction_checked:
+            uncertainty_reason = "Vehicle height/clearance could not be verified for this route."
+
+        return RouteWeatherRisk(
+            route_index=route_index,
+            distance_miles=distance_miles,
+            duration_minutes=duration_minutes,
+            risk_score=safety.overall_score,
+            risk_level=safety.risk_level,
+            hazard_count=hazard_count,
+            severe_weather=severe,
+            worst_road_condition=worst_condition,
+            vehicle_restriction_checked=vehicle_restriction_checked,
+            vehicle_restriction_blocked=vehicle_restriction_blocked,
+            uncertain=uncertain,
+            uncertainty_reason=uncertainty_reason,
+            eta_adjusted=eta_adjusted,
+            forecast_horizon_limited=forecast_horizon_limited,
+            summary=route_summary,
+        )
+
+    try:
+        return await asyncio.wait_for(_run(), timeout=ALT_ROUTE_EVAL_TIMEOUT_SECONDS + 2.0)
+    except asyncio.TimeoutError:
+        return RouteWeatherRisk(
+            route_index=route_index,
+            distance_miles=distance_miles,
+            duration_minutes=duration_minutes,
+            risk_score=0,
+            risk_level="extreme",
+            vehicle_restriction_checked=not bridge_alerts_enabled,
+            uncertain=True,
+            uncertainty_reason="Weather evaluation for this route timed out.",
+            summary="Weather risk assessment timed out for this route.",
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("alt_route_eval_unexpected_error route_index=%s: %s", route_index, exc)
+        return RouteWeatherRisk(
+            route_index=route_index,
+            distance_miles=distance_miles,
+            duration_minutes=duration_minutes,
+            risk_score=0,
+            risk_level="extreme",
+            vehicle_restriction_checked=not bridge_alerts_enabled,
+            uncertain=True,
+            uncertainty_reason="Weather evaluation failed for this route.",
+            summary="Unable to evaluate this alternate route.",
+        )
+
+
+def select_weather_reroute(routes: List[RouteWeatherRisk]) -> WeatherRerouteAssessment:
+    """Pure comparison/selection over already-evaluated routes (routes[0] must be the primary route).
+    Never recommends a route whose hazard or vehicle-restriction data is incomplete, and only
+    recommends rerouting when a candidate meaningfully reduces weather risk."""
+    if not routes:
+        return WeatherRerouteAssessment()
+
+    primary_risk = routes[0]
+    candidates = [
+        r for r in routes[1:]
+        if not r.uncertain
+        and r.vehicle_restriction_checked
+        and not r.vehicle_restriction_blocked
+    ]
+
+    best: Optional[RouteWeatherRisk] = None
+    for cand in candidates:
+        improvement = cand.risk_score - primary_risk.risk_score
+        if improvement < ALT_ROUTE_MIN_RISK_IMPROVEMENT:
+            continue
+        if best is None or cand.risk_score > best.risk_score:
+            best = cand
+
+    any_uncertain = any(r.uncertain for r in routes)
+
+    if best is not None:
+        return WeatherRerouteAssessment(
+            routes=routes,
+            recommended_route_index=best.route_index,
+            reroute_recommended=True,
+            message=(
+                f"Alternate route {best.route_index} reduces weather risk "
+                f"(+{best.risk_score - primary_risk.risk_score} safety points)."
+            ),
+            uncertain=any_uncertain,
+        )
+
+    return WeatherRerouteAssessment(
+        routes=routes,
+        recommended_route_index=None,
+        reroute_recommended=False,
+        message="No safer alternate route found.",
+        uncertain=any_uncertain,
+    )
+
+
 def parse_lat_lng(value: Optional[str]) -> Optional[Dict[str, float]]:
     """Parse a coordinate pair from flexible input (lat,lng or space-separated)."""
     if not value:
@@ -3956,7 +4258,68 @@ async def get_route_weather(request: RouteRequest):
     if bridge_conflicts:
         reroute_recommended = True
         reroute_reason = f"Bridge clearance conflict at {bridge_conflicts[0]['bridge_name']}"
-    
+
+    # Smart Weather Rerouting Phase 0: surface up to 2 alternate route geometries (empty when provider has none).
+    route_alternatives: List[RouteGeometryOption] = []
+    for alt_idx, alt in enumerate((route_data.get("alternatives") or [])[:ALT_ROUTE_MAX_ALTERNATES], start=1):
+        alt_geometry = alt.get("geometry") or ""
+        if not alt_geometry:
+            continue
+        alt_distance_miles, alt_duration_minutes = _alt_route_distance_duration(alt)
+        route_alternatives.append(RouteGeometryOption(
+            index=alt_idx,
+            route_geometry=alt_geometry,
+            distance_miles=alt_distance_miles,
+            duration_minutes=alt_duration_minutes,
+        ))
+
+    # Smart Weather Rerouting Phase 1: evaluate the primary route + every alternate concurrently,
+    # using the identical methodology for all of them, so the comparison is apples-to-apples and
+    # adding alternates doesn't add wall-clock time (bounded by the slowest single evaluation).
+    weather_reroute: Optional[WeatherRerouteAssessment] = None
+    if SMART_REROUTE_ENABLED:
+        try:
+            eval_specs = [(0, route_geometry, round(total_distance, 1), total_duration_minutes)] + [
+                (alt.index, alt.route_geometry, alt.distance_miles, alt.duration_minutes) for alt in route_alternatives
+            ]
+            eval_results = await asyncio.gather(
+                *[
+                    evaluate_route_weather_risk(
+                        route_index=idx,
+                        route_geometry=geom,
+                        distance_miles=dist,
+                        duration_minutes=dur,
+                        departure_time=departure_time,
+                        vehicle_type=vehicle_type,
+                        bridge_alerts_enabled=bridge_alerts_enabled,
+                        vehicle_height_ft=request.vehicle_height_ft,
+                    )
+                    for idx, geom, dist, dur in eval_specs
+                ],
+                return_exceptions=True,
+            )
+            evaluated_routes: List[RouteWeatherRisk] = []
+            for (idx, _geom, dist, dur), result in zip(eval_specs, eval_results):
+                if isinstance(result, Exception):
+                    logger.warning("route_risk_eval_failed route_index=%s route_id=%s: %s", idx, route_id, result)
+                    evaluated_routes.append(RouteWeatherRisk(
+                        route_index=idx,
+                        distance_miles=dist,
+                        duration_minutes=dur,
+                        risk_score=0,
+                        risk_level="extreme",
+                        uncertain=True,
+                        uncertainty_reason="Weather evaluation failed for this route.",
+                        summary="Unable to evaluate this route.",
+                    ))
+                else:
+                    evaluated_routes.append(result)
+            weather_reroute = select_weather_reroute(evaluated_routes)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("weather_reroute_assessment_failed route_id=%s: %s", route_id, exc)
+            weather_reroute = None
+
+
     response = RouteWeatherResponse(
         id=route_id,
         origin=request.origin,
@@ -3991,6 +4354,8 @@ async def get_route_weather(request: RouteRequest):
         coverage_gaps_miles=coverage_gap_miles,
         hazard_status="pending",
         timings_ms=timings if TIMING_DEBUG else None,
+        route_alternatives=route_alternatives,
+        weather_reroute=weather_reroute,
     )
     
     mark("total")
