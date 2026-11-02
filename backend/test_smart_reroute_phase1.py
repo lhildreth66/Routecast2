@@ -225,6 +225,63 @@ async def test_alert_fetch_failure_marks_uncertain(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_missing_weather_data_cannot_produce_perfect_score_or_confident_recommendation(monkeypatch):
+    """Regression test: NWS can return a clean 'ok' alerts fetch with no usable weather (e.g. a
+    points lookup missing forecastHourly). That must never be scored as if conditions were
+    confirmed calm, and must never be good enough to recommend the route as a safer alternate."""
+    geometry = _make_geometry()
+
+    async def missing_weather(lat, lon):
+        return None  # NWS succeeded but had no usable forecast for this point
+
+    async def clean_alerts(lat, lon):
+        return [], "ok"  # alerts fetch itself succeeded fine
+
+    monkeypatch.setattr(server, "get_noaa_weather", missing_weather)
+    monkeypatch.setattr(server, "get_noaa_alerts", clean_alerts)
+
+    result = await evaluate_route_weather_risk(1, geometry, 120.0, 150, dt.datetime.utcnow(), "car", False, None)
+
+    # calculate_safety_score would otherwise default to a perfect 100 when every waypoint's
+    # weather is None (it simply skips them) — uncertain must catch that before it looks "safe".
+    assert result.risk_score == 100
+    assert result.uncertain is True
+    assert result.uncertainty_reason
+
+    # And critically: select_weather_reroute must never let that apparent perfect score win.
+    primary = RouteWeatherRisk(route_index=0, distance_miles=100.0, duration_minutes=120, risk_score=40, risk_level="high", summary="risky primary")
+    assessment = select_weather_reroute([primary, result])
+    assert assessment.recommended_route_index is None
+    assert assessment.reroute_recommended is False
+    assert assessment.message == "No safer alternate route found."
+    assert assessment.uncertain is True
+
+
+@pytest.mark.asyncio
+async def test_partial_missing_weather_among_otherwise_clear_points_still_marks_uncertain(monkeypatch):
+    """Even a single missing-weather waypoint among otherwise-successful ones must not be
+    smoothed over — the whole route stays uncertain rather than silently averaging it away."""
+    geometry = _make_geometry(num_points=6, span_degrees=1.0)
+    call_count = {"n": 0}
+
+    async def mostly_clear_weather(lat, lon):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return None  # first point has no usable forecast
+        return WeatherData(temperature=70, wind_speed="5 mph", conditions="Clear", humidity=40)
+
+    async def clean_alerts(lat, lon):
+        return [], "ok"
+
+    monkeypatch.setattr(server, "get_noaa_weather", mostly_clear_weather)
+    monkeypatch.setattr(server, "get_noaa_alerts", clean_alerts)
+
+    result = await evaluate_route_weather_risk(1, geometry, 120.0, 150, dt.datetime.utcnow(), "car", False, None)
+
+    assert result.uncertain is True
+
+
+@pytest.mark.asyncio
 async def test_bridge_check_failure_marks_uncertain_and_unchecked(monkeypatch):
     geometry = _make_geometry()
     _clear_weather_fns(monkeypatch)
@@ -250,7 +307,7 @@ async def test_bridge_check_timeout_marks_uncertain_and_unchecked(monkeypatch):
         return []
 
     monkeypatch.setattr(server, "_get_bridge_clearances", slow_bridge_check)
-    monkeypatch.setattr(server, "ALT_ROUTE_EVAL_TIMEOUT_SECONDS", 0.05)
+    monkeypatch.setattr(server, "BRIDGE_CHECK_TRUST_SECONDS", 0.05)
 
     result = await evaluate_route_weather_risk(1, geometry, 120.0, 150, dt.datetime.utcnow(), "truck", True, 13.5)
 
@@ -291,6 +348,74 @@ async def test_bridge_check_success_with_no_conflicts_is_confirmed_suitable(monk
     assert result.vehicle_restriction_checked is True
     assert result.vehicle_restriction_blocked is False
     assert result.uncertain is False
+
+
+# ---------------- known_bridge_alerts reuse optimization: must never bypass a restriction ---------------- #
+
+@pytest.mark.asyncio
+async def test_known_bridge_alerts_reuse_skips_redundant_overpass_call(monkeypatch):
+    """When a confirmed-successful prior check is supplied, no new Overpass call is made."""
+    geometry = _make_geometry()
+    _clear_weather_fns(monkeypatch)
+    call_count = {"n": 0}
+
+    async def should_not_be_called(geom, height):
+        call_count["n"] += 1
+        return []
+
+    monkeypatch.setattr(server, "_get_bridge_clearances", should_not_be_called)
+
+    result = await evaluate_route_weather_risk(
+        0, geometry, 120.0, 150, dt.datetime.utcnow(), "truck", True, 13.5,
+        known_bridge_alerts=[],
+    )
+
+    assert call_count["n"] == 0
+    assert result.vehicle_restriction_checked is True
+    assert result.vehicle_restriction_blocked is False
+
+
+@pytest.mark.asyncio
+async def test_known_bridge_alerts_with_conflict_still_blocks_the_route(monkeypatch):
+    """The reuse optimization must never let a real clearance conflict slip through."""
+    geometry = _make_geometry()
+    _clear_weather_fns(monkeypatch)
+
+    async def should_not_be_called(geom, height):
+        raise AssertionError("Overpass should not be called when a known result is supplied")
+
+    monkeypatch.setattr(server, "_get_bridge_clearances", should_not_be_called)
+
+    result = await evaluate_route_weather_risk(
+        0, geometry, 120.0, 150, dt.datetime.utcnow(), "truck", True, 13.5,
+        known_bridge_alerts=[{"bridge_name": "Low Bridge", "margin_ft": -2.0}],
+    )
+
+    assert result.vehicle_restriction_checked is True
+    assert result.vehicle_restriction_blocked is True
+
+
+@pytest.mark.asyncio
+async def test_known_bridge_alerts_none_always_performs_a_fresh_independent_check(monkeypatch):
+    """Every alternate route (and the primary, when no prior result exists) must always get its
+    own real check — the optimization is opt-in per call, never a default skip."""
+    geometry = _make_geometry()
+    _clear_weather_fns(monkeypatch)
+    call_count = {"n": 0}
+
+    async def real_check(geom, height):
+        call_count["n"] += 1
+        return []
+
+    monkeypatch.setattr(server, "_get_bridge_clearances", real_check)
+
+    result = await evaluate_route_weather_risk(
+        1, geometry, 120.0, 150, dt.datetime.utcnow(), "truck", True, 13.5,
+        known_bridge_alerts=None,
+    )
+
+    assert call_count["n"] == 1
+    assert result.vehicle_restriction_checked is True
 
 
 @pytest.mark.asyncio

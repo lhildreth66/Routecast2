@@ -104,6 +104,95 @@ def test_smart_reroute_defaults_off_without_env_override():
 
 
 @pytest.mark.asyncio
+async def test_trucker_mode_reuses_primary_bridge_check_but_still_checks_each_alternate(monkeypatch):
+    """End-to-end: with 1 primary + 2 alternates, the legacy bridge check plus Phase 1 should make
+    exactly 3 Overpass calls (1 legacy primary + 2 independent alternates) — not 4 — because the
+    primary's Phase 1 evaluation reuses the already-confirmed legacy result instead of repeating it.
+    Every alternate must still receive its own real check."""
+    _patch_common(monkeypatch)
+
+    calls = []
+
+    async def counting_bridge_check(route_geometry, vehicle_height_ft):
+        calls.append(route_geometry)
+        return []  # no conflicts found on any route in this scenario
+
+    monkeypatch.setattr(server, "_get_bridge_clearances", counting_bridge_check)
+
+    payload = {**_route_payload(), "trucker_mode": True, "vehicle_height_ft": 12.5}
+    transport = ASGITransport(app=server.app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post("/api/route/weather", json=payload)
+
+    assert response.status_code == 200
+    data = response.json()
+
+    assert len(calls) == 3  # 1 legacy primary + 2 alternates, no redundant 4th primary re-check
+
+    wr = data["weather_reroute"]
+    for r in wr["routes"]:
+        assert r["vehicle_restriction_checked"] is True
+        assert r["vehicle_restriction_blocked"] is False
+
+
+@pytest.mark.asyncio
+async def test_trucker_mode_blocked_primary_still_blocks_after_reuse(monkeypatch):
+    """The reuse optimization must never hide a real clearance conflict found on the primary route."""
+    _patch_common(monkeypatch)
+
+    async def conflicting_bridge_check(route_geometry, vehicle_height_ft):
+        return [{"bridge_name": "Low Overpass", "margin_ft": -1.5}]
+
+    monkeypatch.setattr(server, "_get_bridge_clearances", conflicting_bridge_check)
+
+    payload = {**_route_payload(), "trucker_mode": True, "vehicle_height_ft": 12.5}
+    transport = ASGITransport(app=server.app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post("/api/route/weather", json=payload)
+
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["reroute_recommended"] is True  # legacy flag still upgraded by the conflict
+    primary_risk = next(r for r in data["weather_reroute"]["routes"] if r["route_index"] == 0)
+    assert primary_risk["vehicle_restriction_blocked"] is True
+
+
+@pytest.mark.asyncio
+async def test_slow_legacy_bridge_check_is_not_trusted_for_reuse(monkeypatch):
+    """A legacy check that returns successfully but only after taking suspiciously long (close to
+    its own internal timeout budget) is indistinguishable from a silently-swallowed timeout, and
+    must never be reused as a confirmed result — Phase 1 must perform its own fresh check for the
+    primary route instead of trusting it."""
+    _patch_common(monkeypatch)
+    monkeypatch.setattr(server, "BRIDGE_CHECK_TRUST_SECONDS", 0.05)
+
+    calls = []
+
+    async def slow_but_returns(route_geometry, vehicle_height_ft):
+        calls.append(route_geometry)  # record the call before the (possibly cancelled) sleep
+        await server.asyncio.sleep(0.15)  # exceeds the lowered trust threshold
+        return []
+
+    monkeypatch.setattr(server, "_get_bridge_clearances", slow_but_returns)
+
+    payload = {**_route_payload(), "trucker_mode": True, "vehicle_height_ft": 12.5}
+    transport = ASGITransport(app=server.app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post("/api/route/weather", json=payload)
+
+    assert response.status_code == 200
+    data = response.json()
+
+    # Legacy call (1) + Phase 1's OWN fresh primary check (not reused) + 2 alternates = 4,
+    # not 3 — proving the untrustworthy legacy result was not silently reused.
+    assert len(calls) == 4
+    primary_risk = next(r for r in data["weather_reroute"]["routes"] if r["route_index"] == 0)
+    assert primary_risk["vehicle_restriction_checked"] is False
+    assert primary_risk["uncertain"] is True
+
+
+@pytest.mark.asyncio
 async def test_route_with_no_fixture_alternatives_returns_empty_list(monkeypatch):
     _patch_common(monkeypatch)
 

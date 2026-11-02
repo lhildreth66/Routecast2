@@ -354,6 +354,11 @@ ALT_ROUTE_WAYPOINT_CONCURRENCY = int(_env_float("ALT_ROUTE_WAYPOINT_CONCURRENCY"
 # Minimum safety-score improvement (0-100 scale) an alternate must show before it is ever
 # recommended; override via env without a code change/redeploy.
 ALT_ROUTE_MIN_RISK_IMPROVEMENT = int(_env_float("ALT_ROUTE_MIN_RISK_IMPROVEMENT", 15))
+# get_bridge_clearances_for_route() has an internal 8s timeout but NEVER raises on it — it
+# silently returns [] indistinguishable from "checked, zero bridges found". Our own timeout here
+# must stay strictly below that internal ceiling so OUR asyncio.TimeoutError fires first and is
+# caught as a real failure, instead of racing with (and losing to) the inner silent swallow.
+BRIDGE_CHECK_TRUST_SECONDS = _env_float("BRIDGE_CHECK_TRUST_SECONDS", 7.0)
 
 HAZARD_SCHEMA_VERSION = 2
 
@@ -3398,12 +3403,18 @@ async def evaluate_route_weather_risk(
     vehicle_type: str,
     bridge_alerts_enabled: bool,
     vehicle_height_ft: Optional[float],
+    known_bridge_alerts: Optional[List[Dict[str, Any]]] = None,
 ) -> RouteWeatherRisk:
     """Independently evaluate weather/alert/bridge exposure for one candidate route (Smart Weather
     Rerouting Phase 1), using the SAME methodology (sampling, ETA-aware forecast, vehicle-restriction
     check) for every candidate route — including the primary — so comparisons are apples-to-apples.
     Sparse sampling + bounded concurrency keep this cheap; NOAA caching is reused automatically for
-    overlapping segments between the primary route and its alternates."""
+    overlapping segments between the primary route and its alternates.
+
+    known_bridge_alerts: pass the already-fetched bridge-clearance result for THIS EXACT route
+    geometry only when that earlier check genuinely succeeded (never on failure/timeout), to avoid
+    a redundant Overpass round-trip. Leave None (the default) to always perform a fresh, independent
+    check — this is required for every alternate route, which has no prior result to reuse."""
 
     async def _run() -> RouteWeatherRisk:
         interval = _alt_route_sample_interval(distance_miles)
@@ -3443,6 +3454,12 @@ async def evaluate_route_weather_risk(
             weather, alerts, alerts_status = result
             if alerts_status != "ok":
                 data_incomplete = True
+            # A clean "ok" alerts fetch does not guarantee weather succeeded too (e.g. NWS
+            # points lookup can return without a usable forecast for a given coordinate).
+            # Treat that as incomplete data as well — never let a missing data point silently
+            # score as "good conditions" just because calculate_safety_score skips it.
+            if weather is None:
+                data_incomplete = True
             adjusted_weather, horizon_limited = _pick_eta_weather(weather, wp.eta_minutes, departure_time)
             if adjusted_weather is not weather:
                 eta_adjusted = True
@@ -3458,16 +3475,23 @@ async def evaluate_route_weather_risk(
         vehicle_restriction_checked = True
         vehicle_restriction_blocked = False
         if bridge_alerts_enabled:
-            vehicle_restriction_checked = False
-            try:
-                vehicle_ht = vehicle_height_ft or 13.5
-                bridge_alerts = await asyncio.wait_for(
-                    _get_bridge_clearances(route_geometry, vehicle_ht), timeout=ALT_ROUTE_EVAL_TIMEOUT_SECONDS
-                )
+            if known_bridge_alerts is not None:
+                # Reuse a confirmed-successful prior check for this exact route instead of
+                # re-querying Overpass. Only ever set when that earlier call actually succeeded —
+                # a failed/missing check is never passed in, so it can never masquerade as a pass.
                 vehicle_restriction_checked = True
-                vehicle_restriction_blocked = any((a.get("margin_ft", 1.0) < 0) for a in (bridge_alerts or []))
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("alt_route_bridge_check_failed route_index=%s: %s", route_index, exc)
+                vehicle_restriction_blocked = any((a.get("margin_ft", 1.0) < 0) for a in known_bridge_alerts)
+            else:
+                vehicle_restriction_checked = False
+                try:
+                    vehicle_ht = vehicle_height_ft or 13.5
+                    bridge_alerts = await asyncio.wait_for(
+                        _get_bridge_clearances(route_geometry, vehicle_ht), timeout=BRIDGE_CHECK_TRUST_SECONDS
+                    )
+                    vehicle_restriction_checked = True
+                    vehicle_restriction_blocked = any((a.get("margin_ft", 1.0) < 0) for a in (bridge_alerts or []))
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("alt_route_bridge_check_failed route_index=%s: %s", route_index, exc)
 
         uncertain = data_incomplete or (bridge_alerts_enabled and not vehicle_restriction_checked)
         uncertainty_reason = None
@@ -4241,11 +4265,18 @@ async def get_route_weather(request: RouteRequest):
     # Default is off; only compute when explicitly enabled by client settings.
     # Wrapped in try/except so Overpass failures never crash the route endpoint.
     bridge_clearance_alerts: List[Dict[str, Any]] = []
+    bridge_check_succeeded = False
     bridge_alerts_enabled = bool(request.bridge_height_alerts_enabled) or bool(request.trucker_mode)
     if route_geometry and bridge_alerts_enabled:
         vehicle_ht = (request.vehicle_height_ft or 13.5)
+        _bridge_check_started = time.perf_counter()
         try:
             bridge_clearance_alerts = await _get_bridge_clearances(route_geometry, vehicle_ht)
+            # get_bridge_clearances_for_route never raises on its own internal timeout — it
+            # silently returns [] instead, indistinguishable from "checked, nothing found". A
+            # call that took close to that internal budget is untrustworthy for reuse; only an
+            # answer that clearly came back well within it counts as a confirmed, reusable check.
+            bridge_check_succeeded = (time.perf_counter() - _bridge_check_started) < BRIDGE_CHECK_TRUST_SECONDS
         except Exception as _bridge_err:
             logger.exception("[bridge_height] lookup failed: %s", _bridge_err)
 
@@ -4282,6 +4313,9 @@ async def get_route_weather(request: RouteRequest):
             eval_specs = [(0, route_geometry, round(total_distance, 1), total_duration_minutes)] + [
                 (alt.index, alt.route_geometry, alt.distance_miles, alt.duration_minutes) for alt in route_alternatives
             ]
+            # Only the primary route (index 0) can reuse an already-confirmed-successful bridge
+            # check; every alternate always gets its own fresh, independent Overpass lookup below.
+            known_bridge_by_index = {0: bridge_clearance_alerts} if bridge_check_succeeded else {}
             eval_results = await asyncio.gather(
                 *[
                     evaluate_route_weather_risk(
@@ -4293,6 +4327,7 @@ async def get_route_weather(request: RouteRequest):
                         vehicle_type=vehicle_type,
                         bridge_alerts_enabled=bridge_alerts_enabled,
                         vehicle_height_ft=request.vehicle_height_ft,
+                        known_bridge_alerts=known_bridge_by_index.get(idx),
                     )
                     for idx, geom, dist, dur in eval_specs
                 ],
