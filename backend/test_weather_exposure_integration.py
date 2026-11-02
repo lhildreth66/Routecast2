@@ -235,3 +235,89 @@ async def test_shared_and_unique_hazard_classification_end_to_end(monkeypatch):
     assert primary_unique_miles > 0  # the tornado warning is unique to the primary
     assert alt_unique_miles == 0.0   # the alternate never saw it
     assert primary_shared_miles > 0 and alt_shared_miles > 0  # both cross the wide shared storm
+
+
+# ---------------- Ambient weather scoring fix: end-to-end regressions ---------------- #
+
+@pytest.mark.asyncio
+async def test_okeechobee_style_ordinary_scattered_thunderstorms_does_not_saturate_risk_score(monkeypatch):
+    """The exact real-world bug this round fixes: 7+ sample points all reporting an ordinary
+    'Chance Showers And Thunderstorms' forecast must no longer saturate risk_score to 0."""
+    geometry = _ns_geometry(span_degrees=1.6, n=60)  # ~110mi, comparable to the real trip
+
+    async def ordinary_weather(lat, lon):
+        return WeatherData(temperature=73, wind_speed="10 mph", conditions="Chance Showers And Thunderstorms", humidity=70)
+
+    async def no_alerts(lat, lon):
+        return [], "ok"
+
+    monkeypatch.setattr(server, "get_noaa_weather", ordinary_weather)
+    monkeypatch.setattr(server, "get_noaa_alerts", no_alerts)
+
+    result = await evaluate_route_weather_risk(1, geometry, 110.0, 130, dt.datetime.utcnow(), "car", False, None)
+
+    assert result.uncertain is False
+    assert result.risk_score > 85  # previously saturated to 0 under the old flat per-point penalty
+    assert result.risk_level == "low"
+
+
+@pytest.mark.asyncio
+async def test_two_routes_both_saturated_to_zero_still_distinguishable_via_raw_penalty(monkeypatch):
+    """Genuinely severe, widespread conditions can still legitimately saturate risk_score to 0
+    for multiple routes — the saturated-comparison fallback must still distinguish them via the
+    UNCLAMPED raw_risk_penalty/exposure_delta, per requirement 5. Pure-function coverage of the
+    saturated-comparison DECISION logic itself (distinguishing unequal exposure once both floor
+    out) lives in test_smart_reroute_phase1.py; this test just proves genuinely catastrophic,
+    identical-severity conditions over a realistic distance can legitimately floor BOTH routes —
+    i.e. zero is still reachable when truly warranted, not impossible under the new scoring."""
+    heavy_geom = _ns_geometry(lon=-80.0, span_degrees=3.0, n=120)
+    light_geom = _ns_geometry(lon=-80.8, span_degrees=3.0, n=120)
+    tornado_poly = _square(-80.4, 31.5, half_w=1.0)  # wide enough to cover both parallel corridors
+
+    async def catastrophic_weather(lat, lon):
+        return WeatherData(temperature=5, wind_speed="70 mph", conditions="Severe Thunderstorms", humidity=95)
+
+    async def tornado_alert(lat, lon):
+        return [
+            WeatherAlert(id="tornado1", headline="Tornado Warning", severity="Extreme", event="Tornado Warning",
+                         description="desc", urgency="Immediate", geometry=tornado_poly)
+        ], "ok"
+
+    monkeypatch.setattr(server, "get_noaa_weather", catastrophic_weather)
+    monkeypatch.setattr(server, "get_noaa_alerts", tornado_alert)
+
+    primary = await evaluate_route_weather_risk(0, heavy_geom, 207.0, 240, dt.datetime.utcnow(), "car", False, None)
+    alt = await evaluate_route_weather_risk(1, light_geom, 207.0, 240, dt.datetime.utcnow(), "car", False, None)
+
+    assert primary.risk_score == 0
+    assert alt.risk_score == 0
+    # Both legitimately floored, but the UNCLAMPED raw_risk_penalty remains a real, large,
+    # comparable number rather than being lost — this is what the saturated-comparison
+    # fallback in select_weather_reroute reads from in the recommendation decision.
+    assert primary.raw_risk_penalty > 100.0
+    assert alt.raw_risk_penalty > 100.0
+
+
+# ---------------- Legacy field preservation (requirement 11) ---------------- #
+
+@pytest.mark.asyncio
+async def test_legacy_safety_score_field_unaffected_by_new_ambient_scoring(monkeypatch):
+    """calculate_safety_score() (the always-on, non-Phase-3 safety_score field) must keep
+    producing its EXACT old behavior — still saturating to 0 for the same ordinary scattered
+    thunderstorm forecast — proving the new ambient calculation is additive, Phase-3-only, and
+    does not touch the legacy scoring path existing Android/iOS clients depend on."""
+    from server import WaypointWeather, Waypoint, calculate_safety_score
+
+    waypoints_weather = [
+        WaypointWeather(
+            waypoint=Waypoint(lat=30.0, lon=-80.0, distance_from_start=float(i) * 15, eta_minutes=i * 15),
+            weather=WeatherData(temperature=73, wind_speed="10 mph", conditions="Chance Showers And Thunderstorms", humidity=70),
+            alerts=[], alerts_status="ok",
+        )
+        for i in range(7)
+    ]
+    legacy_score = calculate_safety_score(waypoints_weather, "car")
+    # This is the OLD, UNCHANGED behavior (flat 15pts * 7 points = 105 > 100) — still saturates,
+    # confirming the legacy function (and therefore the always-on safety_score field) is untouched.
+    assert legacy_score.overall_score == 0
+

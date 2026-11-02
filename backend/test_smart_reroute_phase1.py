@@ -144,6 +144,45 @@ def test_empty_routes_list_returns_default_assessment():
     assert result.message == "No safer alternate route found."
 
 
+def _hazard(alert_id, miles, weight=3.0, relevant=True):
+    from server import HazardExposure
+    return HazardExposure(
+        alert_id=alert_id, event="Severe Thunderstorm Warning", severity="Severe",
+        exposure_miles=miles, exposure_minutes=int(miles), exposure_method="polygon_intersection",
+        entry_mile=5.0, temporally_relevant=relevant, weight=weight,
+    )
+
+
+def test_saturated_scores_fall_back_to_raw_penalty_comparison():
+    """When both routes' bounded risk_score hit the 0 floor, the scale alone can't tell them
+    apart — the candidate's real, much-lower unclamped exposure must still be recognized."""
+    primary = _primary(risk_score=0, risk_level="extreme")
+    primary.hazard_exposures = [_hazard("storm1", 80.0)]
+    candidate = _risk(1, 0)
+    candidate.hazard_exposures = [_hazard("storm1", 3.0)]
+
+    result = select_weather_reroute([primary, candidate])
+
+    assert result.recommended_route_index == 1
+    assert result.reroute_recommended is True
+    assert result.comparison_outcome == "lower_risk_found"
+
+
+def test_saturated_scores_with_similar_exposure_are_not_falsely_recommended():
+    """Conservative threshold: if both floored routes have near-identical real exposure, the
+    saturated fallback must NOT manufacture a recommendation from noise."""
+    primary = _primary(risk_score=0, risk_level="extreme")
+    primary.hazard_exposures = [_hazard("storm1", 80.0)]
+    candidate = _risk(1, 0)
+    candidate.hazard_exposures = [_hazard("storm1", 75.0)]  # only a small, insignificant reduction
+
+    result = select_weather_reroute([primary, candidate])
+
+    assert result.recommended_route_index is None
+    assert result.reroute_recommended is False
+    assert result.comparison_outcome == "no_lower_risk_found"
+
+
 # ---------------- GROUP B: evaluate_route_weather_risk ---------------- #
 
 def _clear_weather_fns(monkeypatch, hourly_forecast=None):

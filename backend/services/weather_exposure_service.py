@@ -428,3 +428,217 @@ def exposure_delta_vs_primary(
         delta += weight * (p_miles - c_miles)
     return delta
 
+
+# ─────────────────────────────────────────────────────────────────────────────────
+# Ambient weather exposure (general forecast conditions along a route: precipitation
+# wording, wind, temperature) — a NEW, Smart-Weather-Rerouting-only calculation that
+# does NOT touch the always-on calculate_safety_score() in server.py. That legacy
+# function applies a flat per-sample-point penalty for ANY rain/storm mention with no
+# distance-awareness or deduplication, so a single ordinary "Chance Showers And
+# Thunderstorms" forecast persisting across 7-8 sample points (very common) adds up to
+# 105-120 points and saturates every route to 0, destroying any ability to compare.
+#
+# This calculation instead: (1) allocates each sample point a real mile-share of the
+# route (the midpoint-to-midpoint span to its neighbors — an honest, explicit
+# approximation given weather is only known at discrete sampled points, never treated
+# as more precise than that), (2) classifies conditions into an escalating severity
+# ladder that distinguishes ordinary "chance/isolated/scattered" mentions from
+# unqualified or explicitly severe ones, and (3) applies the SAME concave,
+# never-flat-capped scaled_exposure_penalty() already used for NWS alert polygons, so
+# an ordinary shower over the whole route scores a small, honest penalty instead of a
+# saturating one, while genuinely severe/extensive conditions still score much worse.
+# ─────────────────────────────────────────────────────────────────────────────────
+
+# Precipitation/visibility text tiers — checked in this order (most specific/severe
+# first); NOT exhaustive or authoritative, a heuristic over NWS shortForecast wording.
+_PRECIP_DANGEROUS_PHRASES = (
+    "severe thunderstorm", "tornado", "blizzard", "ice storm", "freezing rain",
+    "dense fog", "zero visibility",
+)
+_PRECIP_ORDINARY_QUALIFIERS = ("chance", "isolated", "slight chance", "scattered")
+_PRECIP_ORDINARY_KEYWORDS = ("shower", "rain", "thunderstorm", "snow", "flurries")
+_PRECIP_MODERATE_PHRASES = ("thunderstorm", "heavy rain", "heavy snow", "snow", "fog")
+_PRECIP_MILD_PHRASES = ("rain", "shower", "drizzle")
+
+PRECIP_TIER_DANGEROUS = 4.0
+PRECIP_TIER_MODERATE = 2.0
+PRECIP_TIER_MILD = 1.0
+PRECIP_TIER_ORDINARY = 0.5
+
+WIND_TIER_EXTREME = 3.0
+WIND_TIER_HIGH = 1.5
+WIND_TIER_ELEVATED = 0.5
+WIND_EXTREME_MPH = 41
+WIND_HIGH_MPH = 30
+WIND_ELEVATED_MPH = 20
+
+TEMP_TIER_FREEZING = 3.0
+TEMP_TIER_NEAR_FREEZING = 0.75
+TEMP_FREEZING_F = 32
+TEMP_NEAR_FREEZING_F = 40
+
+# A hazard-exposure weight at/above this is treated as "dangerous" for the purpose of
+# suppressing a double-counted ambient precipitation-text penalty (see
+# compute_ambient_weather_exposure's alert_covered_ranges parameter).
+ALERT_DANGEROUS_WEIGHT_THRESHOLD = 3.0
+
+
+@dataclass(frozen=True)
+class AmbientWeatherResult:
+    raw_penalty: float                       # unclamped — same scale as hazard scaled_penalty
+    factors: Tuple[str, ...] = ()            # human-readable, deduplicated
+    category_exposures: Dict[str, float] = field(default_factory=dict)  # "category:label" -> miles
+    has_dangerous_tier: bool = False         # a sample hit the dangerous precip tier, unsuppressed
+
+
+def _classify_precip_tier(conditions: Optional[str]) -> Tuple[float, str]:
+    c = (conditions or "").lower()
+    if not c:
+        return 0.0, ""
+    if any(p in c for p in _PRECIP_DANGEROUS_PHRASES):
+        return PRECIP_TIER_DANGEROUS, "Severe/dangerous conditions"
+    if any(q in c for q in _PRECIP_ORDINARY_QUALIFIERS) and any(k in c for k in _PRECIP_ORDINARY_KEYWORDS):
+        return PRECIP_TIER_ORDINARY, "Scattered/chance precipitation"
+    if any(p in c for p in _PRECIP_MODERATE_PHRASES):
+        return PRECIP_TIER_MODERATE, "Steady precipitation or reduced visibility"
+    if any(p in c for p in _PRECIP_MILD_PHRASES):
+        return PRECIP_TIER_MILD, "Rain"
+    return 0.0, ""
+
+
+def _parse_wind_mph(wind_speed: Optional[str]) -> Optional[float]:
+    if not wind_speed:
+        return None
+    try:
+        digits = "".join(filter(str.isdigit, wind_speed.split()[0]))
+        return float(digits) if digits else None
+    except Exception:
+        return None
+
+
+def _classify_wind_tier(wind_speed: Optional[str]) -> Tuple[float, str]:
+    mph = _parse_wind_mph(wind_speed)
+    if mph is None:
+        return 0.0, ""
+    if mph > WIND_EXTREME_MPH:
+        return WIND_TIER_EXTREME, "Extreme winds"
+    if mph > WIND_HIGH_MPH:
+        return WIND_TIER_HIGH, "High winds"
+    if mph > WIND_ELEVATED_MPH:
+        return WIND_TIER_ELEVATED, "Elevated winds"
+    return 0.0, ""
+
+
+def _classify_temp_tier(temp_f: Optional[float]) -> Tuple[float, str]:
+    if temp_f is None:
+        return 0.0, ""
+    if temp_f < TEMP_FREEZING_F:
+        return TEMP_TIER_FREEZING, "Freezing temperatures - ice risk"
+    if temp_f < TEMP_NEAR_FREEZING_F:
+        return TEMP_TIER_NEAR_FREEZING, "Near-freezing temperatures"
+    return 0.0, ""
+
+
+def _allocate_mile_spans(sorted_miles: List[float], total_distance_miles: float) -> List[Tuple[float, float]]:
+    """Midpoint-to-midpoint partition of the route among sample points — an explicit,
+    honest approximation (weather is only known AT the sampled points, never treated as
+    more precise than that), not a claim of continuous coverage between them."""
+    n = len(sorted_miles)
+    spans = []
+    for i in range(n):
+        start = 0.0 if i == 0 else (sorted_miles[i - 1] + sorted_miles[i]) / 2.0
+        end = total_distance_miles if i == n - 1 else (sorted_miles[i] + sorted_miles[i + 1]) / 2.0
+        spans.append((start, end))
+    return spans
+
+
+def compute_ambient_weather_exposure(
+    samples: List[Dict[str, Any]],
+    total_distance_miles: float,
+    alert_covered_ranges: Optional[List[Tuple[float, float]]] = None,
+    wind_sensitivity: float = 1.0,
+    ice_sensitivity: float = 1.0,
+    visibility_sensitivity: float = 1.0,
+) -> AmbientWeatherResult:
+    """Each sample: {"mile": float, "temp": Optional[float], "wind_speed": Optional[str],
+    "conditions": Optional[str], "missing": bool}. A missing sample contributes NOTHING
+    (never treated as clear/good conditions) — the caller's existing uncertain-flagging
+    stays the authority on whether the whole route can be trusted.
+
+    alert_covered_ranges: real mile-ranges already scored by the NWS alert-polygon
+    exposure system (compute_hazard_exposure_for_route) for a DANGEROUS event. A sample
+    landing in one of these ranges has its dangerous-tier precipitation-text penalty
+    suppressed, so the same real event is never counted by both systems — wind/temp
+    tiers are left untouched since they measure independent physical signals (general
+    forecast wind/temperature), not the same alert-classified hazard."""
+    if not samples or total_distance_miles <= 0:
+        return AmbientWeatherResult(raw_penalty=0.0)
+
+    sorted_samples = sorted(samples, key=lambda s: s.get("mile", 0.0))
+    sorted_miles = [s.get("mile", 0.0) for s in sorted_samples]
+    spans = _allocate_mile_spans(sorted_miles, total_distance_miles)
+    alert_covered_ranges = alert_covered_ranges or []
+
+    precip_miles: Dict[float, float] = {}
+    precip_labels: Dict[float, str] = {}
+    wind_miles: Dict[float, float] = {}
+    wind_labels: Dict[float, str] = {}
+    temp_miles: Dict[float, float] = {}
+    temp_labels: Dict[float, str] = {}
+    has_dangerous_tier = False
+
+    for sample, (start, end) in zip(sorted_samples, spans):
+        if sample.get("missing"):
+            continue
+        span_miles = max(0.0, end - start)
+        if span_miles <= 0:
+            continue
+        mid = (start + end) / 2.0
+        covered_by_dangerous_alert = any(r0 <= mid <= r1 for r0, r1 in alert_covered_ranges)
+
+        precip_weight, precip_label = _classify_precip_tier(sample.get("conditions"))
+        if precip_weight >= PRECIP_TIER_DANGEROUS:
+            if covered_by_dangerous_alert:
+                precip_weight, precip_label = 0.0, ""
+            else:
+                has_dangerous_tier = True
+        if precip_weight > 0:
+            scaled_weight = precip_weight * visibility_sensitivity
+            precip_miles[scaled_weight] = precip_miles.get(scaled_weight, 0.0) + span_miles
+            precip_labels[scaled_weight] = precip_label
+
+        wind_weight, wind_label = _classify_wind_tier(sample.get("wind_speed"))
+        if wind_weight > 0:
+            scaled_weight = wind_weight * wind_sensitivity
+            wind_miles[scaled_weight] = wind_miles.get(scaled_weight, 0.0) + span_miles
+            wind_labels[scaled_weight] = wind_label
+
+        temp_weight, temp_label = _classify_temp_tier(sample.get("temp"))
+        if temp_weight > 0:
+            scaled_weight = temp_weight * ice_sensitivity
+            temp_miles[scaled_weight] = temp_miles.get(scaled_weight, 0.0) + span_miles
+            temp_labels[scaled_weight] = temp_label
+
+    total_penalty = 0.0
+    factors: List[str] = []
+    category_exposures: Dict[str, float] = {}
+    for miles_by_weight, labels_by_weight, category in (
+        (precip_miles, precip_labels, "precipitation"),
+        (wind_miles, wind_labels, "wind"),
+        (temp_miles, temp_labels, "temperature"),
+    ):
+        for weight, miles in miles_by_weight.items():
+            if miles <= 0:
+                continue
+            total_penalty += scaled_exposure_penalty(miles, weight)
+            label = labels_by_weight[weight]
+            factors.append(f"{label} ({miles:.0f} mi)")
+            category_exposures[f"{category}:{label}"] = round(miles, 1)
+
+    return AmbientWeatherResult(
+        raw_penalty=round(total_penalty, 2),
+        factors=tuple(factors),
+        category_exposures=category_exposures,
+        has_dangerous_tier=has_dangerous_tier,
+    )
+

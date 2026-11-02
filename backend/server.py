@@ -3568,15 +3568,47 @@ async def evaluate_route_weather_risk(
             else []
         )
 
-        # Weather-condition-only sub-score (temperature/wind/visibility) reuses the existing,
-        # UNCHANGED calculate_safety_score — alerts are stripped here so its own flat
-        # per-alert penalty never double-applies on top of the new exposure-based scoring.
-        stripped_waypoints = [wpw.model_copy(update={"alerts": []}) for wpw in waypoints_weather]
-        base_safety = calculate_safety_score(stripped_waypoints, vehicle_type)
-        base_penalty = 100 - base_safety.overall_score
+        # Weather-condition-only sub-score (precipitation wording/wind/temperature). This is a
+        # Smart-Weather-Rerouting-ONLY calculation (services.weather_exposure_service) — it does
+        # NOT touch the always-on calculate_safety_score() used elsewhere (legacy safety_score
+        # field, reroute_recommended) which stays exactly as it was for existing clients. The old
+        # approach (reusing calculate_safety_score here too) applied a flat per-SAMPLE-POINT
+        # penalty for any rain/storm mention with no distance-awareness or dedup, so an ordinary
+        # "Chance Showers And Thunderstorms" forecast persisting across 7-8 points (common) added
+        # up to 105-120 points and saturated every route to 0. The new calculation instead
+        # allocates each sample a real mile-share of the route and reuses the same concave,
+        # never-flat-capped exposure scaling already used for NWS alert polygons.
+        alert_covered_ranges = [
+            (run.entry_mile, run.exit_mile)
+            for h in hazard_results
+            if h.exposure_method == "polygon_intersection"
+            and h.temporally_relevant
+            and h.weight >= weather_exposure.ALERT_DANGEROUS_WEIGHT_THRESHOLD
+            for run in h.runs
+        ]
+        vehicle_cfg = VEHICLE_TYPES.get(vehicle_type, VEHICLE_TYPES["car"])
+        ambient_samples = [
+            {
+                "mile": wpw.waypoint.distance_from_start or 0.0,
+                "temp": wpw.weather.temperature if wpw.weather else None,
+                "wind_speed": wpw.weather.wind_speed if wpw.weather else None,
+                "conditions": wpw.weather.conditions if wpw.weather else None,
+                "missing": wpw.weather is None,
+            }
+            for wpw in waypoints_weather
+        ]
+        ambient_result = weather_exposure.compute_ambient_weather_exposure(
+            ambient_samples,
+            distance_miles,
+            alert_covered_ranges=alert_covered_ranges,
+            wind_sensitivity=vehicle_cfg["wind_sensitivity"],
+            ice_sensitivity=vehicle_cfg["ice_sensitivity"],
+            visibility_sensitivity=vehicle_cfg["visibility_sensitivity"],
+        )
+        ambient_penalty = ambient_result.raw_penalty
 
         hazard_penalty = sum(h.scaled_penalty for h in hazard_results)
-        raw_risk_penalty = base_penalty + hazard_penalty  # UNCLAMPED — used for saturated-score comparisons
+        raw_risk_penalty = ambient_penalty + hazard_penalty  # UNCLAMPED — used for saturated-score comparisons
         risk_score = max(0, min(100, int(round(100 - raw_risk_penalty))))
         if risk_score >= 80:
             risk_level = "low"
@@ -3588,7 +3620,9 @@ async def evaluate_route_weather_risk(
             risk_level = "extreme"
 
         route_summary, worst_condition, _reroute_needed, _reroute_reason, _gaps, _gap_miles = analyze_route_conditions(waypoints_weather)
-        severe = any(h.severity in ("Extreme", "Severe") and h.temporally_relevant for h in hazard_results)
+        severe = ambient_result.has_dangerous_tier or any(
+            h.severity in ("Extreme", "Severe") and h.temporally_relevant for h in hazard_results
+        )
         hazard_count = len(hazard_results)
 
         # Coverage-gap honesty check (independent of individual fetch success/failure): even

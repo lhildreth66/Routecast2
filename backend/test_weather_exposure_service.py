@@ -18,6 +18,7 @@ from services.weather_exposure_service import (
     allocate_sample_budgets,
     build_route_line,
     classify_shared_unique_exposure,
+    compute_ambient_weather_exposure,
     compute_cumulative_miles,
     compute_hazard_exposure_for_route,
     compute_segment_exposure,
@@ -474,4 +475,169 @@ def test_exposure_delta_zero_when_routes_equally_exposed():
     primary = [_mk("same_everywhere", 10.0)]
     candidate = [_mk("same_everywhere", 10.0)]
     assert exposure_delta_vs_primary(primary, candidate) == 0.0
+
+
+# ---------------- Ambient weather exposure (Phase 3 scoring fix) ---------------- #
+
+def _ambient_samples(n, mile_span, conditions, temp=72, wind_speed="10 mph", missing=False):
+    return [
+        {
+            "mile": i * (mile_span / max(1, n - 1)),
+            "temp": temp,
+            "wind_speed": wind_speed,
+            "conditions": conditions,
+            "missing": missing,
+        }
+        for i in range(n)
+    ]
+
+
+def test_seven_points_of_ordinary_scattered_thunderstorms_does_not_saturate():
+    """The exact real-world regression this fix targets: the OLD calculate_safety_score
+    applied 15 points PER sample point with no dedup (15*7=105, already over the 100-point
+    scale). The new exposure-based calculation must produce a small, non-saturating penalty
+    for an ordinary 'chance of showers' forecast persisting across the whole route."""
+    samples = _ambient_samples(7, 107.2, "Chance Showers And Thunderstorms")
+    result = compute_ambient_weather_exposure(samples, 107.2)
+    assert result.raw_penalty < 10.0
+    assert result.has_dangerous_tier is False
+
+
+def test_eight_points_of_ordinary_scattered_thunderstorms_does_not_saturate():
+    samples = _ambient_samples(8, 110.5, "Chance Showers And Thunderstorms")
+    result = compute_ambient_weather_exposure(samples, 110.5)
+    assert result.raw_penalty < 10.0
+
+
+def test_genuinely_severe_weather_scores_far_worse_than_ordinary():
+    ordinary = _ambient_samples(7, 107.2, "Chance Showers And Thunderstorms")
+    severe = _ambient_samples(7, 107.2, "Severe Thunderstorms", temp=20, wind_speed="45 mph")
+
+    ordinary_result = compute_ambient_weather_exposure(ordinary, 107.2)
+    severe_result = compute_ambient_weather_exposure(severe, 107.2)
+
+    assert severe_result.raw_penalty > ordinary_result.raw_penalty * 5
+    assert severe_result.has_dangerous_tier is True
+    assert ordinary_result.has_dangerous_tier is False
+
+
+@pytest.mark.parametrize("dangerous_phrase", [
+    "Severe Thunderstorms", "Tornado Warning in effect", "Blizzard conditions",
+    "Ice Storm Warning", "Freezing Rain", "Dense Fog",
+])
+def test_dangerous_phrases_are_recognized(dangerous_phrase):
+    samples = _ambient_samples(3, 30.0, dangerous_phrase)
+    result = compute_ambient_weather_exposure(samples, 30.0)
+    assert result.has_dangerous_tier is True
+
+
+@pytest.mark.parametrize("ordinary_phrase", [
+    "Chance Showers And Thunderstorms", "Isolated Thunderstorms", "Scattered Showers",
+    "Slight Chance Of Rain",
+])
+def test_ordinary_qualified_phrases_are_not_dangerous(ordinary_phrase):
+    samples = _ambient_samples(5, 50.0, ordinary_phrase)
+    result = compute_ambient_weather_exposure(samples, 50.0)
+    assert result.has_dangerous_tier is False
+    assert result.raw_penalty < 5.0
+
+
+def test_extreme_wind_and_freezing_temp_detected_independent_of_conditions_text():
+    samples = _ambient_samples(5, 50.0, "Clear", temp=10, wind_speed="50 mph")
+    result = compute_ambient_weather_exposure(samples, 50.0)
+    assert any("Extreme winds" in f for f in result.factors)
+    assert any("ice risk" in f for f in result.factors)
+
+
+# ---------------- Exposure length/duration sensitivity ---------------- #
+
+def test_longer_ambient_exposure_scores_strictly_worse_than_shorter():
+    short = _ambient_samples(5, 50.0, "Thunderstorms")
+    long_ = _ambient_samples(5, 100.0, "Thunderstorms")
+    short_result = compute_ambient_weather_exposure(short, 50.0)
+    long_result = compute_ambient_weather_exposure(long_, 100.0)
+    assert long_result.raw_penalty > short_result.raw_penalty
+
+
+def test_partial_route_exposure_scores_less_than_full_route_exposure():
+    """Only some sample points show the hazardous condition — exposure miles (and
+    therefore penalty) must be proportionally smaller than if it covered the whole route."""
+    full_samples = _ambient_samples(10, 100.0, "Thunderstorms")
+    partial_samples = [
+        {"mile": i * 10.0, "temp": 72, "wind_speed": "10 mph",
+         "conditions": "Thunderstorms" if i < 3 else "Clear", "missing": False}
+        for i in range(10)
+    ]
+    full_result = compute_ambient_weather_exposure(full_samples, 100.0)
+    partial_result = compute_ambient_weather_exposure(partial_samples, 100.0)
+    assert partial_result.raw_penalty < full_result.raw_penalty
+
+
+# ---------------- Missing/incomplete data never treated as clear ---------------- #
+
+def test_missing_weather_samples_contribute_zero_not_clear():
+    samples = [
+        {"mile": 0.0, "temp": None, "wind_speed": None, "conditions": None, "missing": True},
+        {"mile": 50.0, "temp": None, "wind_speed": None, "conditions": None, "missing": True},
+        {"mile": 100.0, "temp": None, "wind_speed": None, "conditions": None, "missing": True},
+    ]
+    result = compute_ambient_weather_exposure(samples, 100.0)
+    assert result.raw_penalty == 0.0
+    assert result.factors == ()
+
+
+def test_mix_of_missing_and_severe_samples_still_scores_the_known_severe_portion():
+    samples = [
+        {"mile": 0.0, "temp": None, "wind_speed": None, "conditions": None, "missing": True},
+        {"mile": 50.0, "temp": 20, "wind_speed": "45 mph", "conditions": "Severe Thunderstorms", "missing": False},
+        {"mile": 100.0, "temp": None, "wind_speed": None, "conditions": None, "missing": True},
+    ]
+    result = compute_ambient_weather_exposure(samples, 100.0)
+    assert result.raw_penalty > 0.0
+    assert result.has_dangerous_tier is True
+
+
+# ---------------- Double-counting avoidance with the alert-polygon system ---------------- #
+
+def test_dangerous_ambient_tier_suppressed_when_already_covered_by_a_real_alert():
+    """A 'Severe Thunderstorms' forecast phrase at a point ALREADY covered by a real,
+    temporally-relevant NWS severe-alert polygon must not be double-penalized by both
+    systems — the ambient dangerous tier is suppressed there (wind/temp are untouched,
+    since they're independent physical signals, not the same classified hazard)."""
+    samples = _ambient_samples(5, 50.0, "Severe Thunderstorms")
+    covered_result = compute_ambient_weather_exposure(samples, 50.0, alert_covered_ranges=[(0.0, 50.0)])
+    uncovered_result = compute_ambient_weather_exposure(samples, 50.0, alert_covered_ranges=[])
+
+    assert covered_result.has_dangerous_tier is False
+    assert covered_result.raw_penalty < uncovered_result.raw_penalty
+
+
+def test_partial_alert_coverage_only_suppresses_the_covered_portion():
+    samples = _ambient_samples(10, 100.0, "Severe Thunderstorms")
+    # Only the first half of the route is covered by a real alert polygon.
+    result = compute_ambient_weather_exposure(samples, 100.0, alert_covered_ranges=[(0.0, 50.0)])
+    assert result.has_dangerous_tier is True  # the UNcovered second half still registers
+    assert result.raw_penalty > 0.0
+
+
+# ---------------- Vehicle sensitivity multipliers ---------------- #
+
+def test_higher_wind_sensitivity_increases_penalty():
+    samples = _ambient_samples(5, 50.0, "Clear", wind_speed="35 mph")
+    car_result = compute_ambient_weather_exposure(samples, 50.0, wind_sensitivity=1.0)
+    semi_result = compute_ambient_weather_exposure(samples, 50.0, wind_sensitivity=1.8)
+    assert semi_result.raw_penalty > car_result.raw_penalty
+
+
+# ---------------- Empty/degenerate input ---------------- #
+
+def test_empty_samples_returns_zero_penalty():
+    result = compute_ambient_weather_exposure([], 100.0)
+    assert result.raw_penalty == 0.0
+
+
+def test_zero_distance_returns_zero_penalty():
+    result = compute_ambient_weather_exposure(_ambient_samples(3, 0.0, "Severe Thunderstorms"), 0.0)
+    assert result.raw_penalty == 0.0
+
 
