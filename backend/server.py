@@ -2978,6 +2978,38 @@ def _weather_is_missing(weather: Optional[WeatherData]) -> bool:
     return all(v in (None, "", []) for v in fields)
 
 
+# Event types that are categorically not about roadway conditions — marine/beach/boating
+# hazards NWS also issues for the same coastal zones a road can pass through. Excluded only
+# from driving-risk calculations (derive_road_condition, hazard exposure scoring); never
+# stripped from the raw alerts list used elsewhere (e.g. the alerts tab), and never applied
+# to genuinely road-relevant products like Coastal Flood/Flash Flood/Tornado/Severe
+# Thunderstorm/High Wind alerts, which remain fully scored (including when zone-only/
+# unconfirmed — uncertainty is preserved there, not discarded).
+MARINE_ONLY_EVENT_TYPES = {
+    "rip current statement",
+    "marine weather statement",
+    "small craft advisory",
+    "small craft advisory for winds",
+    "small craft advisory for hazardous seas",
+    "small craft advisory for rough bar",
+    "gale warning",
+    "storm warning",
+    "hazardous seas warning",
+    "hazardous seas watch",
+    "beach hazards statement",
+    "surf advisory",
+    "special marine warning",
+    "marine dense fog advisory",
+}
+
+
+def is_road_relevant_alert(event: Optional[str]) -> bool:
+    """True unless the event is a categorically marine/beach-only product (see
+    MARINE_ONLY_EVENT_TYPES). Defaults to True for unknown/missing event text — never
+    silently excludes a hazard just because its type wasn't recognized."""
+    return (event or "").strip().lower() not in MARINE_ONLY_EVENT_TYPES
+
+
 def derive_road_condition(weather: Optional[WeatherData], alerts: List[WeatherAlert]) -> RoadCondition:
     """Derive road surface condition from NWS weather + alerts (hierarchy order)."""
     if _weather_is_missing(weather):
@@ -3001,7 +3033,9 @@ def derive_road_condition(weather: Optional[WeatherData], alerts: List[WeatherAl
     except Exception:
         wind_speed = 0
 
-    alert_text = " ".join([(a.event or "") + " " + (a.headline or "") for a in alerts]).lower()
+    alert_text = " ".join(
+        [(a.event or "") + " " + (a.headline or "") for a in alerts if is_road_relevant_alert(a.event)]
+    ).lower()
 
     # Flood classification: NWS issues distinct product tiers (Watch = possible,
     # Warning/Emergency = occurring or imminent, Advisory = minor) and none of them
@@ -3532,12 +3566,15 @@ async def evaluate_route_weather_risk(
         sample_wps = sample_wps[:budget] if sample_wps else []
 
         if not sample_wps:
+            # risk_score=0 here is a non-meaningful placeholder, never a real evaluation —
+            # risk_level="unknown" (not "extreme") is the authoritative signal every consumer
+            # must check via `uncertain` before reading risk_score/risk_level at all.
             return RouteWeatherRisk(
                 route_index=route_index,
                 distance_miles=distance_miles,
                 duration_minutes=duration_minutes,
                 risk_score=0,
-                risk_level="extreme",
+                risk_level="unknown",
                 vehicle_restriction_checked=not bridge_alerts_enabled,
                 uncertain=True,
                 uncertainty_reason="Unable to sample route geometry for weather evaluation.",
@@ -3603,6 +3640,7 @@ async def evaluate_route_weather_risk(
                 "expires_minutes": _minutes_from_departure(a.expires, departure_time),
             }
             for a in seen_alerts.values()
+            if is_road_relevant_alert(a.event)
         ]
         hazard_results = (
             weather_exposure.compute_hazard_exposure_for_route(
@@ -3749,7 +3787,7 @@ async def evaluate_route_weather_risk(
             distance_miles=distance_miles,
             duration_minutes=duration_minutes,
             risk_score=0,
-            risk_level="extreme",
+            risk_level="unknown",
             vehicle_restriction_checked=not bridge_alerts_enabled,
             uncertain=True,
             uncertainty_reason="Weather evaluation for this route timed out.",
@@ -3763,7 +3801,7 @@ async def evaluate_route_weather_risk(
             distance_miles=distance_miles,
             duration_minutes=duration_minutes,
             risk_score=0,
-            risk_level="extreme",
+            risk_level="unknown",
             vehicle_restriction_checked=not bridge_alerts_enabled,
             uncertain=True,
             uncertainty_reason="Weather evaluation failed for this route.",
@@ -3904,7 +3942,12 @@ def select_weather_reroute(routes: List[RouteWeatherRisk]) -> WeatherRerouteAsse
         routes=routes,
         recommended_route_index=None,
         reroute_recommended=False,
-        message="No safer alternate route found.",
+        message=(
+            "No lower-risk route identified among successfully evaluated routes. "
+            "Some alternatives could not be assessed."
+            if has_uncertain_alternate
+            else "No safer alternate route found."
+        ),
         uncertain=any_uncertain,
         comparison_outcome="no_lower_risk_found",
     )
@@ -4677,7 +4720,7 @@ async def get_route_weather(request: RouteRequest):
                         distance_miles=dist,
                         duration_minutes=dur,
                         risk_score=0,
-                        risk_level="extreme",
+                        risk_level="unknown",
                         uncertain=True,
                         uncertainty_reason="Weather evaluation failed for this route.",
                         summary="Unable to evaluate this route.",
