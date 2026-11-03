@@ -554,6 +554,12 @@ class HazardExposure(BaseModel):
     temporally_relevant: bool = True   # False only when onset/expires definitively don't overlap the route's crossing window
     shared_with_all_routes: bool = False  # True = present on every evaluated route (can't be avoided by rerouting)
     weight: float = 1.0  # severity_weight(...) used to compute this hazard's score contribution
+    # Smart Weather Rerouting Phase 4 (additive, optional): raw NWS GeoJSON polygon for map
+    # display, reusing geometry already fetched for scoring — no extra NWS requests. Always
+    # None for exposure_method == "zone_only_uncertain" (never present a warning-zone overlap
+    # as a confirmed on-route intersection) and for anything that fails GeoJSON validation.
+    # Older clients that don't know this field simply ignore it (backward compatible).
+    geometry: Optional[Dict[str, Any]] = None
 
 
 class RouteWeatherRisk(BaseModel):
@@ -3010,6 +3016,30 @@ def is_road_relevant_alert(event: Optional[str]) -> bool:
     return (event or "").strip().lower() not in MARINE_ONLY_EVENT_TYPES
 
 
+_VALID_HAZARD_GEOMETRY_TYPES = {"Polygon", "MultiPolygon"}
+
+
+def _sanitize_hazard_geometry(raw_geometry: Optional[Dict[str, Any]], exposure_method: str) -> Optional[Dict[str, Any]]:
+    """Returns raw_geometry unchanged only when it is safe to show on the map as a confirmed
+    on-route warning area; otherwise returns None (frontend renders without it, never crashes).
+
+    Never attaches geometry for a zone-only/uncertain hazard — a warning-zone overlap must
+    never be presented as a confirmed polygon intersection with this specific route, even if
+    the alert happens to carry some geometry. Validates GeoJSON type and coordinate structure
+    via the same Shapely parser already used for scoring (services.weather_exposure_service.
+    parse_alert_geometry) — reused here, not reimplemented, so both call sites agree on what
+    counts as "valid" and no new geometry-parsing code path is introduced."""
+    if exposure_method != "polygon_intersection":
+        return None
+    if not raw_geometry or not isinstance(raw_geometry, dict):
+        return None
+    if raw_geometry.get("type") not in _VALID_HAZARD_GEOMETRY_TYPES:
+        return None
+    if weather_exposure.parse_alert_geometry(raw_geometry) is None:
+        return None
+    return raw_geometry
+
+
 def derive_road_condition(weather: Optional[WeatherData], alerts: List[WeatherAlert]) -> RoadCondition:
     """Derive road surface condition from NWS weather + alerts (hierarchy order)."""
     if _weather_is_missing(weather):
@@ -3754,6 +3784,14 @@ async def evaluate_route_weather_risk(
                 exposure_miles=h.exposure_miles, exposure_minutes=h.exposure_minutes,
                 exposure_method=h.exposure_method, entry_mile=h.entry_mile,
                 temporally_relevant=h.temporally_relevant, weight=h.weight,
+                # Reuses the same alert geometry already fetched above for scoring — no
+                # extra NWS requests. Validated/filtered by _sanitize_hazard_geometry, which
+                # also enforces that only confirmed polygon_intersection hazards ever carry
+                # geometry (never a zone-only/uncertain one).
+                geometry=_sanitize_hazard_geometry(
+                    seen_alerts[h.alert_id].geometry if h.alert_id in seen_alerts else None,
+                    h.exposure_method,
+                ),
             )
             for h in hazard_results
         ]
