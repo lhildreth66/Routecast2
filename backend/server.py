@@ -3730,6 +3730,10 @@ async def evaluate_route_weather_risk(
             risk_level = "high"
         else:
             risk_level = "extreme"
+        # Display-only floor: a confirmed, reliably-measured overlap with a severe/extreme
+        # hazard must never show as "Low" risk, regardless of how small its numeric
+        # penalty is. risk_score itself (route comparison/recommendation) is untouched.
+        risk_level = weather_exposure.apply_confirmed_hazard_risk_level_floor(risk_level, hazard_results)
 
         route_summary, worst_condition, _reroute_needed, _reroute_reason, _gaps, _gap_miles = analyze_route_conditions(waypoints_weather)
         severe = ambient_result.has_dangerous_tier or any(

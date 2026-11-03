@@ -240,6 +240,53 @@ def scaled_exposure_penalty(total_exposure_miles: float, weight: float) -> float
     return weight * (total_exposure_miles ** HAZARD_EXPOSURE_EXPONENT) / HAZARD_PENALTY_SCALE
 
 
+# ── Displayed risk-level floor ───────────────────────────────────────────────────
+# scaled_exposure_penalty's concave curve (tuned for comparing routes against EACH
+# OTHER) makes even a confirmed Extreme-severity hazard contribute only a few points
+# out of 100 at realistic single-digit/low-double-digit exposure distances — a route
+# genuinely crossing a live Flood/Tornado/Ice Storm Warning polygon could otherwise
+# still display as "Low" risk. This floor only ever RAISES the displayed risk_level
+# text; it never touches risk_score, which keeps driving route-to-route comparison
+# and recommended_route_index exactly as before.
+RISK_LEVEL_RANK = {"low": 0, "moderate": 1, "high": 2, "extreme": 3}
+
+
+def apply_confirmed_hazard_risk_level_floor(risk_level: str, hazard_results: List["HazardExposureResult"]) -> str:
+    """Raises (never lowers) the displayed risk_level when at least one hazard is a
+    reliably-mapped, temporally-relevant hazard that is CONFIRMED to overlap the route
+    for a real, measured distance. Deliberately excludes:
+      - zone_only_uncertain hazards (no confirmed route intersection at all — a
+        geographic warning-zone overlap must never be treated as a confirmed road
+        condition for this route);
+      - hazards excluded by temporal_relevance (won't actually be active when the
+        route reaches them);
+      - hazards with exposure_miles <= 0 (matched the alert's area but never actually
+        crossed its polygon along this specific path).
+    Severity 'extreme' floors to at least 'high'; 'severe' floors to at least
+    'moderate'. Never lowers an already-higher computed risk_level, and never touches
+    the 'unknown' sentinel — an unevaluated/uncertain route must never be silently
+    promoted into the low/moderate/high/extreme numeric ladder by this floor; its own
+    uncertainty is the more important signal and must stay visible as-is."""
+    if risk_level == "unknown":
+        return risk_level
+    floor = "low"
+    for h in hazard_results:
+        if h.exposure_method != "polygon_intersection":
+            continue
+        if not h.temporally_relevant:
+            continue
+        if h.exposure_miles <= 0:
+            continue
+        sev = (h.severity or "").strip().lower()
+        if sev == "extreme" and RISK_LEVEL_RANK[floor] < RISK_LEVEL_RANK["high"]:
+            floor = "high"
+        elif sev == "severe" and RISK_LEVEL_RANK[floor] < RISK_LEVEL_RANK["moderate"]:
+            floor = "moderate"
+    if RISK_LEVEL_RANK.get(risk_level, 0) >= RISK_LEVEL_RANK.get(floor, 0):
+        return risk_level
+    return floor
+
+
 def allocate_sample_budgets(
     distances_miles: List[float],
     base_interval: float = SAMPLE_BASE_INTERVAL_MILES,

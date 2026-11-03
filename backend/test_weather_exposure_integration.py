@@ -321,3 +321,140 @@ async def test_legacy_safety_score_field_unaffected_by_new_ambient_scoring(monke
     # confirming the legacy function (and therefore the always-on safety_score field) is untouched.
     assert legacy_score.overall_score == 0
 
+
+# ---------------- Risk-level floor consistency (round-2 redesign fixes, item 6) ---------------- #
+
+@pytest.mark.asyncio
+async def test_confirmed_flood_warning_exposure_never_displays_as_low_risk_end_to_end(monkeypatch):
+    """Reproduces the exact reported bug end-to-end: a route confirmed to cross a real Flood
+    Warning polygon for several miles must never show risk_level == 'low', even though the raw
+    scaled_exposure_penalty formula alone would score it near 100/100. risk_score (used for
+    route-to-route comparison/recommendation) is intentionally left unclamped/unchanged."""
+    geometry = _ns_geometry(span_degrees=0.15, n=20)  # short route, narrow flood warning crossing
+    _clear_weather(monkeypatch)
+    poly = _square(-80.0, 30.07, half_w=0.03)
+
+    async def fake_alerts(lat, lon):
+        return [
+            WeatherAlert(
+                id="flood1", headline="Flood Warning", severity="Severe",
+                event="Flood Warning", description="desc", urgency="Expected",
+                geometry=poly,
+            )
+        ], "ok"
+
+    monkeypatch.setattr(server, "get_noaa_alerts", fake_alerts)
+
+    result = await evaluate_route_weather_risk(1, geometry, 10.4, 15, dt.datetime.utcnow(), "car", False, None)
+
+    confirmed = [h for h in result.hazard_exposures if h.exposure_method == "polygon_intersection" and h.exposure_miles > 0]
+    assert len(confirmed) == 1  # sanity: the hazard genuinely, measurably overlaps this route
+    assert result.risk_score >= 80  # the raw formula alone would still call this "low"
+    assert result.risk_level != "low"  # the displayed label must not contradict the confirmed exposure
+    assert result.risk_level == "moderate"
+
+
+@pytest.mark.asyncio
+async def test_zone_only_warning_overlap_still_displays_as_low_when_score_says_so(monkeypatch):
+    """A county-wide/zone-only (unconfirmed) advisory — geographic overlap only, never a
+    confirmed route intersection — must NOT trigger the floor, distinguishing a geographic
+    warning-zone overlap from a confirmed on-road hazard."""
+    geometry = _ns_geometry(span_degrees=0.15, n=20)
+    _clear_weather(monkeypatch)
+
+    async def fake_alerts(lat, lon):
+        return [
+            WeatherAlert(
+                id="zonewarn1", headline="Flood Warning", severity="Severe",
+                event="Flood Warning", description="desc", urgency="Expected",
+                geometry=None,  # zone-only — no polygon to confirm actual route intersection
+            )
+        ], "ok"
+
+    monkeypatch.setattr(server, "get_noaa_alerts", fake_alerts)
+
+    result = await evaluate_route_weather_risk(1, geometry, 10.4, 15, dt.datetime.utcnow(), "car", False, None)
+
+    zone_only = [h for h in result.hazard_exposures if h.exposure_method == "zone_only_uncertain"]
+    assert len(zone_only) == 1
+    assert result.risk_level == "low"  # unconfirmed overlap never floors the displayed level
+
+
+@pytest.mark.asyncio
+async def test_recommended_route_risk_label_never_contradicts_its_own_confirmed_exposure(monkeypatch):
+    """Cross-field consistency: whichever route select_weather_reroute recommends, its OWN
+    displayed risk_level must never claim 'low' while its own hazard_exposures confirm a
+    severe/extreme polygon overlap — the recommendation message and the risk label shown on
+    that same card must never contradict each other."""
+    primary_geom = _ns_geometry(lon=-80.0, span_degrees=0.15, n=20)
+    alt_geom = _ns_geometry(lon=-80.8, span_degrees=0.15, n=20)  # clear corridor, no hazard
+    poly = _square(-80.0, 30.07, half_w=0.03)  # only intersects the primary's corridor
+    _clear_weather(monkeypatch)
+
+    async def fake_alerts(lat, lon):
+        if lon > -80.4:
+            return [
+                WeatherAlert(id="flood2", headline="Flood Warning", severity="Severe",
+                             event="Flood Warning", description="desc", urgency="Expected", geometry=poly)
+            ], "ok"
+        return [], "ok"
+
+    monkeypatch.setattr(server, "get_noaa_alerts", fake_alerts)
+
+    primary = await evaluate_route_weather_risk(0, primary_geom, 10.4, 15, dt.datetime.utcnow(), "car", False, None)
+    alt = await evaluate_route_weather_risk(1, alt_geom, 10.4, 15, dt.datetime.utcnow(), "car", False, None)
+
+    assessment = select_weather_reroute([primary, alt])
+
+    if assessment.recommended_route_index == 1:
+        # The alternate was recommended specifically because it avoids confirmed exposure the
+        # primary has — its own risk_level must reflect that it is in fact the less-exposed one.
+        assert alt.risk_level == "low"
+        assert primary.risk_level != "low"
+    else:
+        # Whatever was recommended, it must never be a route whose own confirmed exposure says
+        # otherwise — its displayed label and its own hazard data must agree.
+        recommended = primary if assessment.recommended_route_index == 0 else alt
+        recommended_confirmed_severe = any(
+            h.exposure_method == "polygon_intersection" and h.exposure_miles > 0
+            and (h.severity or "").lower() in ("severe", "extreme") and h.temporally_relevant
+            for h in recommended.hazard_exposures
+        )
+        if recommended_confirmed_severe:
+            assert recommended.risk_level != "low"
+
+
+@pytest.mark.asyncio
+async def test_floor_still_applies_correctly_when_the_route_is_also_marked_uncertain(monkeypatch):
+    """`uncertain` (incomplete data elsewhere on the route) and the confirmed-hazard risk-level
+    floor are independent signals \u2014 a route can be both uncertain AND have one fully confirmed
+    severe hazard; the floor must still apply to whatever numeric risk_level was computed, and
+    must never be confused by uncertain=True into skipping or double-penalizing."""
+    geometry = _ns_geometry(span_degrees=0.15, n=20)
+    poly = _square(-80.0, 30.07, half_w=0.03)
+    call_count = {"n": 0}
+
+    async def mostly_missing_weather(lat, lon):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            return WeatherData(temperature=70, wind_speed="5 mph", conditions="Clear", humidity=40)
+        return None  # subsequent points missing -> data_incomplete -> uncertain=True
+
+    async def fake_alerts(lat, lon):
+        return [
+            WeatherAlert(id="flood3", headline="Flood Warning", severity="Severe",
+                         event="Flood Warning", description="desc", urgency="Expected", geometry=poly)
+        ], "ok"
+
+    monkeypatch.setattr(server, "get_noaa_weather", mostly_missing_weather)
+    monkeypatch.setattr(server, "get_noaa_alerts", fake_alerts)
+
+    result = await evaluate_route_weather_risk(1, geometry, 10.4, 15, dt.datetime.utcnow(), "car", False, None)
+
+    assert result.uncertain is True
+    confirmed = [h for h in result.hazard_exposures if h.exposure_method == "polygon_intersection" and h.exposure_miles > 0]
+    assert len(confirmed) == 1
+    assert result.risk_level != "low"
+
+
+

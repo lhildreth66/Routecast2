@@ -14,8 +14,10 @@ from services.weather_exposure_service import (
     SAMPLE_MAX_PER_ROUTE,
     SAMPLE_MAX_TOTAL_PER_REQUEST,
     SAMPLE_MIN_PER_ROUTE,
+    HazardExposureResult,
     _haversine_miles,
     allocate_sample_budgets,
+    apply_confirmed_hazard_risk_level_floor,
     build_route_line,
     classify_shared_unique_exposure,
     compute_ambient_weather_exposure,
@@ -639,5 +641,81 @@ def test_empty_samples_returns_zero_penalty():
 def test_zero_distance_returns_zero_penalty():
     result = compute_ambient_weather_exposure(_ambient_samples(3, 0.0, "Severe Thunderstorms"), 0.0)
     assert result.raw_penalty == 0.0
+
+
+# ---------------- Displayed risk-level floor (round-2 redesign fixes, item 6) ---------------- #
+
+def _hazard(
+    severity="Severe",
+    exposure_miles=2.5,
+    exposure_method="polygon_intersection",
+    temporally_relevant=True,
+) -> HazardExposureResult:
+    return HazardExposureResult(
+        alert_id="a1", event="Flood Warning", severity=severity,
+        exposure_miles=exposure_miles, exposure_minutes=10,
+        exposure_method=exposure_method, entry_mile=1.0 if exposure_method == "polygon_intersection" else None,
+        temporally_relevant=temporally_relevant, scaled_penalty=0.9, weight=3.0,
+    )
+
+
+def test_confirmed_severe_exposure_floors_low_to_moderate():
+    assert apply_confirmed_hazard_risk_level_floor("low", [_hazard(severity="Severe")]) == "moderate"
+
+
+def test_confirmed_extreme_exposure_floors_low_to_high():
+    assert apply_confirmed_hazard_risk_level_floor("low", [_hazard(severity="Extreme")]) == "high"
+
+
+def test_floor_never_lowers_an_already_higher_computed_level():
+    assert apply_confirmed_hazard_risk_level_floor("extreme", [_hazard(severity="Severe")]) == "extreme"
+    assert apply_confirmed_hazard_risk_level_floor("high", [_hazard(severity="Severe")]) == "high"
+
+
+def test_unknown_sentinel_is_never_touched_by_the_floor():
+    """An unevaluated/uncertain route (risk_level == 'unknown') must never be silently
+    promoted into the low/moderate/high/extreme numeric ladder, even alongside a confirmed
+    severe hazard — its own uncertainty remains the more important, visible signal."""
+    assert apply_confirmed_hazard_risk_level_floor("unknown", [_hazard(severity="Extreme")]) == "unknown"
+
+
+def test_zone_only_uncertain_hazard_never_floors_the_level():
+    """A geographic warning-zone overlap with no confirmed route intersection must never
+    be treated as a confirmed dangerous roadway condition for this route."""
+    hazard = _hazard(severity="Extreme", exposure_method="zone_only_uncertain", exposure_miles=0.0)
+    assert apply_confirmed_hazard_risk_level_floor("low", [hazard]) == "low"
+
+
+def test_temporally_irrelevant_hazard_never_floors_the_level():
+    hazard = _hazard(severity="Extreme", temporally_relevant=False)
+    assert apply_confirmed_hazard_risk_level_floor("low", [hazard]) == "low"
+
+
+def test_zero_exposure_miles_never_floors_the_level():
+    """Matched the alert's general area but never actually crossed its polygon along this
+    specific path — must not be floored as if it had."""
+    hazard = _hazard(severity="Extreme", exposure_miles=0.0)
+    assert apply_confirmed_hazard_risk_level_floor("low", [hazard]) == "low"
+
+
+def test_minor_or_moderate_severity_never_floors_the_level():
+    assert apply_confirmed_hazard_risk_level_floor("low", [_hazard(severity="Moderate")]) == "low"
+    assert apply_confirmed_hazard_risk_level_floor("low", [_hazard(severity="Minor")]) == "low"
+
+
+def test_no_hazards_never_floors_the_level():
+    assert apply_confirmed_hazard_risk_level_floor("low", []) == "low"
+
+
+def test_realistic_calibration_bug_is_fixed_end_to_end():
+    """Reproduces the exact reported bug: 2.5 miles of confirmed Flood Warning exposure,
+    which the raw scaled_exposure_penalty formula alone scores as 'low' risk (~99/100)."""
+    weight = severity_weight("Severe", "Expected", "Flood Warning")
+    penalty = scaled_exposure_penalty(2.5, weight)
+    raw_score = max(0, min(100, int(round(100 - penalty))))
+    assert raw_score >= 80  # confirms the raw formula alone would say "low"
+    hazard = _hazard(severity="Severe", exposure_miles=2.5)
+    floored = apply_confirmed_hazard_risk_level_floor("low", [hazard])
+    assert floored == "moderate"
 
 
