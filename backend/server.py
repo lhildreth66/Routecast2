@@ -486,7 +486,9 @@ ROAD_CONDITIONS = {
     "slippery": {"severity": 2, "color": "#f59e0b", "icon": "⚠️", "label": "SLIPPERY"},
     "icy": {"severity": 3, "color": "#ef4444", "icon": "🧊", "label": "ICY"},
     "snow_covered": {"severity": 3, "color": "#93c5fd", "icon": "❄️", "label": "SNOW"},
-    "flooded": {"severity": 4, "color": "#dc2626", "icon": "🌊", "label": "FLOODING"},
+    "flooded": {"severity": 4, "color": "#dc2626", "icon": "🌊", "label": "FLOOD WARNING"},
+    "flood_watch": {"severity": 2, "color": "#f59e0b", "icon": "🌧️", "label": "FLOOD WATCH"},
+    "flood_advisory": {"severity": 1, "color": "#60a5fa", "icon": "🌦️", "label": "FLOOD ADVISORY"},
     "low_visibility": {"severity": 2, "color": "#9ca3af", "icon": "🌫️", "label": "LOW VIS"},
     "dangerous_wind": {"severity": 3, "color": "#8b5cf6", "icon": "💨", "label": "HIGH WIND"},
     "out_of_coverage": {"severity": 0, "color": "#6b7280", "icon": "📡", "label": "OUT OF COVERAGE"},
@@ -3001,15 +3003,57 @@ def derive_road_condition(weather: Optional[WeatherData], alerts: List[WeatherAl
 
     alert_text = " ".join([(a.event or "") + " " + (a.headline or "") for a in alerts]).lower()
 
-    if "flood" in alert_text:
+    # Flood classification: NWS issues distinct product tiers (Watch = possible,
+    # Warning/Emergency = occurring or imminent, Advisory = minor) and none of them
+    # are a ground-truth confirmation that a specific road is flooded — NWS alerts
+    # are zone-level forecasts, not road-closure data. This system has no DOT/511 or
+    # similar closure feed, so "confirmed road flooding" / "verified closures" are
+    # intentionally not claimed anywhere below; only the NWS product tier is reported.
+    if "flood warning" in alert_text or "flood emergency" in alert_text:
         return RoadCondition(
             condition="flooded",
             severity=4,
-            label="FLOODING",
+            label="FLOOD WARNING",
             icon="🌊",
             color="#dc2626",
-            description="Flooding reported in NWS alert",
-            recommendation="🚫 Avoid water on roadways; find alternate route",
+            description="NWS Flood Warning in effect — flooding is occurring or imminent in this area",
+            recommendation="🚫 Avoid low-lying roads and water on roadways; seek an alternate route if possible",
+        )
+
+    if "flood watch" in alert_text:
+        return RoadCondition(
+            condition="flood_watch",
+            severity=2,
+            label="FLOOD WATCH",
+            icon="🌧️",
+            color="#f59e0b",
+            description="NWS Flood Watch in effect — flooding is possible but not yet confirmed",
+            recommendation="⚠️ Monitor conditions; avoid low-lying roads if flooding develops",
+        )
+
+    if "flood advisory" in alert_text:
+        return RoadCondition(
+            condition="flood_advisory",
+            severity=1,
+            label="FLOOD ADVISORY",
+            icon="🌦️",
+            color="#60a5fa",
+            description="NWS Flood Advisory in effect — minor flooding possible",
+            recommendation="Use normal caution; watch for standing water",
+        )
+
+    if "flood" in alert_text:
+        # Catch-all for flood-related NWS products that don't match a named tier above
+        # (e.g. Flood Statement, Hydrologic Outlook mentioning flooding) — never silently
+        # dropped, but never overclaimed as confirmed/imminent without more specific wording.
+        return RoadCondition(
+            condition="flood_watch",
+            severity=2,
+            label="FLOOD ALERT",
+            icon="🌧️",
+            color="#f59e0b",
+            description="NWS flood-related alert in effect — check local conditions",
+            recommendation="⚠️ Monitor conditions; avoid low-lying roads if flooding develops",
         )
 
     if any(k in alert_text for k in ["ice", "freezing"]):
@@ -4554,11 +4598,21 @@ async def get_route_weather(request: RouteRequest):
         except Exception as _bridge_err:
             logger.exception("[bridge_height] lookup failed: %s", _bridge_err)
 
-    # NEW: Analyze road conditions
-    road_condition_summary, worst_road_condition, reroute_recommended, reroute_reason, coverage_gaps_segments, coverage_gap_miles = analyze_route_conditions(list(waypoints_weather))
+    # NEW: Analyze road conditions. The severity-only reroute signal returned here
+    # (now underscore-prefixed) cannot confirm a safer alternative actually exists, so it
+    # is intentionally NOT used to set the externally-visible reroute_recommended/reason
+    # below — hazard severity itself remains fully visible via road_condition_summary /
+    # worst_road_condition regardless. reroute_recommended only becomes true once a bridge
+    # physical conflict is found (below) or Smart Weather Rerouting confirms a genuinely
+    # lower-risk alternate (after it runs, further down).
+    road_condition_summary, worst_road_condition, _legacy_severity_reroute_needed, _legacy_severity_reason, coverage_gaps_segments, coverage_gap_miles = analyze_route_conditions(list(waypoints_weather))
+    reroute_recommended = False
+    reroute_reason: Optional[str] = None
 
-    # If a bridge physically blocks the vehicle, upgrade reroute flags regardless
-    # of what analyze_route_conditions returned.
+    # If a bridge physically blocks the vehicle, upgrade reroute flags regardless of
+    # weather — this is a hard physical constraint (any alternative is better than a
+    # too-low bridge), not a weather-risk comparison, so it does not need verification
+    # from Smart Weather Rerouting below.
     bridge_conflicts = [a for a in bridge_clearance_alerts if a.get("margin_ft", 1.0) < 0]
     if bridge_conflicts:
         reroute_recommended = True
@@ -4672,6 +4726,12 @@ async def get_route_weather(request: RouteRequest):
             logger.warning("weather_reroute_assessment_failed route_id=%s: %s", route_id, exc)
             weather_reroute = None
 
+    # Only a *confirmed* meaningfully-lower-risk alternative may claim "reroute
+    # recommended" — never raw hazard severity alone, and never downgrade an existing
+    # bridge-conflict recommendation set above.
+    if not reroute_recommended and weather_reroute is not None and weather_reroute.comparison_outcome == "lower_risk_found":
+        reroute_recommended = True
+        reroute_reason = weather_reroute.message
 
     response = RouteWeatherResponse(
         id=route_id,
