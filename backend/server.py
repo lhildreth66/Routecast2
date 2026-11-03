@@ -29,7 +29,10 @@ import polyline
 from notifications.route_alerts import sample_route_points
 import asyncio
 from bridge_database import get_bridge_warnings, get_bridge_warnings_near_route
-from services.bridge_height_service import get_bridge_clearances_for_route as _get_bridge_clearances
+# Status-aware: returns (alerts, succeeded) so a swallowed Overpass failure/timeout/decode
+# error can never be mistaken for a confirmed "zero restrictions found" result (see
+# BRIDGE_CHECK_TRUST_SECONDS comment below for why the plain list-only variant is unsafe here).
+from services.bridge_height_service import get_bridge_clearances_for_route_with_status as _get_bridge_clearances
 try:
     from services.auth_service import verify_token as _verify_token, get_user_by_id as _get_user_by_id
 except ImportError:
@@ -344,7 +347,9 @@ MIN_STEPS_FOR_NATIVE = int(_env_float("MIN_STEPS_FOR_NATIVE", 30))
 # Defaults OFF: Phase 1 (weather_reroute) stays disabled until the Android UI is built, tested,
 # and explicitly approved for deployment. Phase 0 (route_alternatives) is unaffected by this flag.
 SMART_REROUTE_ENABLED = os.environ.get("SMART_REROUTE_ENABLED", "0").lower() not in {"0", "false", "no", "off"}
-ALT_ROUTE_MAX_ALTERNATES = 2
+# Primary route plus up to this many distinct corridors (Mapbox-native alternatives plus
+# exclude=motorway/exclude=toll corridor-generation variants, deduplicated by real geometry).
+ALT_ROUTE_MAX_ALTERNATES = 3
 # Floor on sample spacing; the actual interval is computed per-route to spread samples evenly
 # across the full trip length (see _alt_route_sample_interval), not a fixed 1-size-fits-all value.
 ALT_ROUTE_MIN_SAMPLE_INTERVAL_MILES = _env_float("ALT_ROUTE_MIN_SAMPLE_INTERVAL_MILES", 10.0)
@@ -354,10 +359,11 @@ ALT_ROUTE_WAYPOINT_CONCURRENCY = int(_env_float("ALT_ROUTE_WAYPOINT_CONCURRENCY"
 # Minimum safety-score improvement (0-100 scale) an alternate must show before it is ever
 # recommended; override via env without a code change/redeploy.
 ALT_ROUTE_MIN_RISK_IMPROVEMENT = int(_env_float("ALT_ROUTE_MIN_RISK_IMPROVEMENT", 15))
-# get_bridge_clearances_for_route() has an internal 8s timeout but NEVER raises on it — it
-# silently returns [] indistinguishable from "checked, zero bridges found". Our own timeout here
-# must stay strictly below that internal ceiling so OUR asyncio.TimeoutError fires first and is
-# caught as a real failure, instead of racing with (and losing to) the inner silent swallow.
+# get_bridge_clearances_for_route_with_status() reports a real (alerts, succeeded) status now,
+# so correctness no longer depends on elapsed time. This budget only bounds the wall-clock cost
+# of a single alternate's bridge check inside the concurrent Phase 1 evaluation batch — a slow
+# check that still legitimately succeeds is trusted; only succeeded=False is ever treated as
+# unchecked/uncertain.
 BRIDGE_CHECK_TRUST_SECONDS = _env_float("BRIDGE_CHECK_TRUST_SECONDS", 7.0)
 
 HAZARD_SCHEMA_VERSION = 2
@@ -527,6 +533,9 @@ class RouteGeometryOption(BaseModel):
     route_geometry: str
     distance_miles: float
     duration_minutes: int
+    # How this corridor was generated: "mapbox_alternative" (Mapbox's own alternatives=true),
+    # "exclude_motorway", or "exclude_toll". Informational only; never surfaced as a safety claim.
+    generation_method: str = "mapbox_alternative"
 
 
 class RouteWeatherRisk(BaseModel):
@@ -3485,11 +3494,15 @@ async def evaluate_route_weather_risk(
                 vehicle_restriction_checked = False
                 try:
                     vehicle_ht = vehicle_height_ft or 13.5
-                    bridge_alerts = await asyncio.wait_for(
+                    bridge_alerts, bridge_check_ok = await asyncio.wait_for(
                         _get_bridge_clearances(route_geometry, vehicle_ht), timeout=BRIDGE_CHECK_TRUST_SECONDS
                     )
-                    vehicle_restriction_checked = True
-                    vehicle_restriction_blocked = any((a.get("margin_ft", 1.0) < 0) for a in (bridge_alerts or []))
+                    # bridge_check_ok is the service's own ground-truth status — an internally
+                    # swallowed Overpass failure/timeout reports False here and must NEVER be
+                    # treated as a confirmed "checked, zero restrictions found" result.
+                    vehicle_restriction_checked = bridge_check_ok
+                    if bridge_check_ok:
+                        vehicle_restriction_blocked = any((a.get("margin_ft", 1.0) < 0) for a in (bridge_alerts or []))
                 except Exception as exc:  # noqa: BLE001
                     logger.warning("alt_route_bridge_check_failed route_index=%s: %s", route_index, exc)
 
@@ -3892,6 +3905,10 @@ async def get_route_weather(request: RouteRequest):
         "avoid_tolls": request.avoid_tolls,
         "prefer_campgrounds": request.prefer_campgrounds,
         "mode": request.mode,
+        # Smart Weather Rerouting Phase 0: always attempt exclude=motorway/exclude=toll corridor
+        # generation in addition to Mapbox's own alternatives=true routes (Phase 1's risk
+        # comparison runs over whatever route_alternatives this produces, unchanged either way).
+        "generate_corridors": True,
     }
     # Drop unset options so downstream helpers can use clean dicts
     routing_options = {k: v for k, v in routing_options.items() if v is not None}
@@ -4269,14 +4286,11 @@ async def get_route_weather(request: RouteRequest):
     bridge_alerts_enabled = bool(request.bridge_height_alerts_enabled) or bool(request.trucker_mode)
     if route_geometry and bridge_alerts_enabled:
         vehicle_ht = (request.vehicle_height_ft or 13.5)
-        _bridge_check_started = time.perf_counter()
         try:
-            bridge_clearance_alerts = await _get_bridge_clearances(route_geometry, vehicle_ht)
-            # get_bridge_clearances_for_route never raises on its own internal timeout — it
-            # silently returns [] instead, indistinguishable from "checked, nothing found". A
-            # call that took close to that internal budget is untrustworthy for reuse; only an
-            # answer that clearly came back well within it counts as a confirmed, reusable check.
-            bridge_check_succeeded = (time.perf_counter() - _bridge_check_started) < BRIDGE_CHECK_TRUST_SECONDS
+            # get_bridge_clearances_for_route_with_status reports real success/failure — a
+            # swallowed Overpass outage/timeout/decode error returns succeeded=False and must
+            # never be reused downstream as a confirmed "checked, nothing found" result.
+            bridge_clearance_alerts, bridge_check_succeeded = await _get_bridge_clearances(route_geometry, vehicle_ht)
         except Exception as _bridge_err:
             logger.exception("[bridge_height] lookup failed: %s", _bridge_err)
 
@@ -4290,7 +4304,8 @@ async def get_route_weather(request: RouteRequest):
         reroute_recommended = True
         reroute_reason = f"Bridge clearance conflict at {bridge_conflicts[0]['bridge_name']}"
 
-    # Smart Weather Rerouting Phase 0: surface up to 2 alternate route geometries (empty when provider has none).
+    # Smart Weather Rerouting Phase 0: surface up to 3 distinct alternate route geometries
+    # (empty when the provider found none that were both genuinely different and reasonably sized).
     route_alternatives: List[RouteGeometryOption] = []
     for alt_idx, alt in enumerate((route_data.get("alternatives") or [])[:ALT_ROUTE_MAX_ALTERNATES], start=1):
         alt_geometry = alt.get("geometry") or ""
@@ -4302,6 +4317,7 @@ async def get_route_weather(request: RouteRequest):
             route_geometry=alt_geometry,
             distance_miles=alt_distance_miles,
             duration_minutes=alt_duration_minutes,
+            generation_method=alt.get("generation_method", "mapbox_alternative"),
         ))
 
     # Smart Weather Rerouting Phase 1: evaluate the primary route + every alternate concurrently,

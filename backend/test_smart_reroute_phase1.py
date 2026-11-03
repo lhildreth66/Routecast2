@@ -298,13 +298,33 @@ async def test_bridge_check_failure_marks_uncertain_and_unchecked(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_bridge_check_reporting_failure_status_marks_uncertain_even_without_raising(monkeypatch):
+    """The real bug this guards against: an internally swallowed Overpass outage/decode error
+    returns normally (does not raise, does not time out) but with succeeded=False. This must
+    NEVER be interpreted as a confirmed 'checked, zero restrictions found' result."""
+    geometry = _make_geometry()
+    _clear_weather_fns(monkeypatch)
+
+    async def swallowed_failure_bridge_check(geom, height):
+        return [], False  # fast, no exception, no timeout — but genuinely failed internally
+
+    monkeypatch.setattr(server, "_get_bridge_clearances", swallowed_failure_bridge_check)
+
+    result = await evaluate_route_weather_risk(1, geometry, 120.0, 150, dt.datetime.utcnow(), "truck", True, 13.5)
+
+    assert result.vehicle_restriction_checked is False
+    assert result.vehicle_restriction_blocked is False
+    assert result.uncertain is True
+
+
+@pytest.mark.asyncio
 async def test_bridge_check_timeout_marks_uncertain_and_unchecked(monkeypatch):
     geometry = _make_geometry()
     _clear_weather_fns(monkeypatch)
 
     async def slow_bridge_check(geom, height):
         await server.asyncio.sleep(999)
-        return []
+        return [], True
 
     monkeypatch.setattr(server, "_get_bridge_clearances", slow_bridge_check)
     monkeypatch.setattr(server, "BRIDGE_CHECK_TRUST_SECONDS", 0.05)
@@ -321,7 +341,7 @@ async def test_bridge_conflict_blocks_route(monkeypatch):
     _clear_weather_fns(monkeypatch)
 
     async def conflicting_bridge_check(geom, height):
-        return [{"bridge_name": "Low Bridge", "margin_ft": -1.0}]
+        return [{"bridge_name": "Low Bridge", "margin_ft": -1.0}], True
 
     monkeypatch.setattr(server, "_get_bridge_clearances", conflicting_bridge_check)
 
@@ -339,7 +359,7 @@ async def test_bridge_check_success_with_no_conflicts_is_confirmed_suitable(monk
     _clear_weather_fns(monkeypatch)
 
     async def clean_bridge_check(geom, height):
-        return []
+        return [], True
 
     monkeypatch.setattr(server, "_get_bridge_clearances", clean_bridge_check)
 
@@ -361,7 +381,7 @@ async def test_known_bridge_alerts_reuse_skips_redundant_overpass_call(monkeypat
 
     async def should_not_be_called(geom, height):
         call_count["n"] += 1
-        return []
+        return [], True
 
     monkeypatch.setattr(server, "_get_bridge_clearances", should_not_be_called)
 
@@ -405,7 +425,7 @@ async def test_known_bridge_alerts_none_always_performs_a_fresh_independent_chec
 
     async def real_check(geom, height):
         call_count["n"] += 1
-        return []
+        return [], True
 
     monkeypatch.setattr(server, "_get_bridge_clearances", real_check)
 

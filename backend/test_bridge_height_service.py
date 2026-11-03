@@ -62,6 +62,9 @@ from services.bridge_height_service import (
     _decode_polyline_raw,
     decode_polyline,
     get_bridge_clearances_for_route,
+    get_bridge_clearances_for_route_with_status,
+    query_overpass_for_clearances,
+    OverpassUnavailable,
     parse_maxheight,
     extract_bridge_data,
     BridgeHeightResult,
@@ -461,6 +464,150 @@ async def test_bad_polyline_returns_empty_list():
     result = await get_bridge_clearances_for_route("###invalid###", 13.5)
     # May return [] due to decode error or Overpass timeout; must not raise.
     assert isinstance(result, list)
+
+
+# ───────────────────────────────────────────────────────────────────────────────
+# 6b. Status-aware entry point — an Overpass outage/timeout/decode error must report
+#     succeeded=False, never be indistinguishable from a confirmed "zero bridges found".
+# ───────────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_query_overpass_raises_when_every_endpoint_fails():
+    """Both mirrors erroring (fast, no timeout involved) must raise OverpassUnavailable,
+    not silently return [] — that [] would be indistinguishable from a genuine zero-bridges
+    query result one layer up."""
+    mock_client = AsyncMock()
+    mock_client.post = AsyncMock(side_effect=Exception("Connection refused"))
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+
+    with patch("services.bridge_height_service.httpx.AsyncClient", return_value=mock_client):
+        with pytest.raises(OverpassUnavailable):
+            await query_overpass_for_clearances([(40.756, -73.988)])
+
+
+@pytest.mark.asyncio
+async def test_status_aware_reports_failure_on_fast_overpass_outage_not_a_confirmed_clear():
+    """The exact bug this guards against: Overpass fails FAST (well under any timeout budget,
+    no exception reaches the caller) — the status-aware function must still report
+    succeeded=False, never succeeded=True with an empty (and therefore seemingly 'all clear')
+    alerts list."""
+    with patch(
+        "services.bridge_height_service.query_overpass_for_clearances",
+        new=AsyncMock(side_effect=Exception("Connection refused")),
+    ), patch(
+        "services.bridge_height_service.decode_polyline",
+        return_value=[(40.756, -73.988)],
+    ):
+        alerts, succeeded = await get_bridge_clearances_for_route_with_status("polyline_fail", 13.5)
+
+    assert alerts == []
+    assert succeeded is False
+
+
+@pytest.mark.asyncio
+async def test_status_aware_reports_failure_on_timeout():
+    """asyncio.TimeoutError must also report succeeded=False, not just a bare []."""
+    import asyncio as _asyncio
+
+    async def raises_timeout(coro, timeout):
+        coro.close()  # prevent ResourceWarning
+        raise _asyncio.TimeoutError()
+
+    with patch("services.bridge_height_service.asyncio.wait_for", new=raises_timeout):
+        alerts, succeeded = await get_bridge_clearances_for_route_with_status("polyline_timeout", 13.5)
+
+    assert alerts == []
+    assert succeeded is False
+
+
+@pytest.mark.asyncio
+async def test_status_aware_reports_failure_on_undecodeable_polyline():
+    """A polyline decode failure is also a genuine check failure, not a confirmed zero-bridges
+    result — must report succeeded=False."""
+    with patch(
+        "services.bridge_height_service.decode_polyline",
+        side_effect=ValueError("garbage polyline"),
+    ):
+        alerts, succeeded = await get_bridge_clearances_for_route_with_status("###invalid###", 13.5)
+
+    assert alerts == []
+    assert succeeded is False
+
+
+@pytest.mark.asyncio
+async def test_status_aware_reports_success_with_genuine_zero_results():
+    """A real, completed Overpass query that legitimately finds zero bridges must report
+    succeeded=True — this is the one case where an empty list IS a confirmed, trustworthy
+    'all clear', and it must remain distinguishable from every failure case above."""
+    with patch(
+        "services.bridge_height_service.query_overpass_for_clearances",
+        new=AsyncMock(return_value=[]),  # Overpass responded fine, just found nothing
+    ), patch(
+        "services.bridge_height_service.decode_polyline",
+        return_value=[(40.756, -73.988), (40.760, -73.982)],
+    ):
+        alerts, succeeded = await get_bridge_clearances_for_route_with_status("polyline_clean", 13.5)
+
+    assert alerts == []
+    assert succeeded is True
+
+
+@pytest.mark.asyncio
+async def test_status_aware_reports_success_with_real_alerts():
+    with patch(
+        "services.bridge_height_service.query_overpass_for_clearances",
+        new=AsyncMock(return_value=MOCK_OVERPASS_RESPONSE),
+    ), patch(
+        "services.bridge_height_service.decode_polyline",
+        return_value=[(40.755, -73.990), (40.760, -73.982)],
+    ):
+        alerts, succeeded = await get_bridge_clearances_for_route_with_status("polyline_danger", 13.5)
+
+    assert len(alerts) >= 1
+    assert succeeded is True
+
+
+@pytest.mark.asyncio
+async def test_status_aware_cache_hit_reports_success():
+    """A cached result always came from a prior genuinely-successful check, so a cache hit
+    must always report succeeded=True."""
+    with patch(
+        "services.bridge_height_service.query_overpass_for_clearances",
+        new=AsyncMock(return_value=[]),
+    ), patch(
+        "services.bridge_height_service.decode_polyline",
+        return_value=[(40.756, -73.988)],
+    ):
+        await get_bridge_clearances_for_route_with_status("polyline_cache", 13.5)  # populate cache
+
+    # Second call should hit the cache even if Overpass would now fail — proves it's a true cache hit.
+    with patch(
+        "services.bridge_height_service.query_overpass_for_clearances",
+        new=AsyncMock(side_effect=Exception("would fail if actually called")),
+    ):
+        alerts, succeeded = await get_bridge_clearances_for_route_with_status("polyline_cache", 13.5)
+
+    assert alerts == []
+    assert succeeded is True
+
+
+@pytest.mark.asyncio
+async def test_legacy_function_still_returns_a_plain_list_never_a_tuple():
+    """Backward-compatibility contract: get_bridge_clearances_for_route() must keep returning
+    a bare list in every case (success or failure) for any existing caller that doesn't know
+    about the status-aware variant."""
+    with patch(
+        "services.bridge_height_service.query_overpass_for_clearances",
+        new=AsyncMock(side_effect=Exception("down")),
+    ), patch(
+        "services.bridge_height_service.decode_polyline",
+        return_value=[(40.756, -73.988)],
+    ):
+        result = await get_bridge_clearances_for_route("polyline_legacy", 13.5)
+
+    assert isinstance(result, list)
+    assert result == []
 
 
 # ───────────────────────────────────────────────────────────────────────────────

@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import asyncio
+import math
 import os
 import time
 import uuid
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import logging
 
 import httpx
+import polyline
 
 from .contracts import (
     AlertsProvider,
@@ -28,6 +31,22 @@ NOAA_USER_AGENT = os.environ.get(
 )
 NOAA_HEADERS = {"User-Agent": NOAA_USER_AGENT, "Accept": "application/geo+json"}
 
+# Smart Weather Rerouting corridor generation: in addition to Mapbox's own alternatives=true
+# routes, request these road-class exclusions to surface genuinely different corridors (e.g. an
+# interstate/turnpike-heavy route vs. a US-highway/surface-road route) — nationwide, not tied to
+# any specific road name. Best-effort only: a slow/failed variant just yields fewer corridors.
+CORRIDOR_EXCLUDE_VARIANTS = ["motorway", "toll"]
+CORRIDOR_VARIANT_TIMEOUT_SECONDS = float(os.environ.get("MAPBOX_CORRIDOR_TIMEOUT_SECONDS", "6.0"))
+# A candidate corridor is discarded if it is more than this multiple of the primary route's
+# distance — keeps "reasonable longer routes" in play without manufacturing absurd detours.
+CORRIDOR_MAX_DETOUR_RATIO = float(os.environ.get("MAPBOX_CORRIDOR_MAX_DETOUR_RATIO", "1.75"))
+# Distinctness check: a candidate must have at least this fraction of its sampled points more
+# than CORRIDOR_DISTINCT_MIN_MILES away from every already-kept route to count as genuinely
+# different, rather than a near-duplicate of an existing option.
+CORRIDOR_DISTINCT_MIN_MILES = float(os.environ.get("MAPBOX_CORRIDOR_DISTINCT_MIN_MILES", "2.0"))
+CORRIDOR_DISTINCT_MIN_FRACTION = float(os.environ.get("MAPBOX_CORRIDOR_DISTINCT_MIN_FRACTION", "0.3"))
+CORRIDOR_MAX_TOTAL_ALTERNATES = int(os.environ.get("MAPBOX_CORRIDOR_MAX_ALTERNATES", "3"))
+
 logger = logging.getLogger(__name__)
 if not MAPBOX_ACCESS_TOKEN:
     logger.error("MAPBOX_ACCESS_TOKEN is missing - Mapbox providers will be offline.")
@@ -37,6 +56,91 @@ def _redact_token(value: str) -> str:
     if not value:
         return value
     return value.replace(MAPBOX_ACCESS_TOKEN, "<redacted>") if MAPBOX_ACCESS_TOKEN else value
+
+
+def _haversine_miles(a: Tuple[float, float], b: Tuple[float, float]) -> float:
+    r = 3958.8
+    lat1, lon1 = math.radians(a[0]), math.radians(a[1])
+    lat2, lon2 = math.radians(b[0]), math.radians(b[1])
+    dlat, dlon = lat2 - lat1, lon2 - lon1
+    h = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
+    return 2 * r * math.asin(min(1.0, math.sqrt(h)))
+
+
+def _decode_polyline_safe(encoded: Optional[str]) -> List[Tuple[float, float]]:
+    if not encoded:
+        return []
+    try:
+        return polyline.decode(encoded, precision=6)
+    except Exception:
+        return []
+
+
+def _sample_coords(coords: List[Tuple[float, float]], max_points: int = 50) -> List[Tuple[float, float]]:
+    if len(coords) <= max_points:
+        return coords
+    step = max(1, len(coords) // max_points)
+    return coords[::step]
+
+
+def _is_reasonable_detour(candidate_distance_m: float, primary_distance_m: float) -> bool:
+    if primary_distance_m <= 0:
+        return True
+    return candidate_distance_m <= primary_distance_m * CORRIDOR_MAX_DETOUR_RATIO
+
+
+def _is_distinct_corridor(
+    candidate_coords: List[Tuple[float, float]],
+    kept_coords_list: List[List[Tuple[float, float]]],
+) -> bool:
+    """A candidate is distinct only if it stays meaningfully far from EVERY already-kept route
+    for a large enough share of its length — not just momentarily diverging for a few miles."""
+    if not candidate_coords:
+        return False
+    if not kept_coords_list:
+        return True
+    sample = _sample_coords(candidate_coords)
+    for kept in kept_coords_list:
+        kept_sample = _sample_coords(kept) if kept else []
+        if not kept_sample:
+            continue
+        far_count = sum(
+            1 for pt in sample
+            if min(_haversine_miles(pt, k) for k in kept_sample) > CORRIDOR_DISTINCT_MIN_MILES
+        )
+        if (far_count / len(sample)) < CORRIDOR_DISTINCT_MIN_FRACTION:
+            return False
+    return True
+
+
+def _select_distinct_corridors(
+    primary_geometry: Optional[str],
+    primary_distance_m: float,
+    candidates: List[Dict[str, Any]],
+    max_total: int = CORRIDOR_MAX_TOTAL_ALTERNATES,
+) -> List[Dict[str, Any]]:
+    """Filters candidate alternates down to genuinely distinct, reasonably-sized corridors.
+    Never manufactures an alternate: if nothing qualifies, returns an empty list."""
+    kept: List[Dict[str, Any]] = []
+    kept_coords: List[List[Tuple[float, float]]] = []
+    primary_coords = _decode_polyline_safe(primary_geometry)
+    if primary_coords:
+        kept_coords.append(primary_coords)
+
+    for cand in candidates:
+        if len(kept) >= max_total:
+            break
+        geometry = cand.get("geometry")
+        cand_distance = cand.get("distance") or 0.0
+        if not geometry or not _is_reasonable_detour(cand_distance, primary_distance_m):
+            continue
+        cand_coords = _decode_polyline_safe(geometry)
+        if not cand_coords or not _is_distinct_corridor(cand_coords, kept_coords):
+            continue
+        kept.append(cand)
+        kept_coords.append(cand_coords)
+
+    return kept
 
 
 class MapboxGeocodeProvider(GeocodeProvider):
@@ -132,6 +236,94 @@ class MapboxGeocodeProvider(GeocodeProvider):
 
 
 class MapboxDirectionsProvider(DirectionsProvider):
+    async def _fetch_route_variant(
+        self,
+        coords_str: str,
+        exclude: Optional[str],
+        timeout: float,
+        with_alternatives: bool,
+    ) -> Optional[Dict[str, Any]]:
+        """One raw Mapbox Directions request. Returns the parsed primary route (+ its own
+        Mapbox-native alternatives, when requested) or None on any failure — never raises."""
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                url = f"https://api.mapbox.com/directions/v5/mapbox/driving/{coords_str}"
+                params = {
+                    "access_token": MAPBOX_ACCESS_TOKEN,
+                    "geometries": "polyline6",
+                    "overview": "full",
+                    "steps": "true",
+                    "annotations": "distance,duration",
+                }
+                if with_alternatives:
+                    # Smart Weather Rerouting Phase 0: ask Mapbox for its own extra route options.
+                    params["alternatives"] = "true"
+                if exclude:
+                    params["exclude"] = exclude
+                safe_params = {k: v for k, v in params.items() if k != "access_token"}
+                safe_url = _redact_token(url)
+                logger.info("MAPBOX_REQ directions url=%s params=%s", safe_url, safe_params)
+                response = await client.get(url, params=params)
+                redacted_body = _redact_token(response.text[:2000])
+                logger.info("MAPBOX_RES directions status=%s body=%s", response.status_code, redacted_body)
+                if response.status_code >= 400:
+                    logger.error("Mapbox directions HTTP %s body=%s", response.status_code, response.text[:200])
+                    response.raise_for_status()
+                data = response.json()
+                if data.get("code") == "NoRoute":
+                    logger.warning("Mapbox returned NoRoute for coords=%s exclude=%s", coords_str[:120], exclude)
+                    return None
+                if not data.get("routes"):
+                    return None
+
+                route = data["routes"][0]
+                legs = route.get("legs", []) or []
+                steps_count = sum(len(l.get("steps", []) or []) for l in legs)
+                route_distance = route.get("distance", 0)
+                logger.info(
+                    "MAPBOX steps_count=%s legs=%s route_distance_m=%s exclude=%s",
+                    steps_count, len(legs), route_distance, exclude,
+                )
+                alternates = []
+                if with_alternatives:
+                    # Smart Weather Rerouting Phase 0: surface up to 2 Mapbox-native alternates.
+                    for alt_route in data["routes"][1:3]:
+                        if alt_route.get("geometry"):
+                            alternates.append({
+                                "geometry": alt_route.get("geometry"),
+                                "duration": alt_route.get("duration", 0),
+                                "distance": alt_route.get("distance", 0),
+                            })
+                return {
+                    "geometry": route.get("geometry"),
+                    # Mapbox returns duration in seconds; keep seconds so downstream conversions stay correct.
+                    "duration": route.get("duration", 0),
+                    "distance": route_distance,  # meters (per Mapbox)
+                    "legs": legs,
+                    "alternatives": alternates,
+                }
+        except Exception as exc:
+            logger.error("Mapbox directions failed coords=%s exclude=%s: %s", coords_str[:120], exclude, exc)
+            return None
+
+    async def _fetch_corridor_variant_with_deadline(
+        self, coords_str: str, exclude: str, timeout: float
+    ) -> Optional[Dict[str, Any]]:
+        """Corridor-generation variants are best-effort extras: enforce an explicit application-level
+        deadline (on top of the HTTP client's own timeout) so a slow/unresponsive variant can never
+        hold up the overall response beyond the configured budget."""
+        try:
+            return await asyncio.wait_for(
+                self._fetch_route_variant(coords_str, exclude, timeout=timeout, with_alternatives=False),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("corridor_variant_timeout exclude=%s timeout=%ss", exclude, timeout)
+            return None
+        except Exception as exc:
+            logger.error("corridor_variant_unexpected_error exclude=%s: %s", exclude, exc)
+            return None
+
     async def route(
         self,
         origin_coords: Dict[str, float],
@@ -148,67 +340,50 @@ class MapboxDirectionsProvider(DirectionsProvider):
                 coords_list.append(f"{wp['lon']},{wp['lat']}")
         coords_list.append(f"{dest_coords['lon']},{dest_coords['lat']}")
         coords_str = ";".join(coords_list)
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                url = f"https://api.mapbox.com/directions/v5/mapbox/driving/{coords_str}"
-                params = {
-                    "access_token": MAPBOX_ACCESS_TOKEN,
-                    "geometries": "polyline6",
-                    "overview": "full",
-                    "steps": "true",
-                    "annotations": "distance,duration",
-                    # Smart Weather Rerouting Phase 0: ask Mapbox for up to 2 extra route options.
-                    "alternatives": "true",
-                }
-                if options:
-                    exclude = options.get("exclude")
-                    if exclude:
-                        params["exclude"] = exclude
-                safe_params = {k: v for k, v in params.items() if k != "access_token"}
-                safe_url = _redact_token(url)
-                logger.info("MAPBOX_REQ directions url=%s params=%s", safe_url, safe_params)
-                response = await client.get(url, params=params)
-                redacted_body = _redact_token(response.text[:2000])
-                logger.info("MAPBOX_RES directions status=%s body=%s", response.status_code, redacted_body)
-                if response.status_code >= 400:
-                    logger.error("Mapbox directions HTTP %s body=%s", response.status_code, response.text[:200])
-                    response.raise_for_status()
-                data = response.json()
-                if data.get("code") == "NoRoute":
-                    logger.warning("Mapbox returned NoRoute for coords=%s", coords_str[:120])
-                    return None
-                if data.get("routes"):
-                    route = data["routes"][0]
-                    legs = route.get("legs", []) or []
-                    steps_count = sum(len(l.get("steps", []) or []) for l in legs)
-                    route_distance = route.get("distance", 0)
-                    logger.info(
-                        "MAPBOX steps_count=%s legs=%s route_distance_m=%s",
-                        steps_count,
-                        len(legs),
-                        route_distance,
+
+        # Preserve the existing standard request exactly (same timeout, same alternatives=true).
+        requested_exclude = (options or {}).get("exclude")
+        primary_coro = self._fetch_route_variant(coords_str, requested_exclude, timeout=10.0, with_alternatives=True)
+        generate_corridors = bool((options or {}).get("generate_corridors")) and not requested_exclude
+
+        corridor_coros = []
+        if generate_corridors:
+            for exclude_value in CORRIDOR_EXCLUDE_VARIANTS:
+                corridor_coros.append(
+                    self._fetch_corridor_variant_with_deadline(
+                        coords_str, exclude_value, CORRIDOR_VARIANT_TIMEOUT_SECONDS
                     )
-                    # Smart Weather Rerouting Phase 0: surface up to 2 alternates; empty when Mapbox has none.
-                    alternates = []
-                    for alt_route in data["routes"][1:3]:
-                        if alt_route.get("geometry"):
-                            alternates.append({
-                                "geometry": alt_route.get("geometry"),
-                                "duration": alt_route.get("duration", 0),
-                                "distance": alt_route.get("distance", 0),
-                            })
-                    return {
-                        "geometry": route.get("geometry"),
-                        # Mapbox returns duration in seconds; keep seconds so downstream conversions stay correct.
-                        "duration": route.get("duration", 0),
-                        "distance": route_distance,  # meters (per Mapbox)
-                        "legs": legs,
-                        "alternatives": alternates,
-                    }
-        except Exception as exc:
-            logger.error("Mapbox directions failed coords=%s: %s", coords_str[:120], exc)
+                )
+
+        gathered = await asyncio.gather(primary_coro, *corridor_coros, return_exceptions=True)
+        primary_result, corridor_results = gathered[0], gathered[1:]
+
+        if isinstance(primary_result, Exception) or not primary_result:
             return None
-        return None
+
+        # Candidate pool: Mapbox's own native alternates first (already computed, no extra cost),
+        # then each successful corridor-exclusion variant's route — never manufactured, only ever
+        # what Mapbox actually returned.
+        candidates: List[Dict[str, Any]] = []
+        for alt in primary_result.get("alternatives", []):
+            candidates.append({**alt, "generation_method": "mapbox_alternative"})
+        for exclude_value, result in zip(CORRIDOR_EXCLUDE_VARIANTS, corridor_results):
+            if isinstance(result, Exception) or not result:
+                logger.warning("corridor_variant_unavailable exclude=%s", exclude_value)
+                continue
+            candidates.append({**result, "generation_method": f"exclude_{exclude_value}"})
+
+        if generate_corridors:
+            distinct = _select_distinct_corridors(
+                primary_result.get("geometry"), primary_result.get("distance") or 0.0, candidates
+            )
+        else:
+            # Unchanged existing behavior when corridor generation wasn't requested.
+            distinct = candidates[:2]
+
+        primary_result["alternatives"] = distinct
+        return primary_result
+
 
 
 class NOAAWeatherProvider(WeatherProvider):

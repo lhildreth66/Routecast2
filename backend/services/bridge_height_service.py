@@ -52,6 +52,14 @@ LCM_API_KEY = os.environ.get("LCM_API_KEY")
 LCM_API_URL = "https://api.lowclearancemap.com/v1"  # Placeholder
 
 
+class OverpassUnavailable(Exception):
+    """Raised when every Overpass mirror failed/errored — distinct from a genuine, confirmed
+    zero-results query. Never let this collapse into the same `[]` a real "no bridges found"
+    answer would produce; callers that need to know the difference should use
+    get_bridge_clearances_for_route_with_status() instead of the legacy list-only function."""
+    pass
+
+
 @dataclass
 class BridgeHeightResult:
     """Represents a low clearance obstacle."""
@@ -191,6 +199,7 @@ async def query_overpass_for_clearances(
     """
 
     results = []
+    any_endpoint_succeeded = False
 
     # Hard per-request timeout of 5 s per endpoint; total ceiling enforced by
     # the asyncio.wait_for in get_bridge_clearances_for_route.
@@ -208,11 +217,19 @@ async def query_overpass_for_clearances(
                 if response.status_code == 200:
                     data = response.json()
                     results = data.get("elements", [])
+                    any_endpoint_succeeded = True
                     break
 
             except Exception as e:
                 print(f"Overpass API error ({api_url}): {e}")
                 continue
+
+    if not any_endpoint_succeeded:
+        # Every mirror errored or returned a non-200 status — this is a genuine service
+        # failure, NOT a confirmed "zero bridges on this route" result. Raise so callers
+        # (get_bridge_clearances_for_route_with_status) can report it as uncertain rather
+        # than silently returning [] indistinguishable from a real clean check.
+        raise OverpassUnavailable("All Overpass endpoints failed or returned a non-200 status")
 
     return results
 
@@ -356,17 +373,18 @@ async def _do_bridge_lookup(
         route_points = decode_polyline(route_polyline)
     except Exception as e:
         print(f"Error decoding polyline: {e}")
-        return []
+        raise
 
     if not route_points:
-        return []
+        raise ValueError("Route polyline decoded to zero points")
 
     # Sample points to avoid overloading API
     sampled_points = sample_route_points(route_points, max_points=30)
 
     all_bridges: List[BridgeHeightResult] = []
 
-    # LAYER 1: Try LCM API if available (future integration)
+    # LAYER 1: Try LCM API if available (future integration) — best-effort/optional, a failure
+    # here must never mask the OSM layer below, so it stays independently swallowed.
     if LCM_API_KEY:
         try:
             lcm_bridges = await query_lcm_api(sampled_points, vehicle_height_ft)
@@ -374,26 +392,25 @@ async def _do_bridge_lookup(
         except Exception as e:
             print(f"LCM API error: {e}")
 
-    # LAYER 2: OpenStreetMap Overpass API (always available)
-    try:
-        osm_elements = await query_overpass_for_clearances(sampled_points)
-        osm_bridges = extract_bridge_data(osm_elements, route_points)
+    # LAYER 2: OpenStreetMap Overpass API (always available). NOT wrapped in try/except here:
+    # a genuine Overpass failure (OverpassUnavailable or any other error) must propagate up to
+    # get_bridge_clearances_for_route_with_status() so it can be reported as an uncertain check,
+    # never silently collapsed into the same [] a real "zero bridges found" result would produce.
+    osm_elements = await query_overpass_for_clearances(sampled_points)
+    osm_bridges = extract_bridge_data(osm_elements, route_points)
 
-        # Merge with existing results, avoiding duplicates
-        existing_coords = {(b.latitude, b.longitude) for b in all_bridges}
-        for bridge in osm_bridges:
-            # Check for nearby existing entries (within ~50 meters)
-            is_duplicate = False
-            for existing in existing_coords:
-                if haversine_distance(bridge.latitude, bridge.longitude, existing[0], existing[1]) < 0.03:
-                    is_duplicate = True
-                    break
+    # Merge with existing results, avoiding duplicates
+    existing_coords = {(b.latitude, b.longitude) for b in all_bridges}
+    for bridge in osm_bridges:
+        # Check for nearby existing entries (within ~50 meters)
+        is_duplicate = False
+        for existing in existing_coords:
+            if haversine_distance(bridge.latitude, bridge.longitude, existing[0], existing[1]) < 0.03:
+                is_duplicate = True
+                break
 
-            if not is_duplicate:
-                all_bridges.append(bridge)
-
-    except Exception as e:
-        print(f"Overpass API error: {e}")
+        if not is_duplicate:
+            all_bridges.append(bridge)
 
     # Convert to alert format
     alerts = []
@@ -473,6 +490,40 @@ async def _do_bridge_lookup(
     return alerts
 
 
+async def get_bridge_clearances_for_route_with_status(
+    route_polyline: str,
+    vehicle_height_ft: float = 13.5,
+) -> Tuple[List[Dict], bool]:
+    """
+    Same lookup as get_bridge_clearances_for_route(), but also reports whether the check
+    genuinely completed successfully (True) or failed/timed-out/errored internally (False).
+
+    A cached result is always from a prior genuinely-successful check, so cache hits report
+    True. Use this whenever the caller must never treat a swallowed failure (Overpass outage,
+    decode error, internal timeout) as a confirmed "zero restrictions found" answer — e.g. a
+    truck/RV bridge-clearance safety check must stay explicitly uncertain in that case, not
+    silently report "checked, all clear".
+    """
+    key = _cache_key(route_polyline, vehicle_height_ft)
+    cached = _cache_get(key)
+    if cached is not None:
+        return cached, True
+
+    try:
+        result = await asyncio.wait_for(
+            _do_bridge_lookup(route_polyline, vehicle_height_ft),
+            timeout=8.0,
+        )
+        _cache_set(key, result)
+        return result, True
+    except asyncio.TimeoutError:
+        print("[bridge_height] Overpass lookup timed out (8 s) — reporting as uncertain, not a confirmed clear")
+        return [], False
+    except Exception as e:
+        print(f"[bridge_height] lookup failed: {e} — reporting as uncertain, not a confirmed clear")
+        return [], False
+
+
 async def get_bridge_clearances_for_route(
     route_polyline: str,
     vehicle_height_ft: float = 13.5,
@@ -484,25 +535,13 @@ async def get_bridge_clearances_for_route(
       - Results are cached per (route_polyline, height-bucket) for 15 minutes.
       - Hard timeout of 8 s total; returns [] on any failure.
       - Never raises — safe to call inside a route response handler.
-    """
-    key = _cache_key(route_polyline, vehicle_height_ft)
-    cached = _cache_get(key)
-    if cached is not None:
-        return cached
 
-    try:
-        result = await asyncio.wait_for(
-            _do_bridge_lookup(route_polyline, vehicle_height_ft),
-            timeout=8.0,
-        )
-        _cache_set(key, result)
-        return result
-    except asyncio.TimeoutError:
-        print("[bridge_height] Overpass lookup timed out (8 s) — returning []")
-        return []
-    except Exception as e:
-        print(f"[bridge_height] lookup failed: {e}")
-        return []
+    NOTE: this legacy signature cannot distinguish "confirmed zero bridges found" from
+    "the check itself failed/timed out" — both return []. Callers that need that distinction
+    (e.g. truck/RV safety gating) must use get_bridge_clearances_for_route_with_status() instead.
+    """
+    alerts, _succeeded = await get_bridge_clearances_for_route_with_status(route_polyline, vehicle_height_ft)
+    return alerts
 
 
 async def query_lcm_api(
