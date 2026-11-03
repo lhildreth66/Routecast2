@@ -3760,9 +3760,11 @@ def _build_recommendation_message(primary: RouteWeatherRisk, best: RouteWeatherR
     if saturated:
         message = f"Both routes show extreme weather risk, but Route {best.route_index} has meaningfully less severe-weather exposure."
     else:
+        # Wording: "weather-exposure points", not "safety points" — this score measures
+        # calculated weather exposure, not an overall road-safety guarantee.
         message = (
-            f"Alternate route {best.route_index} reduces weather risk "
-            f"(+{best.risk_score - primary.risk_score} safety points)."
+            f"Alternate route {best.route_index} has lower calculated weather exposure "
+            f"(+{best.risk_score - primary.risk_score} weather-exposure points)."
         )
     if avoided_events:
         message += f" Avoids: {', '.join(avoided_events)}."
