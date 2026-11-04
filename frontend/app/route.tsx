@@ -703,7 +703,7 @@ export default function RouteScreen() {
           <View style={[styles.proFeatureIcon, { backgroundColor: '#8b4513' }]}>
             <Ionicons name="bonfire" size={20} color="#fff" />
           </View>
-          <Text style={styles.proFeatureTitle}>Boondockers</Text>
+          <Text style={styles.proFeatureTitle} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.75}>Boondockers</Text>
         </TouchableOpacity>
 
         {/* Tractor Trailer */}
@@ -979,7 +979,14 @@ export default function RouteScreen() {
       </ScrollView>
 
       {/* Bottom Action Bar */}
-      <View style={styles.actionBar}>
+      <View
+        style={[
+          styles.actionBar,
+          // Android edge-to-edge mode can draw the system navigation bar over this footer.
+          // Keep all footer actions above the system bar, including 3-button navigation.
+          Platform.OS === 'android' && { paddingBottom: Math.max(insets.bottom, 32) + 8 },
+        ]}
+      >
         <TouchableOpacity style={styles.actionBtn} onPress={shareRoute}>
           <Ionicons name="share-outline" size={22} color="#fff" />
           <Text style={styles.actionText}>Share</Text>
@@ -1669,7 +1676,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   bottomPadding: {
-    height: 100,
+    height: 16,
   },
   actionBar: {
     flexDirection: 'row',
@@ -1919,27 +1926,27 @@ const styles = StyleSheet.create({
   // Features Row Styles
   proFeaturesRow: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 8,
     paddingHorizontal: 16,
-    marginTop: 12,
+    marginTop: 10,
     marginBottom: 8,
   },
   proFeatureCard: {
     flex: 1,
     backgroundColor: '#1a1a1a',
     borderRadius: 12,
-    padding: 12,
+    padding: 10,
     alignItems: 'center',
     borderWidth: 1,
     borderColor: '#27272a',
   },
   proFeatureIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 6,
   },
   proFeatureTitle: {
     color: '#fff',
