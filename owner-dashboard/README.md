@@ -48,3 +48,19 @@ Confirm actual app-store publication and backend/billing providers before connec
 Use server-side read-only integration adapters and separate scoped credentials where feasible, never public source or browser-side secrets. Suggestions and feature usage should be tagged by product. For VPN analytics collect only coarse app feature usage, never browsing history, traffic destinations, or connection content.
 
 The prototype now includes navigation and type-specific dashboard layouts. Only RouteCast has a prepared live-data adapter; no other product integrations or verified live counts yet. No production changes or permanent hosting. Add installable PWA manifest/icons and secure HTTPS hosting after authentication and testing are complete.
+
+
+## Corporate website and first-party web analytics
+
+HildrethTechnology.com is a separate website dashboard, making eight products/website tabs in addition to the portfolio overview. The corporate site's private repository was inspected: frontend pages include Home, About, OurWork, Contact, Privacy, Terms and NotFound; the existing FastAPI backend stores contact submissions. No visitor analytics endpoint was identified in the inspected backend. Connect aggregate contact metrics through an authenticated read-only adapter; never copy contact message bodies into analytics. Do not treat the corporate website as a subscription app or invent a signup funnel for it.
+
+For HildrethTechnology.com and all applicable website businesses, implement first-party analytics with:
+- Monthly unique visitor estimates (pseudonymous browser identifiers where consent permits), sessions, page views, new/returning visitors, active engagement time, bounce rate (define explicitly as non-engaged sessions), landing and exit pages, date comparisons.
+- Referring domain, sanitized campaign tags (UTM source/medium/campaign), broad channel, direct/unknown, approximate country/region, device and browser categories. Do not store full referrer URLs, query strings, precise location, or raw IPs for analytics.
+- Page performance and conversion funnels: page view, product-link click, contact start/success/failure for corporate site; signup start, step completion, validation error, verification, checkout and confirmed purchase where those steps actually exist on other sites. Measure time between steps and distinguish attempted from completed events.
+- Allowlisted client/server error codes, HTTP failures and timing buckets; no passwords, form contents, payment data, session replay, keystrokes, or personal search strings. Correlate aggregate abandonment and errors without claiming causal proof. Offer optional explicit feedback for reported reasons.
+- Filter known bots and owner/test traffic, make collection consent-aware, define retention and deletion, and document measurement limitations (blocked tracking, missing referrers, multiple devices, small geographic cohorts). No Google Analytics or external analytics platform.
+- Show monthly traffic, acquisition channels, geographic breakdown, engagement, most visited pages, conversion and error panels; corporate product outbound clicks and contact completion, not Apple/Google subscribers. Attribute downstream conversions only where a privacy-conscious supported attribution mechanism is implemented.
+- Use shared event schema with product ID, timestamp, event type, normalized page/feature ID, coarse context and opaque event ID; separate authenticated collection/aggregation boundaries per product. Protect against spam, duplicate events, and unauthorized dashboard access. Keep metrics unavailable until actual events or verified records exist.
+
+This update adds corporate and web-specific dashboard layouts only. No visitor tracking, contact-count adapter, historical import, production deployment, or website code changes have been made yet. Test syntax, auth, event schema and UI before release.
