@@ -31,14 +31,42 @@ def fetch_stats(key):
         return json.load(response)
 
 def render(data=None):
-    if data is None:
-        body = "<p>Live data unavailable. Check your administrator key and backend, then refresh. No counts are displayed.</p>"
-    else:
-        body = '<div class="grid">' + "".join(f"<section><small>{html.escape(k)}</small><strong>{v:,}</strong></section>" for k,v in counts(data).items()) + "</div>"
-        body += "<p>Backend snapshot: " + html.escape(str(data["timestamp"])) + "</p>"
-    return f"""<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>RouteCast Owner</title>
-<style>body{{background:#f3f6fa;color:#16314b;font:16px system-ui;margin:0}}main{{max-width:1000px;margin:auto;padding:28px}}header{{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}}small,p{{color:#53677b}}.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px;margin:28px 0}}section{{background:white;border:1px solid #dbe4ee;border-radius:12px;padding:22px}}section:nth-child(-n+3){{border-top:4px solid #1663aa}}strong{{display:block;font-size:36px;margin-top:12px}}a{{background:#174e83;color:white;padding:12px 18px;border-radius:8px;text-decoration:none}}footer{{border-top:1px solid #dbe4ee;padding-top:15px;font-size:14px;line-height:1.6;color:#53677b}}</style>
-<main><header><div><small>ROUTECAST · OWNER CONSOLE</small><h1>Subscriber dashboard</h1><p>Private · Read-only · Live backend snapshot</p></div><a href="/">Refresh data</a></header>{body}<footer>Counts are active account records in RouteCast, not independently verified paid transactions. Trials and grants are separate. Canceled-but-unexpired accounts may be omitted. Reconcile with Apple and Google for definitive paid counts. Feature analytics and suggestions are not implemented in this version.</footer></main></html>""".encode()
+    metrics = counts(data) if data is not None else {}
+    def tile(label, description, accent=False):
+        value = f"{metrics[label]:,}" if label in metrics else "—"
+        return f'<section class="tile {"accent" if accent else ""}"><small>{html.escape(label)}</small><strong>{value}</strong><span>{html.escape(description)}</span></section>'
+    cards = "".join([
+        tile("Apple App Store", "Active Apple accounts"),
+        tile("Google Play", "Active Google accounts"),
+        tile("Combined store accounts", "Apple + Google", True),
+        tile("Free trials", "Trialing accounts"),
+        tile("Direct / Stripe", "Active direct accounts"),
+        tile("All active accounts", "All providers"),
+    ])
+    labels = ["Apple App Store", "Google Play", "Direct / Stripe", "Manually granted"]
+    colors = ["#1561d8", "#3aa7eb", "#8456d9", "#a5afbd"]
+    total = sum(metrics.get(k, 0) for k in labels)
+    legend = ""
+    stops = []
+    pos = 0
+    for label, color in zip(labels, colors):
+        v = metrics.get(label, 0)
+        share = 100 * v / total if total else 0
+        end = pos + share
+        if share:
+            stops.append(f"{color} {pos:.8f}% {end:.8f}%")
+        pos = end
+        detail = f"{v:,} · {share:.1f}%" if data is not None else "—"
+        legend += f'<div class="legend-row"><i style="background:{color}"></i><span>{label}</span><b>{detail}</b></div>'
+    ring = "conic-gradient(" + ", ".join(stops) + ")" if len(stops) > 1 else (stops[0].split()[0] if stops else "#e4ebf3")
+    total_display = f"{total:,}" if data is not None else "—"
+    stamp = html.escape(str(data["timestamp"])) if data is not None else "Unavailable — refresh after checking backend access"
+    state = "Live backend snapshot" if data is not None else "Live data unavailable"
+    extra = "".join(tile(k, d) for k,d in [("Registered accounts","All registrations"),("Verified accounts","Verified email"),("Manually granted","Complimentary / admin")])
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>RouteCast Owner Dashboard</title>
+<style>
+*{{box-sizing:border-box}}html{{scroll-behavior:smooth}}body{{margin:0;background:#f3f6fb;color:#12243e;font:15px system-ui,sans-serif}}.layout{{display:grid;grid-template-columns:220px minmax(0,1fr);min-height:100vh}}aside{{background:linear-gradient(170deg,#fff,#e4effc);padding:26px 16px;border-right:1px solid #dce6f3}}.brand{{font-size:26px;font-weight:850;letter-spacing:-1px;margin:0 0 32px 10px}}.brand span{{color:#1468db}}nav{{display:grid;gap:6px}}nav a{{color:#203753;text-decoration:none;padding:12px;border-radius:9px;font-weight:600}}nav a:first-child{{background:#1668dc;color:white}}nav a:hover{{background:#dceaff;color:#124eaa}}main{{padding:28px;max-width:1540px;width:100%;margin:auto;align-self:start}}header{{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:22px}}h1{{font-size:clamp(24px,3vw,36px);letter-spacing:-.8px;margin:0}}h2{{font-size:19px;margin:0 0 18px}}p{{color:#53677b;line-height:1.55}}header p{{margin:5px 0 0}}.refresh{{background:#1668dc;color:white;padding:11px 16px;border-radius:9px;text-decoration:none;font-weight:650}}.kpis{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:18px}}.tile,.panel{{background:white;border:1px solid #dce4ef;border-radius:12px;box-shadow:0 3px 10px #142d4d09;padding:19px;min-width:0}}.tile.accent{{background:#eaf2ff;border-color:#b7d3fa}}.tile small{{color:#31465e;font-weight:650;font-size:13px}}.tile strong{{display:block;font-size:clamp(25px,3vw,34px);margin:8px 0;letter-spacing:-.5px;font-variant-numeric:tabular-nums}}.tile span{{font-size:12px;color:#61748b}}.columns{{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}}.chart{{display:flex;align-items:center;flex-wrap:wrap;gap:20px}}.ring{{width:160px;height:160px;border-radius:50%;display:grid;place-items:center;flex:none}}.ring-inner{{width:106px;height:106px;border-radius:50%;background:#fff;display:grid;align-content:center;text-align:center;font-size:12px;color:#61748b}}.ring-inner b{{font-size:24px;color:#12243e}}.legend{{flex:1;min-width:190px}}.legend-row{{display:flex;gap:8px;align-items:center;padding:12px 0;border-bottom:1px solid #edf1f6;font-size:12px}}.legend-row i{{width:10px;height:10px;border-radius:50%;flex:none}}.legend-row b{{margin-left:auto;white-space:nowrap}}.pending{{border:1px dashed #c9d8eb;border-radius:9px;padding:18px;background:#f8fafd;color:#52677c;line-height:1.6}}.status{{font-size:12px;letter-spacing:.03em;font-weight:650;color:#436688}}footer{{font-size:12px;color:#64758a;line-height:1.65;margin-top:18px}}@media(min-width:1500px){{.kpis{{grid-template-columns:repeat(6,minmax(0,1fr))}}}}@media(max-width:960px){{.layout{{grid-template-columns:1fr}}aside{{border-right:0;border-bottom:1px solid #dce6f3;padding:14px 18px}}.brand{{margin:0 0 8px}}nav{{display:flex;overflow:auto}}nav a{{white-space:nowrap}}main{{padding:18px}}}}@media(max-width:600px){{.columns{{grid-template-columns:1fr}}.kpis{{grid-template-columns:repeat(2,minmax(0,1fr))}}.tile,.panel{{padding:14px}}}}
+</style></head><body><div class="layout"><aside><div class="brand">Route<span>Cast</span></div><nav><a href="#overview">Overview</a><a href="#subscribers">Subscribers</a><a href="#usage">Usage</a><a href="#suggestions">Suggestions</a><a href="#trends">Trends</a></nav></aside><main id="overview"><header><div><h1>RouteCast Owner Dashboard</h1><p>Private analytics and customer insights · <span class="status">{state}</span></p></div><a class="refresh" href="/">Refresh data</a></header><div class="kpis">{cards}</div><div class="columns"><section class="panel" id="subscribers"><h2>Subscriber Sources</h2><div class="chart"><div class="ring" style="background:{ring}"><div class="ring-inner"><b>{total_display}</b>Listed active<br>accounts</div></div><div class="legend">{legend}</div></div></section><section class="panel" id="usage"><h2>Most Used Features</h2><div class="pending">Feature tracking is not connected yet. Rankings will appear here once RouteCast starts receiving verified usage events. No example numbers are shown.</div></section></div><div class="columns"><section class="panel" id="suggestions"><h2>Recent Customer Suggestions</h2><div class="pending">The in-app suggestion form and private feedback inbox are planned. No customer suggestions have been collected through this dashboard yet.</div></section><section class="panel" id="trends"><h2>Recent Trends</h2><div class="pending">Historical subscriber growth, conversions, cancellations and app opens require event collection and reconciled subscription history.</div></section></div><div class="kpis">{extra}</div><footer>Backend snapshot: {stamp}<br>Counts reflect active account records in RouteCast, not independently verified paid transactions. Trials and grants are separate. Canceled-but-unexpired accounts may be omitted. Reconcile with Apple and Google before treating these as definitive paid counts.</footer></main></div></body></html>""".encode()
 
 def handler(key, password):
     expected = ("Basic " + base64.b64encode(("owner:" + password).encode()).decode()).encode()
