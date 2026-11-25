@@ -27,3 +27,24 @@ Approved design: blue-and-white desktop owner console, left navigation, subscrib
 - Keep existing mobile functionality unchanged until tested. Do not merge or deploy this branch automatically.
 
 Current branch contains a read-only subscriber preview and design placeholders. It does not yet collect usage events, customer suggestions or live trends. Production authentication and runtime tests remain to be completed.
+
+
+## Hildreth Technologies portfolio (owner-confirmed product types)
+
+One private, responsive owner console with separate tabs and an all-products overview.
+
+| Product | Type | Data source to connect |
+| --- | --- | --- |
+| RouteCast | Mobile app | Existing backend stats, Apple App Store Connect, Google Play Developer API and first-party feature events |
+| Emergent VPN | Mobile app | Its own billing/backend and applicable Apple/Google subscription data |
+| Endoscopy Nurse Pro | Mobile app | Its own backend and applicable Apple/Google data |
+| Simple Background Remover | Mobile app in testing | Test metrics separately; include production metrics only when published |
+| MedPolicyRef | Website / SaaS | Its own account database, website billing and first-party web usage events |
+| Patriot News US | Website | Its own account database, website billing and first-party web usage events |
+| TikHooks2 | Website | Its own account database, website billing and first-party web usage events |
+
+Confirm actual app-store publication and backend/billing providers before connecting. Do not assume each product uses the same database or payment provider. Mobile dashboards distinguish Apple and Google; website dashboards use web registrations, active accounts, visitors, conversions, paid subscriptions and revenue. Visitor counts need privacy-conscious first-party instrumentation if not currently recorded. Keep source definitions and dates explicit; missing metrics show unavailable, not zero. Portfolio totals count subscriptions, not unique people across products, unless deduplication is justified and implemented.
+
+Use server-side read-only integration adapters and separate scoped credentials where feasible, never public source or browser-side secrets. Suggestions and feature usage should be tagged by product. For VPN analytics collect only coarse app feature usage, never browsing history, traffic destinations, or connection content.
+
+The prototype now includes navigation and type-specific dashboard layouts. Only RouteCast has a prepared live-data adapter; no other product integrations or verified live counts yet. No production changes or permanent hosting. Add installable PWA manifest/icons and secure HTTPS hosting after authentication and testing are complete.
