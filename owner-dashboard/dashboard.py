@@ -17,6 +17,7 @@ URL = "https://routecast-backend.onrender.com/api/admin/stats"
 # Product inventory from the public Hildreth Technologies portfolio.
 # Website status is not a confirmation of App Store / Google Play availability.
 APPS = {
+    "hildreth-technology": ("HildrethTechnology.com", "Live", "Corporate website"),
     "routecast": ("RouteCast", "Live", "Travel & weather"),
     "emergent-vpn": ("Emergent VPN", "Live", "Privacy & networking"),
     "medpolicyref": ("MedPolicyRef", "Live", "Medical policy SaaS"),
@@ -29,6 +30,7 @@ APPS = {
 
 # Owner-confirmed product types; store publication status still requires verification.
 PRODUCT_TYPES = {
+    "hildreth-technology": "Website",
     "routecast": "Mobile app",
     "emergent-vpn": "Mobile app",
     "endoscopy-nurse-pro": "Mobile app",
@@ -40,8 +42,33 @@ PRODUCT_TYPES = {
 
 def product_metrics(key):
     if PRODUCT_TYPES[key] == "Website":
-        return ("Paying subscribers", "Website visitors", "Active accounts", "New registrations", "Conversions", "Revenue")
+        traffic = ("Visitors this month", "Sessions this month", "Page views", "Average engaged time", "Bounce rate", "Returning visitors")
+        if key == "hildreth-technology":
+            return traffic + ("Contact submissions", "Product link clicks", "Contact completion rate")
+        return traffic + ("Paying subscribers", "Active accounts", "New registrations", "Signup completion rate", "Revenue")
     return ("Apple subscribers", "Google Play subscribers", "Direct subscriptions", "Trials", "Active accounts", "Revenue")
+
+def product_panels(key):
+    if PRODUCT_TYPES[key] == "Website":
+        panels = [
+            ("Visitor Sources", "Traffic by referring domain, direct, organic search, social, referral and campaign. Direct includes unknown sources."),
+            ("Visitor Geography", "Approximate country and region totals only; no precise coordinates."),
+            ("Most Visited Pages", "Page views, engaged time, entries and exits by normalized page path."),
+            ("Engagement & Bounce", "Session and engagement trends, landing-page bounce rates, device and browser categories."),
+            ("Conversion Funnel", "Visit, product or contact click, contact form start and submission." if key == "hildreth-technology" else "Visit, signup start, validation, registration, verification and purchase where applicable."),
+            ("Errors & Drop-off Signals", "Allowlisted error codes, form step failures, slow requests and failed submissions. These are diagnostic clues, not proof of why a visitor left."),
+            ("Recent Customer Suggestions", "Feedback integration pending."),
+            ("Recent Trends", "Daily, weekly and monthly comparisons need first-party event collection."),
+        ]
+        if key == "hildreth-technology":
+            panels.append(("Product Referrals", "Outbound clicks to each portfolio product and app-store listing, with conversion attribution only where supported."))
+        return panels
+    return [
+        ("Subscriber Sources", "Store availability and account data need verification."),
+        ("Most Used Features", "First-party product analytics not connected."),
+        ("Recent Customer Suggestions", "Feedback integration pending."),
+        ("Recent Trends", "Historical data and reporting not connected."),
+    ]
 
 def navigation(selected):
     entries = [("portfolio", "All products", "/")] + [(k, v[0], "/apps/" + k) for kind in ("Mobile app", "Website", "Mobile app (testing)") for k, v in APPS.items() if PRODUCT_TYPES[k] == kind]
@@ -108,7 +135,7 @@ def render_portfolio(selected="portfolio"):
     # Reuse the approved dashboard stylesheet, not its data or panels.
     css = render().decode("utf-8").split("<style>", 1)[1].split("</style>", 1)[0]
     if selected == "portfolio":
-        title = "App portfolio"
+        title = "Business portfolio"
         subtitle = "All products · private analytics and customer insights"
         cards = "".join(
             f'<section class="tile"><small>{html.escape(PRODUCT_TYPES[key])} · {html.escape(status)} · {html.escape(category)}</small>'
@@ -121,19 +148,14 @@ def render_portfolio(selected="portfolio"):
     else:
         name, status, category = APPS[selected]
         title = name + " Owner Dashboard"
-        subtitle = PRODUCT_TYPES[selected] + " · " + status + " on company website · " + category
+        subtitle = PRODUCT_TYPES[selected] + " · " + status + " · " + category
         cards = "".join(
             f'<section class="tile"><small>{html.escape(label)}</small><strong>—</strong><span>Not connected</span></section>'
             for label in product_metrics(selected)
         )
         panels = "".join(
             f'<section class="panel"><h2>{html.escape(label)}</h2><div class="pending">{html.escape(detail)}</div></section>'
-            for label, detail in [
-                ("Subscriber Sources", "Website billing and account data need verification." if PRODUCT_TYPES[selected] == "Website" else "Store availability and account data need verification."),
-                ("Most Used Features", "First-party product analytics not connected."),
-                ("Recent Customer Suggestions", "Feedback integration pending."),
-                ("Recent Trends", "Historical data and reporting not connected."),
-            ]
+            for label, detail in product_panels(selected)
         )
         body = '<div class="kpis">' + cards + '</div><div class="columns">' + panels + '</div>'
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{html.escape(title)} | Hildreth Technologies</title><style>{css}</style></head><body><div class="layout"><aside><div class="brand" style="font-size:20px">Hildreth<br><span>Technologies</span></div><nav>{navigation(selected)}</nav></aside><main><header><div><h1>{html.escape(title)}</h1><p>{html.escape(subtitle)}</p></div></header>{body}<footer>Website product status is not confirmation of a live store listing. All customer metrics require authenticated source data. No sample figures appear in the owner console.</footer></main></div></body></html>""".encode("utf-8")
