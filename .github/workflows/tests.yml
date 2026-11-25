@@ -30,4 +30,5 @@ jobs:
 
       - name: Run hazard tests
         run: |
-          pytest -q backend/test_hazard_alerts.py
+          python -m py_compile backend/server.py backend/services/route_wind_gusts.py
+          pytest -q backend/test_hazard_alerts.py backend/test_route_wind_gusts.py

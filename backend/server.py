@@ -34,6 +34,7 @@ from bridge_database import get_bridge_warnings, get_bridge_warnings_near_route
 # BRIDGE_CHECK_TRUST_SECONDS comment below for why the plain list-only variant is unsafe here).
 from services.bridge_height_service import get_bridge_clearances_for_route_with_status as _get_bridge_clearances
 import services.weather_exposure_service as weather_exposure
+from services.route_wind_gusts import aware as gust_aware, fetch_wind_at_eta, gust_severity, sampled_distances
 try:
     from services.auth_service import verify_token as _verify_token, get_user_by_id as _get_user_by_id
 except ImportError:
@@ -5248,6 +5249,69 @@ async def get_route_weather_alerts(
                 "returned_events": [card.event or card.message for card in returned_cards],
             }
             debug_payload["returned_unique_alert_ids"] = [card.alert_id for card in returned_cards if card.alert_id]
+
+        # Forecast gusts are RouteCast guidance, not NWS-issued advisories.
+        # Opt-in during staged rollout; ordinary NWS alerts remain unchanged.
+        if os.environ.get("ROUTE_WIND_GUSTS_ENABLED", "").lower() in {"1", "true", "yes", "on"}:
+            try:
+                target_departure = gust_aware(departure_time)
+                route_miles = float(total_distance or 0)
+                route_minutes = float(total_duration_minutes or 0)
+                distances = sampled_distances(hazard_waypoints_data, route_miles)
+                if target_departure is not None and route_minutes > 0 and distances:
+                    gust_gate = asyncio.Semaphore(8)
+                    async with httpx.AsyncClient(timeout=2.5, follow_redirects=False) as gust_client:
+                        async def forecast_gust(point, distance):
+                            eta = round(route_minutes * distance / route_miles)
+                            target = target_departure + timedelta(minutes=eta)
+                            try:
+                                async with gust_gate:
+                                    data = await fetch_wind_at_eta(gust_client, point["lat"], point["lon"], target, NOAA_HEADERS)
+                                if not data:
+                                    return None
+                                peak = data["gust_mph"]
+                                severity = gust_severity(peak)
+                                if not severity:
+                                    return None
+                                gust = round(peak)
+                                sustained = data["sustained_mph"]
+                                detail = f"Forecast gusts up to {gust} mph near route mile {distance:.0f} at estimated arrival."
+                                if sustained is not None:
+                                    detail += f" Sustained wind approximately {round(sustained)} mph."
+                                detail += " High-profile vehicles, trailers and motorcycles may be particularly affected. Reduce speed as conditions require; stop safely if control becomes difficult."
+                                identifier = "routecast-gust-" + hashlib.sha256(f"{route_id}:{distance:.1f}:{target.isoformat()}".encode()).hexdigest()[:20]
+                                return HazardAlert(
+                                    type="wind", severity=severity, distance_miles=round(distance, 1),
+                                    eta_minutes=eta, message=f"Forecast wind gusts up to {gust} mph",
+                                    event="Forecast Wind Gusts", headline=f"Wind gusts up to {gust} mph",
+                                    description=detail, full_description=detail,
+                                    recommendation="Slow as needed; stop safely if vehicle control becomes difficult.",
+                                    countdown_text=f"Estimated encounter {eta} minutes after departure",
+                                    wind_mph=round(sustained) if sustained is not None else None,
+                                    wind_gust_mph=gust, alert_level="Hazard" if severity == "high" else "Advisory",
+                                    id=identifier, alert_id=identifier,
+                                    properties={"source": "RouteCast forecast guidance (NWS grid data)", "forecast_arrival": target.isoformat()},
+                                )
+                            except Exception:
+                                return None
+                        gust_tasks = [asyncio.create_task(forecast_gust(point, distance)) for point, distance in zip(hazard_waypoints_data, distances)]
+                        done_gusts, pending_gusts = await asyncio.wait(gust_tasks, timeout=6.0)
+                        for task in pending_gusts:
+                            task.cancel()
+                        if pending_gusts:
+                            await asyncio.gather(*pending_gusts, return_exceptions=True)
+                        gust_cards = [task.result() for task in done_gusts if not task.cancelled() and task.exception() is None and task.result() is not None]
+                        # Keep at most three distinct encounters, highest severity then earliest.
+                        gust_cards.sort(key=lambda a: (0 if a.severity == "high" else 1, a.distance_miles))
+                        selected_gusts = []
+                        for card in gust_cards:
+                            if all(abs(card.distance_miles - prior.distance_miles) >= 15 for prior in selected_gusts):
+                                selected_gusts.append(card)
+                            if len(selected_gusts) >= 3:
+                                break
+                        hazard_alerts.extend(selected_gusts)
+            except Exception:
+                logger.warning("Forecast gust enhancement unavailable", exc_info=True)
 
         await hydrate_alert_roads_from_geometry(hazard_alerts, geometry_index)
         road_conditions = build_condition_segments(hazard_alerts, category="road")
