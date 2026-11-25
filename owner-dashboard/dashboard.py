@@ -26,8 +26,25 @@ APPS = {
     "simple-background-remover": ("Simple Background Remover", "In testing", "Photo utility"),
 }
 
+
+# Owner-confirmed product types; store publication status still requires verification.
+PRODUCT_TYPES = {
+    "routecast": "Mobile app",
+    "emergent-vpn": "Mobile app",
+    "endoscopy-nurse-pro": "Mobile app",
+    "simple-background-remover": "Mobile app (testing)",
+    "medpolicyref": "Website",
+    "patriot-news-us": "Website",
+    "tikhooks2": "Website",
+}
+
+def product_metrics(key):
+    if PRODUCT_TYPES[key] == "Website":
+        return ("Paying subscribers", "Website visitors", "Active accounts", "New registrations", "Conversions", "Revenue")
+    return ("Apple subscribers", "Google Play subscribers", "Direct subscriptions", "Trials", "Active accounts", "Revenue")
+
 def navigation(selected):
-    entries = [("portfolio", "All apps", "/")] + [(k, v[0], "/apps/" + k) for k, v in APPS.items()]
+    entries = [("portfolio", "All products", "/")] + [(k, v[0], "/apps/" + k) for kind in ("Mobile app", "Website", "Mobile app (testing)") for k, v in APPS.items() if PRODUCT_TYPES[k] == kind]
     return "".join(
         f'<a href="{href}"' + (' class="selected" aria-current="page"' if key == selected else '') +
         f'>{html.escape(name)}</a>' for key, name, href in entries
@@ -94,7 +111,7 @@ def render_portfolio(selected="portfolio"):
         title = "App portfolio"
         subtitle = "All products · private analytics and customer insights"
         cards = "".join(
-            f'<section class="tile"><small>{html.escape(status)} · {html.escape(category)}</small>'
+            f'<section class="tile"><small>{html.escape(PRODUCT_TYPES[key])} · {html.escape(status)} · {html.escape(category)}</small>'
             f'<h2 style="margin:12px 0">{html.escape(name)}</h2>'
             f'<p>{"Subscriber API prepared; live verification pending." if key == "routecast" else "Data source not connected yet."}</p>'
             f'<a class="refresh" style="display:inline-block" href="/apps/{key}">Open dashboard</a></section>'
@@ -104,15 +121,15 @@ def render_portfolio(selected="portfolio"):
     else:
         name, status, category = APPS[selected]
         title = name + " Owner Dashboard"
-        subtitle = status + " on company website · " + category
+        subtitle = PRODUCT_TYPES[selected] + " · " + status + " on company website · " + category
         cards = "".join(
             f'<section class="tile"><small>{html.escape(label)}</small><strong>—</strong><span>Not connected</span></section>'
-            for label in ("Apple subscribers", "Google Play subscribers", "Direct subscriptions", "Trials", "Active accounts", "Revenue")
+            for label in product_metrics(selected)
         )
         panels = "".join(
             f'<section class="panel"><h2>{html.escape(label)}</h2><div class="pending">{html.escape(detail)}</div></section>'
             for label, detail in [
-                ("Subscriber Sources", "Store availability and account data need verification."),
+                ("Subscriber Sources", "Website billing and account data need verification." if PRODUCT_TYPES[selected] == "Website" else "Store availability and account data need verification."),
                 ("Most Used Features", "First-party product analytics not connected."),
                 ("Recent Customer Suggestions", "Feedback integration pending."),
                 ("Recent Trends", "Historical data and reporting not connected."),
