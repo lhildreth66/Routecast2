@@ -24,6 +24,9 @@ FAILURES = {}
 FAILURE_SECONDS = 300
 LOCK = Lock()
 LIMIT = 20 * 1024 * 1024
+REPORT_NAME = re.compile(
+    r"earnings/earnings_([0-9]{6})(?:_[0-9]+-[0-9]+)?\.zip"
+)
 
 def parse_earnings(payload):
     results = defaultdict(lambda: defaultdict(lambda: {"sales": Decimal(0), "fees": Decimal(0), "total": Decimal(0), "lines": 0}))
@@ -149,14 +152,14 @@ def report():
                             break
                         check_response(response, stage)
                         data = response.json()
-                    names.extend(x for x in data.get("items", []) if re.fullmatch(r"earnings/earnings_[0-9]{6}\.zip", x.get("name", "")))
+                    names.extend(x for x in data.get("items", []) if REPORT_NAME.fullmatch(x.get("name", "")))
                     if not data.get("nextPageToken"):
                         break
                     params["pageToken"] = data["nextPageToken"]
                 else:
                     raise ReportError("Too many reports; list incomplete")
                 if not names:
-                    raise ReportError("Report listing succeeded, but no filename matched earnings_YYYYMM.zip")
+                    raise ReportError("Report listing succeeded, but no filename matched earnings_YYYYMM.zip or earnings_YYYYMM_digits-n.zip")
                 newest = max(names, key=lambda x:x["name"])
                 if int(newest.get("size", 0)) > LIMIT:
                     raise ReportError("Report exceeds size limit")
@@ -170,7 +173,7 @@ def report():
                             raise ReportError("Report exceeds size limit")
                 stage = "reading the downloaded report"
                 totals = parse_earnings(chunks)
-            result = {"month": datetime.strptime(newest["name"][-10:-4], "%Y%m").strftime("%B %Y"), "totals": totals, "fetched": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"), "warning": listing_error}
+            result = {"month": datetime.strptime(REPORT_NAME.fullmatch(newest["name"]).group(1), "%Y%m").strftime("%B %Y"), "totals": totals, "fetched": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"), "warning": listing_error}
         except Exception as exc:
             # Exception text can include paths or account details; show only the stage.
             if isinstance(exc, ReportError):

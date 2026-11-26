@@ -106,6 +106,22 @@ class WorkflowTests(unittest.TestCase):
         self.assertTrue(self.calls[2][0].endswith("/o/earnings%2Fearnings_202602.zip"))
         self.assertEqual(self.calls[2][1], {"alt": "media"})
 
+    def test_suffixed_report_filename(self):
+        self.responses = [
+            listing("earnings/earnings_202605_12345678-1.zip",
+                    "earnings/earnings_202606_12345678-2.zip",
+                    "earnings/earnings_202607_12345678-3.zip",
+                    "earnings/earnings_202609_12345678-4.zip",
+                    "earnings/earnings_202610_invalid.zip"),
+            Response(content=archive()),
+        ]
+        data = pe.report()
+        self.assertEqual(data["month"], "September 2026")
+        self.assertIsNone(data["warning"])
+        self.assertIn("com.routecast.app", data["totals"])
+        self.assertTrue(self.calls[1][0].endswith("/o/earnings%2Fearnings_202609_12345678-4.zip"))
+        self.assertEqual(self.calls[1][1], {"alt": "media"})
+
     def test_success_is_cached(self):
         self.responses = [listing("earnings/earnings_202602.zip"), Response(content=archive())]
         self.assertIs(pe.report(), pe.report())
