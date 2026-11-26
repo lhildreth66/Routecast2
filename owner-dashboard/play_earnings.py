@@ -6,7 +6,7 @@ import os
 import re
 import zipfile
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from decimal import Decimal
 from threading import Lock
 from time import monotonic
@@ -58,9 +58,26 @@ def parse_earnings(payload):
 class ReportError(Exception):
     pass
 
-def check_response(response):
+def check_response(response, stage="request"):
     if response.status_code != 200:
-        raise ReportError("Google Storage HTTP " + str(int(response.status_code)))
+        hint = ""
+        try:
+            err = response.json().get("error", {})
+            reasons = {item.get("reason") for item in err.get("errors", []) if isinstance(item, dict)}
+            reasons.update(item.get("reason") for item in err.get("details", []) if isinstance(item, dict))
+            if reasons & {"accessNotConfigured", "SERVICE_DISABLED", "serviceDisabled"}:
+                hint = " (Cloud Storage API disabled in credential project)"
+            elif reasons & {"insufficientPermissions", "ACCESS_TOKEN_SCOPE_INSUFFICIENT"}:
+                hint = " (OAuth scope insufficient)"
+            elif reasons & {"forbidden", "PERMISSION_DENIED"}:
+                hint = " (permission denied)"
+        except Exception:
+            pass
+        raise ReportError("Google Storage HTTP " + str(int(response.status_code)) + " during " + stage + hint)
+
+def previous_month_report():
+    previous = datetime.now(timezone.utc).replace(day=1) - timedelta(days=1)
+    return "earnings/earnings_" + previous.strftime("%Y%m") + ".zip"
 
 def report():
     uri = os.getenv("PLAY_EARNINGS_URI", "").strip()
@@ -82,7 +99,12 @@ def report():
             params = {"prefix": "earnings/earnings_", "fields": "items(name,size),nextPageToken", "maxResults": 1000}
             for _ in range(5):
                 with session.get(endpoint, params=params, timeout=12) as response:
-                    check_response(response)
+                    if response.status_code == 403:
+                        # Google documents direct reads of monthly objects. Listing
+                        # permission can differ from object read permission.
+                        names = [{"name": previous_month_report()}]
+                        break
+                    check_response(response, "report listing")
                     data = response.json()
                 names.extend(x for x in data.get("items", []) if re.fullmatch(r"earnings/earnings_[0-9]{6}\.zip", x.get("name", "")))
                 if not data.get("nextPageToken"):
@@ -96,7 +118,7 @@ def report():
             if int(newest.get("size", 0)) > LIMIT:
                 raise ReportError("Report exceeds size limit")
             with session.get(endpoint + "/" + quote(newest["name"], safe=""), params={"alt": "media"}, timeout=20, stream=True) as response:
-                check_response(response)
+                check_response(response, "monthly file download")
                 chunks = bytearray()
                 for chunk in response.iter_content(chunk_size=65536):
                     chunks.extend(chunk)
