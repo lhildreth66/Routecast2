@@ -9,6 +9,9 @@ import html
 import json
 import os
 import secrets
+from urllib.parse import urlsplit, parse_qs
+from ga4_reports import report as ga4_report, PERIODS
+from web_view import render_web
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.request import Request, urlopen
 
@@ -131,7 +134,7 @@ def render(data=None, selected='routecast'):
 *{{box-sizing:border-box}}html{{scroll-behavior:smooth}}body{{margin:0;background:#f3f6fb;color:#12243e;font:15px system-ui,sans-serif}}.layout{{display:grid;grid-template-columns:220px minmax(0,1fr);min-height:100vh}}aside{{background:linear-gradient(170deg,#fff,#e4effc);padding:26px 16px;border-right:1px solid #dce6f3}}.brand{{font-size:26px;font-weight:850;letter-spacing:-1px;margin:0 0 32px 10px}}.brand span{{color:#1468db}}nav{{display:grid;gap:6px}}nav a{{color:#203753;text-decoration:none;padding:12px;border-radius:9px;font-weight:600}}nav a.selected{{background:#1668dc;color:white}}nav a:hover{{background:#dceaff;color:#124eaa}}main{{padding:28px;max-width:1540px;width:100%;margin:auto;align-self:start}}header{{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:22px}}h1{{font-size:clamp(24px,3vw,36px);letter-spacing:-.8px;margin:0}}h2{{font-size:19px;margin:0 0 18px}}p{{color:#53677b;line-height:1.55}}header p{{margin:5px 0 0}}.refresh{{background:#1668dc;color:white;padding:11px 16px;border-radius:9px;text-decoration:none;font-weight:650}}.kpis{{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:18px}}.tile,.panel{{background:white;border:1px solid #dce4ef;border-radius:12px;box-shadow:0 3px 10px #142d4d09;padding:19px;min-width:0}}.tile.accent{{background:#eaf2ff;border-color:#b7d3fa}}.tile small{{color:#31465e;font-weight:650;font-size:13px}}.tile strong{{display:block;font-size:clamp(25px,3vw,34px);margin:8px 0;letter-spacing:-.5px;font-variant-numeric:tabular-nums}}.tile span{{font-size:12px;color:#61748b}}.columns{{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}}.chart{{display:flex;align-items:center;flex-wrap:wrap;gap:20px}}.ring{{width:160px;height:160px;border-radius:50%;display:grid;place-items:center;flex:none}}.ring-inner{{width:106px;height:106px;border-radius:50%;background:#fff;display:grid;align-content:center;text-align:center;font-size:12px;color:#61748b}}.ring-inner b{{font-size:24px;color:#12243e}}.legend{{flex:1;min-width:190px}}.legend-row{{display:flex;gap:8px;align-items:center;padding:12px 0;border-bottom:1px solid #edf1f6;font-size:12px}}.legend-row i{{width:10px;height:10px;border-radius:50%;flex:none}}.legend-row b{{margin-left:auto;white-space:nowrap}}.pending{{border:1px dashed #c9d8eb;border-radius:9px;padding:18px;background:#f8fafd;color:#52677c;line-height:1.6}}.status{{font-size:12px;letter-spacing:.03em;font-weight:650;color:#436688}}footer{{font-size:12px;color:#64758a;line-height:1.65;margin-top:18px}}@media(min-width:1500px){{.kpis{{grid-template-columns:repeat(6,minmax(0,1fr))}}}}@media(max-width:960px){{.layout{{grid-template-columns:1fr}}aside{{border-right:0;border-bottom:1px solid #dce6f3;padding:14px 18px}}.brand{{margin:0 0 8px}}nav{{display:flex;overflow:auto}}nav a{{white-space:nowrap}}main{{padding:18px}}}}@media(max-width:600px){{.columns{{grid-template-columns:1fr}}.kpis{{grid-template-columns:repeat(2,minmax(0,1fr))}}.tile,.panel{{padding:14px}}}}
 </style></head><body><div class="layout"><aside><div class="brand" style="font-size:20px">Hildreth<br><span>Technologies</span></div><nav>{navigation(selected)}</nav><hr style="border:0;border-top:1px solid #dce6f3;margin:20px 0"><nav><a href="#overview">Overview</a><a href="#subscribers">Subscribers</a><a href="#usage">Usage</a><a href="#suggestions">Suggestions</a><a href="#trends">Trends</a></nav></aside><main id="overview"><header><div><h1>RouteCast Owner Dashboard</h1><p>Private analytics and customer insights · <span class="status">{state}</span></p></div><a class="refresh" href="/apps/routecast">Refresh data</a></header><div class="kpis">{cards}</div><div class="columns"><section class="panel" id="subscribers"><h2>Subscriber Sources</h2><div class="chart"><div class="ring" style="background:{ring}"><div class="ring-inner"><b>{total_display}</b>Listed active<br>accounts</div></div><div class="legend">{legend}</div></div></section><section class="panel" id="usage"><h2>Most Used Features</h2><div class="pending">Feature tracking is not connected yet. Rankings will appear here once RouteCast starts receiving verified usage events. No example numbers are shown.</div></section></div><div class="columns"><section class="panel" id="suggestions"><h2>Recent Customer Suggestions</h2><div class="pending">The in-app suggestion form and private feedback inbox are planned. No customer suggestions have been collected through this dashboard yet.</div></section><section class="panel" id="trends"><h2>Recent Trends</h2><div class="pending">Historical subscriber growth, conversions, cancellations and app opens require event collection and reconciled subscription history.</div></section></div><div class="kpis">{extra}</div><footer>Backend snapshot: {stamp}<br>Counts reflect active account records in RouteCast, not independently verified paid transactions. Trials and grants are separate. Canceled-but-unexpired accounts may be omitted. Reconcile with Apple and Google before treating these as definitive paid counts.</footer></main></div></body></html>""".encode()
 
-def render_portfolio(selected="portfolio"):
+def render_portfolio(selected="portfolio", web_data=None, period="30", web_error=False):
     # Reuse the approved dashboard stylesheet, not its data or panels.
     css = render().decode("utf-8").split("<style>", 1)[1].split("</style>", 1)[0]
     if selected == "portfolio":
@@ -158,6 +161,8 @@ def render_portfolio(selected="portfolio"):
             for label, detail in product_panels(selected)
         )
         body = '<div class="kpis">' + cards + '</div><div class="columns">' + panels + '</div>'
+    if selected != "portfolio" and PRODUCT_TYPES[selected] == "Website":
+        body = render_web(selected, web_data, period, web_error) + body
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{html.escape(title)} | Hildreth Technologies</title><style>{css}</style></head><body><div class="layout"><aside><div class="brand" style="font-size:20px">Hildreth<br><span>Technologies</span></div><nav>{navigation(selected)}</nav></aside><main><header><div><h1>{html.escape(title)}</h1><p>{html.escape(subtitle)}</p></div></header>{body}<footer>Website product status is not confirmation of a live store listing. All customer metrics require authenticated source data. No sample figures appear in the owner console.</footer></main></div></body></html>""".encode("utf-8")
 
 def handler(key, password):
@@ -179,15 +184,26 @@ def handler(key, password):
         def do_GET(self):
             if not hmac.compare_digest(self.headers.get("Authorization", "").encode(), expected):
                 return self.reply(401, b"Login required", True)
-            if self.path == "/":
+            parsed = urlsplit(self.path)
+            if parsed.path == "/":
                 return self.reply(200, render_portfolio())
-            if not self.path.startswith("/apps/"):
+            if not parsed.path.startswith("/apps/"):
                 return self.reply(404, b"Not found")
-            selected = self.path[len("/apps/"):]
+            selected = parsed.path[len("/apps/"):]
             if selected not in APPS:
                 return self.reply(404, b"Not found")
             if selected != "routecast":
-                return self.reply(200, render_portfolio(selected))
+                period = parse_qs(parsed.query).get("period", ["30"])[0]
+                if period not in PERIODS:
+                    return self.reply(400, b"Invalid date range")
+                data = None
+                failed = False
+                if PRODUCT_TYPES[selected] == "Website":
+                    try:
+                        data = ga4_report(selected, period)
+                    except Exception:
+                        failed = True
+                return self.reply(200, render_portfolio(selected, data, period, failed))
             try:
                 body = render(fetch_stats(key))
             except Exception:
