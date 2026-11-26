@@ -57,6 +57,15 @@ class DashboardTests(unittest.TestCase):
         with patch.object(rc, "fetch_overview", side_effect=ValueError("secret-example")):
             self.assertNotIn("secret-example", rc.render_revenuecat("emergent-vpn"))
 
+    def test_play_earnings_diagnostics(self):
+        from unittest.mock import Mock
+        from play_earnings import check_response, previous_month_report, ReportError
+        response = Mock(status_code=403)
+        response.json.return_value = {"error":{"details":[{"reason":"SERVICE_DISABLED"}]}}
+        with self.assertRaisesRegex(ReportError, "Cloud Storage API disabled"):
+            check_response(response, "monthly file download")
+        self.assertRegex(previous_month_report(), r"^earnings/earnings_[0-9]{6}\.zip$")
+
     def test_play_earnings_aggregation(self):
         from io import BytesIO
         import zipfile
