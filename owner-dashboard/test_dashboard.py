@@ -39,11 +39,15 @@ class DashboardTests(unittest.TestCase):
             self.assertIn("snapshot unavailable",render_marketing("routecast"))
 
     def test_website_report(self):
-        data = {"totals":{"totalUsers":"7","bounceRate":"0.25"}, "groups":{"Visitor Sources":[("search", 5)]}, "fetched":"test only"}
+        data = {"totals":{"totalUsers":"7","bounceRate":"0.25"}, "groups":{"Visitor Sources":[("search", 5)], "Recent Trends":[("20260102", 5)]}, "fetched":"test only"}
         page = dashboard.render_portfolio("patriot-news-us", data, "7")
         self.assertIn(b"25.0%", page)
         self.assertIn(b"search", page)
         self.assertIn(b"period=7", page)
+        self.assertIn(b"Jan 02, 2026", page)
+        self.assertEqual(page.count(b"<h2>Visitor Sources</h2>"), 1)
+        self.assertNotIn(b"Visitors this month", page)
+        self.assertIn(b"Additional metrics", page)
 
     def test_property_id(self):
         with patch.dict("os.environ", {"GA4_PATRIOT_PROPERTY_ID":"123456"}):
