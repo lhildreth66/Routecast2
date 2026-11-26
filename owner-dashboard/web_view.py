@@ -1,6 +1,7 @@
 """HTML display of verified GA4 reports; no invented metrics."""
 import html
 import math
+from datetime import datetime
 
 def render_web(product, data, period, failed=False):
     base = "/apps/" + product
@@ -33,11 +34,19 @@ def render_web(product, data, period, failed=False):
             rows = [(k,v) for k,v in rows if k.startswith("/") and "?" not in k and "@" not in k and not any(ch.isdigit() for ch in k)]
         peak = max((v for _,v in rows), default=1) or 1
         lines = []
-        for k,v in rows[:30]:
+        displayed = rows[-30:] if label == "Recent Trends" else rows[:30]
+        for k,v in displayed:
+            if label == "Recent Trends":
+                try:
+                    k = datetime.strptime(k, "%Y%m%d").strftime("%b %d, %Y")
+                except (ValueError, TypeError):
+                    pass
             safe = html.escape(str(k)[:100])
             width = max(0,min(100,v/peak*100))
             lines.append(f'<div class="legend-row"><span style="overflow-wrap:anywhere">{safe}</span><b>{v:,}</b></div><div style="height:7px;background:#e4ebf3;border-radius:4px"><div style="height:7px;width:{width:.1f}%;background:#1684cc;border-radius:4px"></div></div>')
         body = "".join(lines) or "<p>No reportable rows or report unavailable.</p>"
+        if label == "Recent Trends" and len(rows) > 30:
+            body = "<p>Latest 30 reported dates in the selected period.</p>" + body
         panels.append(f'<section class="panel"><h2>{html.escape(label)}</h2>{body}</section>')
     stamp = html.escape(data["fetched"])
     return f'<section class="panel" style="margin-bottom:18px"><h2>Google Analytics · website traffic</h2>{filters}<p>Read-only GA4 · today may be incomplete · fetched {stamp}</p></section><div class="kpis">{cards}</div><div class="columns">{"".join(panels)}</div><p>Visitors are GA4 total users, not guaranteed unique people. Sources, country, device and trend panels count sessions; pages count views. Bars scale to the largest row. GA4 may omit or threshold data.</p>'
