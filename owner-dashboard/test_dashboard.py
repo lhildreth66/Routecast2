@@ -17,6 +17,14 @@ class DashboardTests(unittest.TestCase):
             self.assertIn(b"Dashboard", body)
         self.assertIn(b"HildrethTechnology.com", dashboard.render_portfolio())
 
+    def test_provider_reconciliation(self):
+        data = {"subscriptions_by_provider":{"apple":0,"google":3,"stripe":0,"admin":1},
+                "trialing_users":12,"active_subscriptions":5,"total_users":20,"verified_users":19,"timestamp":"test"}
+        self.assertEqual(dashboard.counts(data)["Provider not identified"], 1)
+        self.assertIn(b"Provider not identified", dashboard.render(data))
+        data["active_subscriptions"] = 4
+        self.assertEqual(dashboard.counts(data)["Provider not identified"], 0)
+
     def test_website_report(self):
         data = {"totals":{"totalUsers":"7","bounceRate":"0.25"}, "groups":{"Visitor Sources":[("search", 5)]}, "fetched":"test only"}
         page = dashboard.render_portfolio("patriot-news-us", data, "7")
