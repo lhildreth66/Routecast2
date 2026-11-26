@@ -25,6 +25,19 @@ class DashboardTests(unittest.TestCase):
         data["active_subscriptions"] = 4
         self.assertEqual(dashboard.counts(data)["Provider not identified"], 0)
 
+    def test_marketing_snapshot(self):
+        from marketing_view import render_marketing
+        example = {"currency":"USD","start":"2026-01-01","as_of":"2026-01-02","products":{"routecast":{"spend":10,"installs":5,"purchases":None,"gross_revenue":20,"coverage":"<unsafe>"}}}
+        with patch.dict("os.environ", {"DASHBOARD_MARKETING_SNAPSHOT":json.dumps(example)}):
+            page = render_marketing("routecast")
+            self.assertIn("$2.00",page)
+            self.assertIn("$20.00",page)
+            self.assertIn("saved report, not live",page)
+            self.assertIn("&lt;unsafe&gt;",page)
+            self.assertIn("Advertising",dashboard.render().decode())
+        with patch.dict("os.environ", {"DASHBOARD_MARKETING_SNAPSHOT":"invalid"}):
+            self.assertIn("snapshot unavailable",render_marketing("routecast"))
+
     def test_website_report(self):
         data = {"totals":{"totalUsers":"7","bounceRate":"0.25"}, "groups":{"Visitor Sources":[("search", 5)]}, "fetched":"test only"}
         page = dashboard.render_portfolio("patriot-news-us", data, "7")
