@@ -25,6 +25,27 @@ class DashboardTests(unittest.TestCase):
         data["active_subscriptions"] = 4
         self.assertEqual(dashboard.counts(data)["Provider not identified"], 0)
 
+    def test_revenuecat_overview(self):
+        from io import BytesIO
+        import revenuecat_view as rc
+        data = {"currency":"USD","metrics":[{"id":"active_subscriptions","value":3,"period":"P0D"},{"id":"revenue","value":12.5,"period":"P28D"},{"id":"ignored","value":999}]}
+        rc.CACHE.clear()
+        try:
+            with patch.dict("os.environ", {"RC_EMERGENT_PROJECT_ID":"projtest","RC_EMERGENT_API_KEY":"sk_test_only"}):
+                with patch.object(rc, "urlopen", return_value=BytesIO(json.dumps(data).encode())) as fetch:
+                    page = dashboard.render_portfolio("emergent-vpn")
+                    self.assertIn(b"Active paid subscriptions",page)
+                    self.assertIn(b"$12.50",page)
+                    self.assertIn(b"Last 28 days",page)
+                    self.assertNotIn(b"sk_test_only",page)
+                    self.assertNotIn(b"999",page)
+                    self.assertEqual(fetch.call_args.args[0].get_method(),"GET")
+                    self.assertIn("/v2/projects/projtest/metrics/overview",fetch.call_args.args[0].full_url)
+                    rc.render_revenuecat("emergent-vpn")
+                    self.assertEqual(fetch.call_count,1)
+        finally:
+            rc.CACHE.clear()
+
     def test_marketing_snapshot(self):
         from marketing_view import render_marketing
         example = {"currency":"USD","start":"2026-01-01","as_of":"2026-01-02","products":{"routecast":{"spend":10,"installs":5,"purchases":None,"gross_revenue":20,"coverage":"<unsafe>"}}}
