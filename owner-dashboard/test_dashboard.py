@@ -57,6 +57,27 @@ class DashboardTests(unittest.TestCase):
         with patch.object(rc, "fetch_overview", side_effect=ValueError("secret-example")):
             self.assertNotIn("secret-example", rc.render_revenuecat("emergent-vpn"))
 
+    def test_play_earnings_aggregation(self):
+        from io import BytesIO
+        import zipfile
+        from decimal import Decimal
+        from play_earnings import parse_earnings
+        output = BytesIO()
+        content = ("Package ID,Transaction Type,Merchant Currency,Amount (Merchant Currency)\n"
+                   "com.routecast.app,Charge,USD,10\n"
+                   "com.routecast.app,Charge refund,USD,-2\n"
+                   "com.routecast.app,Google fee,USD,-1.2\n"
+                   "com.emergentvpn,Charge,USD,5\n"
+                   "other.app,Charge,USD,99\n")
+        with zipfile.ZipFile(output,"w") as z:
+            z.writestr("earnings.csv",content)
+        data = parse_earnings(output.getvalue())
+        self.assertEqual(data["com.routecast.app"]["USD"]["sales"],Decimal("8"))
+        self.assertEqual(data["com.routecast.app"]["USD"]["fees"],Decimal("-1.2"))
+        self.assertEqual(data["com.routecast.app"]["USD"]["total"],Decimal("6.8"))
+        self.assertNotIn("other.app",data)
+        self.assertEqual(data["com.emergentvpn"]["USD"]["total"],Decimal("5"))
+
     def test_marketing_snapshot(self):
         from marketing_view import render_marketing
         example = {"currency":"USD","start":"2026-01-01","as_of":"2026-01-02","products":{"routecast":{"spend":10,"installs":5,"purchases":None,"gross_revenue":20,"coverage":"<unsafe>"}}}
