@@ -1,0 +1,19 @@
+name: Owner dashboard tests
+on:
+  push:
+    branches: [routecast-owner-dashboard-v1]
+    paths:
+      - 'owner-dashboard/**'
+      - '.github/workflows/owner-dashboard-tests.yml'
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m compileall -q owner-dashboard
+      - run: python -m unittest discover -s owner-dashboard -p 'test_*.py' -v
