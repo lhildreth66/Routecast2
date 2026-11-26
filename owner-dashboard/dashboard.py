@@ -13,6 +13,7 @@ from urllib.parse import urlsplit, parse_qs
 from ga4_reports import report as ga4_report, PERIODS
 from web_view import render_web
 from marketing_view import render_marketing
+from revenuecat_view import render_revenuecat
 from pwa import ASSETS, HEAD
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.request import Request, urlopen
@@ -176,7 +177,7 @@ def render_portfolio(selected="portfolio", web_data=None, period="30", web_error
     if selected != "portfolio" and PRODUCT_TYPES[selected] == "Website":
         body = render_web(selected, web_data, period, web_error) + body
     elif selected != "portfolio":
-        body = render_marketing(selected) + body
+        body = render_revenuecat(selected) + render_marketing(selected) + body
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{html.escape(title)} | Hildreth Technologies</title>{HEAD}<style>{css}</style></head><body><div class="layout"><aside><div class="brand" style="font-size:20px">Hildreth<br><span>Technologies</span></div><nav>{navigation(selected)}</nav></aside><main><header><div><h1>{html.escape(title)}</h1><p>{html.escape(subtitle)}</p></div></header>{body}<footer>Website product status is not confirmation of a live store listing. All customer metrics require authenticated source data. No sample figures appear in the owner console.</footer></main></div></body></html>""".encode("utf-8")
 
 def handler(key, password):
