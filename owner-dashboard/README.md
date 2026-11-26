@@ -78,3 +78,9 @@ This supersedes the earlier blanket plan to avoid Google Analytics as a data sou
 - Official docs: https://developers.google.com/analytics/devguides/reporting/data/v1/quickstart and https://developers.google.com/analytics/devguides/reporting/data/v1/api-schema .
 
 Status: requirements recorded only; GA4 connector, credentials, property verification, actual reports, tests and live deployment are not yet complete.
+
+## November 26: launch preparation
+
+The website tabs now include a server-side GA4 report adapter and PWA assets. Install dependencies with `python -m pip install -r owner-dashboard/requirements.txt`, then run `python -m unittest discover -s owner-dashboard -p 'test_*.py' -v`. The GA4 properties use the numeric IDs in GA4_HILDRETH_PROPERTY_ID, GA4_PATRIOT_PROPERTY_ID, GA4_TIKHOOKS_PROPERTY_ID and GA4_MEDPOLICYREF_PROPERTY_ID. Set Google application credentials using a server-side secret file and GOOGLE_APPLICATION_CREDENTIALS; give its service account Viewer permission for each selected GA4 property and enable the GA4 Data API. Never commit keys or passwords. Verify property-to-domain mapping before connecting.
+
+For an isolated Render web service, use branch routecast-owner-dashboard-v1, root directory owner-dashboard, build command `pip install -r requirements.txt`, start command `python dashboard.py`, and environment DASHBOARD_HOSTED=1, a randomly generated DASHBOARD_PASSWORD of at least 24 characters, and optional ADMIN_API_KEY (RouteCast backend only). Use HTTPS and validate login, access controls and actual counts before opening the dashboard to routine use. Confirm hosting plan/cost before creating the service. Do not change the existing RouteCast service. The public assets are only icons, manifest and a non-caching worker; business pages require authentication. Browser installation is subject to Chrome/Edge support and verified HTTPS. No public deployment or production data connection has been performed.
