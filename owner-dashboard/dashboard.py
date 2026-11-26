@@ -155,15 +155,24 @@ def render_portfolio(selected="portfolio", web_data=None, period="30", web_error
         name, status, category = APPS[selected]
         title = name + " Owner Dashboard"
         subtitle = PRODUCT_TYPES[selected] + " · " + status + " · " + category
+        metrics = product_metrics(selected)
+        panel_items = product_panels(selected)
+        if PRODUCT_TYPES[selected] == "Website" and web_data is not None:
+            # Live GA4 report above owns these metrics; do not render duplicate placeholders.
+            metrics = [m for m in metrics if m not in ("Visitors this month", "Sessions this month", "Page views", "Bounce rate")]
+            panel_items = [(label, detail) for label, detail in panel_items if label not in ("Visitor Sources", "Visitor Geography", "Most Visited Pages", "Recent Trends")]
+            panel_items = [("Detailed engagement", "Landing-page engagement and browser breakdown are not connected.") if label == "Engagement & Bounce" else (label, detail) for label, detail in panel_items]
         cards = "".join(
             f'<section class="tile"><small>{html.escape(label)}</small><strong>—</strong><span>Not connected</span></section>'
-            for label in product_metrics(selected)
+            for label in metrics
         )
         panels = "".join(
             f'<section class="panel"><h2>{html.escape(label)}</h2><div class="pending">{html.escape(detail)}</div></section>'
-            for label, detail in product_panels(selected)
+            for label, detail in panel_items
         )
         body = '<div class="kpis">' + cards + '</div><div class="columns">' + panels + '</div>'
+        if PRODUCT_TYPES[selected] == "Website" and web_data is not None:
+            body = '<h2>Additional metrics — connection pending</h2>' + body
     if selected != "portfolio" and PRODUCT_TYPES[selected] == "Website":
         body = render_web(selected, web_data, period, web_error) + body
     elif selected != "portfolio":
