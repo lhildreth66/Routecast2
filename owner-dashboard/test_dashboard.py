@@ -46,6 +46,17 @@ class DashboardTests(unittest.TestCase):
         finally:
             rc.CACHE.clear()
 
+    def test_revenuecat_error_diagnostics(self):
+        from urllib.error import HTTPError
+        import revenuecat_view as rc
+        with patch.object(rc, "fetch_overview", side_effect=HTTPError("https://example.invalid",403,"private response",None,None)):
+            result = rc.render_revenuecat("emergent-vpn")
+            self.assertIn("HTTP 403", result)
+            self.assertIn("Overview metrics read", result)
+            self.assertNotIn("private response", result)
+        with patch.object(rc, "fetch_overview", side_effect=ValueError("secret-example")):
+            self.assertNotIn("secret-example", rc.render_revenuecat("emergent-vpn"))
+
     def test_marketing_snapshot(self):
         from marketing_view import render_marketing
         example = {"currency":"USD","start":"2026-01-01","as_of":"2026-01-02","products":{"routecast":{"spend":10,"installs":5,"purchases":None,"gross_revenue":20,"coverage":"<unsafe>"}}}
