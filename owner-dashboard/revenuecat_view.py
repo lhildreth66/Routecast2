@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from threading import Lock
 from time import monotonic
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
 
 CACHE = {}
 LOCK = Lock()
@@ -29,8 +30,10 @@ def fetch_overview(product):
     key = os.getenv("RC_" + prefix + "_API_KEY", "").strip()
     if not project or not key:
         return None
-    if not re.fullmatch(r"proj[a-zA-Z0-9_-]{1,100}", project) or not key.startswith("sk_"):
-        raise ValueError("Invalid RevenueCat configuration")
+    if not re.fullmatch(r"proj[a-zA-Z0-9_-]{1,100}", project):
+        raise ValueError("Invalid project ID format")
+    if not key.startswith("sk_"):
+        raise ValueError("Invalid secret API key format")
     with LOCK:
         cached = CACHE.get(product)
         if cached and cached[0] == project and monotonic() - cached[1] < 300:
@@ -59,8 +62,19 @@ def render_revenuecat(product):
     title = '<h2>RevenueCat · subscription overview</h2>'
     try:
         data = fetch_overview(product)
+    except HTTPError as exc:
+        hints = {400: "Request rejected; check project configuration.", 401: "Authentication rejected. Verify the V2 secret API key.", 403: "Access denied. Verify Charts metrics → Overview metrics read permission and that the key belongs to this project.", 404: "Project or endpoint not found. Verify the project ID in RevenueCat project settings.", 423: "RevenueCat reports this resource is locked.", 429: "Rate limit reached. Try again later."}
+        message = f"RevenueCat HTTP {exc.code}: " + hints.get(exc.code, "RevenueCat service unavailable.")
+        return '<section class="panel" style="margin-bottom:18px">'+title+'<div class="pending">'+html.escape(message)+'</div></section>'
+    except ValueError as exc:
+        # Only display locally defined, allowlisted error messages; never raw exceptions.
+        known = ("Invalid project ID format", "Invalid secret API key format", "Invalid RevenueCat response")
+        message = str(exc) if str(exc) in known else "Unexpected report format."
+        return '<section class="panel" style="margin-bottom:18px">'+title+'<div class="pending">'+html.escape(message)+'</div></section>'
+    except (URLError, TimeoutError):
+        return '<section class="panel" style="margin-bottom:18px">'+title+'<div class="pending">RevenueCat network error or timeout.</div></section>'
     except Exception:
-        return '<section class="panel" style="margin-bottom:18px">'+title+'<div class="pending">Report unavailable. Verify the project ID and read-only API permissions.</div></section>'
+        return '<section class="panel" style="margin-bottom:18px">'+title+'<div class="pending">Unexpected reporting error.</div></section>'
     if data is None:
         return '<section class="panel" style="margin-bottom:18px">'+title+'<div class="pending">RevenueCat not connected. Configure server settings.</div></section>'
     cards = []
