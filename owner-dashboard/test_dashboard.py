@@ -39,7 +39,7 @@ class DashboardTests(unittest.TestCase):
                     self.assertIn(b"$12.50",page)
                     self.assertIn(b"Last 28 days",page)
                     self.assertNotIn(b"sk_test_only",page)
-                    self.assertNotIn(b"999",page)
+                    self.assertNotIn(b"<strong>999</strong>",page)  # Do not match unrelated timestamp digits.
                     self.assertEqual(fetch.call_args.args[0].get_method(),"GET")
                     self.assertIn("/v2/projects/projtest/metrics/overview",fetch.call_args.args[0].full_url)
                     rc.render_revenuecat("emergent-vpn")
