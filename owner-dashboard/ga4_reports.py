@@ -70,6 +70,12 @@ def report(product, period="30"):
     except Exception:
         acquisition = {}
     result = {"totals": totals, "groups": groups, "acquisition": acquisition, "fetched": datetime.now(timezone.utc).isoformat(), "period": period}
+    if product == "tikhooks2":
+        from tikhooks_view import collect_journey
+        try:
+            result["tikhooks_journey"] = collect_journey(client, prop, start)
+        except Exception:
+            result["tikhooks_journey"] = None
     with LOCK:
         CACHE[cache_key] = (monotonic(), result)
     return result

@@ -17,6 +17,7 @@ from revenuecat_view import render_revenuecat
 from play_earnings import render_play
 from endoscopy_view import render_endoscopy
 from pwa import ASSETS, HEAD
+from tikhooks_view import render_tikhooks
 from portfolio_view import render_overview, CSS as PORTFOLIO_CSS, remember_route, clear_route
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.request import Request, urlopen
@@ -178,7 +179,10 @@ def render_portfolio(selected="portfolio", web_data=None, period="30", web_error
         if PRODUCT_TYPES[selected] == "Website" and web_data is not None:
             body = '<h2>Additional metrics — connection pending</h2>' + body
     if selected != "portfolio" and PRODUCT_TYPES[selected] == "Website":
-        body = render_web(selected, web_data, period, web_error) + body
+        if selected == "tikhooks2":
+            body = render_tikhooks(web_data) + render_web(selected, web_data, period, web_error)
+        else:
+            body = render_web(selected, web_data, period, web_error) + body
     elif selected != "portfolio":
         body = render_endoscopy(selected) + render_revenuecat(selected) + render_play(selected) + render_marketing(selected) + body
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{html.escape(title)} | Hildreth Technologies</title>{HEAD}<style>{css}</style></head><body><div class="layout"><aside><div class="brand" style="font-size:20px">Hildreth<br><span>Technologies</span></div><nav>{navigation(selected)}</nav></aside><main><header><div><h1>{html.escape(title)}</h1><p>{html.escape(subtitle)}</p></div></header>{body}<footer>Website product status is not confirmation of a live store listing. All customer metrics require authenticated source data. No sample figures appear in the owner console.</footer></main></div></body></html>""".encode("utf-8")
