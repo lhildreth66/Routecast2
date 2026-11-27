@@ -4,6 +4,7 @@ import json
 import math
 import os
 from datetime import date
+from google_ads_view import render_ads
 
 PRODUCTS = {"routecast", "emergent-vpn", "endoscopy-nurse-pro", "simple-background-remover"}
 
@@ -32,7 +33,7 @@ def money(v):
 def number(v):
     return "—" if v is None else f"{v:,.2f}".rstrip("0").rstrip(".")
 
-def render_marketing(product):
+def render_saved_marketing(product):
     if product not in PRODUCTS:
         return ""
     title = '<h2>Advertising &amp; revenue</h2>'
@@ -66,3 +67,7 @@ def render_marketing(product):
     cards = "".join(f'<section class="tile"><small>{label}</small><strong>{v}</strong></section>' for label,v in tiles)
     coverage = html.escape(str(record.get("coverage", "Attribution coverage unverified.")))
     return f'<section class="panel" style="margin:18px 0">{title}<p>Google Ads and Google Play · saved report, not live · {data["start"]} to {data["as_of"]} · USD</p><div class="kpis">{cards}</div><p>{coverage}</p><p>Install counts use Google Ads All conversions and may differ from the primary Conversions column. Purchase events are not unique paying customers. Total store revenue is not ad-attributed revenue. Organic purchases and unique customer acquisition cost are unavailable without reliable attribution. Blank means unknown, not zero. Gross revenue precedes applicable fees and adjustments.</p></section>'
+
+
+def render_marketing(product):
+    return render_ads(product) + render_saved_marketing(product)
