@@ -8,7 +8,7 @@ import dashboard
 class TikHooksTests(unittest.TestCase):
     def data(self):
         data={k:0 for k in t.FIELDS}
-        data.update(version=1,product="tikhooks2",fetched_at=datetime.now(timezone.utc).isoformat(),total_accounts=4,owner_entitlements=1,nonowner_accounts=3)
+        data.update(version=1,product="tikhooks2",fetched_at=datetime.now(timezone.utc).isoformat(),total_accounts=4,owner_entitlements=1,internal_accounts=1,nonowner_accounts=3)
         return data
     def test_validate(self):
         self.assertEqual(t.validate(self.data())["nonowner_accounts"],3)
@@ -19,7 +19,7 @@ class TikHooksTests(unittest.TestCase):
     def test_zeros_and_no_ads(self):
         with patch.object(t,"report",return_value=(t.validate(self.data()),"")):
             page=dashboard.render_portfolio("tikhooks2").decode()
-        self.assertIn("Non-owner accounts",page)
+        self.assertIn("External registered accounts",page)
         self.assertIn("Live payment events",page)
         self.assertIn("Verified paying customer totals",page)
         self.assertNotIn("Advertising performance",page)

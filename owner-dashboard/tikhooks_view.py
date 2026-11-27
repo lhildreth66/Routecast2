@@ -10,7 +10,7 @@ from urllib.request import Request, build_opener, HTTPRedirectHandler
 
 URL = "https://cnktoiaibxkvujxvdhbt.supabase.co/functions/v1/tikhooks-owner-report"
 TOKEN_NAME = "TIKHOOKS_OWNER_REPORT_TOKEN"
-FIELDS = ("total_accounts","owner_entitlements","nonowner_accounts","new_nonowner_accounts_30d",
+FIELDS = ("total_accounts","owner_entitlements","internal_accounts","nonowner_accounts","new_nonowner_accounts_30d",
           "nonowner_subscription_records","active_nonowner_subscription_records","live_payment_events",
           "live_payment_events_30d","sandbox_webhook_events")
 CACHE = None
@@ -29,7 +29,7 @@ def validate(data):
     stamp=datetime.fromisoformat(data["fetched_at"].replace("Z","+00:00"))
     if stamp.tzinfo is None or not -60 <= (datetime.now(timezone.utc)-stamp).total_seconds() <= 900:
         raise ValueError("Stale report")
-    if (data["nonowner_accounts"]>data["total_accounts"] or data["new_nonowner_accounts_30d"]>data["nonowner_accounts"]
+    if (data["internal_accounts"]+data["nonowner_accounts"]!=data["total_accounts"] or data["new_nonowner_accounts_30d"]>data["nonowner_accounts"]
             or data["active_nonowner_subscription_records"]>data["nonowner_subscription_records"]
             or data["live_payment_events_30d"]>data["live_payment_events"]):
         raise ValueError("Inconsistent counts")
@@ -103,12 +103,12 @@ def render_tikhooks(web_data):
         body+='<p>Supabase snapshot · '+html.escape(data["fetched_at"])+'</p><div class="kpis">'+''.join(
             tile(label,data[key],detail) for label,key,detail in (
                 ("Registered accounts","total_accounts","All profile records"),
-                ("Non-owner accounts","nonowner_accounts","May include test accounts"),
-                ("New non-owner accounts","new_nonowner_accounts_30d","Rolling 30 days"),
+                ("External registered accounts","nonowner_accounts","Excludes confirmed internal accounts"),
+                ("New external accounts","new_nonowner_accounts_30d","Rolling 30 days"),
                 ("Active subscription records","active_nonowner_subscription_records","Not verified paid customers"),
-                ("Live payment events","live_payment_events","Recorded non-owner events · all time"),
+                ("Live payment events","live_payment_events","Recorded external-account events · all time"),
                 ("Live payment events","live_payment_events_30d","Recorded events · rolling 30 days"),
-            ))+'</div><p>Owner entitlements: '+str(data["owner_entitlements"])+' · Sandbox webhook events: '+str(data["sandbox_webhook_events"])+' · Non-owner subscription records: '+str(data["nonowner_subscription_records"])+'.</p>'
+            ))+'</div><p>Internal accounts: '+str(data["internal_accounts"])+' · Owner entitlements: '+str(data["owner_entitlements"])+' · Sandbox webhook events: '+str(data["sandbox_webhook_events"])+' · External subscription records: '+str(data["nonowner_subscription_records"])+'.</p>'
     body+='<p>Verified paying customer totals and actual revenue require PayPal reconciliation. A recorded webhook event is not necessarily a unique payment. No advertising data is included.</p></section>'
     body+='<section class="panel" style="margin:18px 0"><h2>Customer journey · signup to checkout</h2>'
     rows=(web_data or {}).get("tikhooks_journey")
