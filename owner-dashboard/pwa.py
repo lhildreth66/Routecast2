@@ -2,6 +2,7 @@
 import json
 import struct
 import zlib
+from acquisition_view import UTM_JS
 
 def icon(size):
     # Blue geometric H mark with a teal accent, rendered as PNG without dependencies.
@@ -23,6 +24,7 @@ def icon(size):
 
 MANIFEST = json.dumps({"name":"Hildreth Technologies Dashboard","short_name":"Hildreth Admin","id":"/","start_url":"/","scope":"/","display":"standalone","background_color":"#f3f6fb","theme_color":"#102b4e","icons":[{"src":"/icon-192.png","sizes":"192x192","type":"image/png"},{"src":"/icon-512.png","sizes":"512x512","type":"image/png"}]}).encode()
 ASSETS = {
+    "/utm-builder.js": ("application/javascript", UTM_JS),
     "/manifest.webmanifest": ("application/manifest+json", MANIFEST),
     "/icon-192.png": ("image/png", icon(192)),
     "/icon-512.png": ("image/png", icon(512)),

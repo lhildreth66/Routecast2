@@ -4,6 +4,7 @@ import re
 from datetime import datetime, timezone
 from threading import Lock
 from time import monotonic
+from acquisition_view import collect
 
 PROPERTIES = {
     "hildreth-technology": "GA4_HILDRETH_PROPERTY_ID",
@@ -64,7 +65,11 @@ def report(product, period="30"):
             groups[name] = [(row.dimension_values[0].value, int(row.metric_values[0].value)) for row in group] if group else []
         except Exception:
             groups[name] = None
-    result = {"totals": totals, "groups": groups, "fetched": datetime.now(timezone.utc).isoformat(), "period": period}
+    try:
+        acquisition = collect(client, prop, start)
+    except Exception:
+        acquisition = {}
+    result = {"totals": totals, "groups": groups, "acquisition": acquisition, "fetched": datetime.now(timezone.utc).isoformat(), "period": period}
     with LOCK:
         CACHE[cache_key] = (monotonic(), result)
     return result

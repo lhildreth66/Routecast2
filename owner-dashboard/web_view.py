@@ -2,8 +2,12 @@
 import html
 import math
 from datetime import datetime
+from acquisition_view import render_acquisition, render_link_generator
 
 def render_web(product, data, period, failed=False):
+    return render_traffic(product, data, period, failed) + (render_acquisition(data) if data is not None else '') + render_link_generator(product)
+
+def render_traffic(product, data, period, failed=False):
     base = "/apps/" + product
     buttons = []
     for k, label in [("today", "Today"), ("7", "7 days"), ("30", "30 days"), ("90", "90 days")]:
