@@ -1,0 +1,24 @@
+name: Isolated website acquisition validation
+on:
+  push:
+    branches: [dashboard-website-acquisition-validation]
+permissions:
+  contents: read
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r owner-dashboard/requirements.txt
+      - run: python -m compileall -q owner-dashboard
+      - run: python -m unittest discover -s owner-dashboard -p 'test_*.py' -v
+      - run: |
+          cd owner-dashboard
+          python -c 'from acquisition_view import UTM_JS; open("/tmp/utm-builder.js","wb").write(UTM_JS)'
+          node --check /tmp/utm-builder.js
