@@ -17,6 +17,7 @@ from revenuecat_view import render_revenuecat
 from play_earnings import render_play
 from endoscopy_view import render_endoscopy
 from pwa import ASSETS, HEAD
+from portfolio_view import render_overview, CSS as PORTFOLIO_CSS, remember_route, clear_route
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.request import Request, urlopen
 
@@ -146,14 +147,8 @@ def render_portfolio(selected="portfolio", web_data=None, period="30", web_error
     if selected == "portfolio":
         title = "Business portfolio"
         subtitle = "All products · private analytics and customer insights"
-        cards = "".join(
-            f'<section class="tile"><small>{html.escape(PRODUCT_TYPES[key])} · {html.escape(status)} · {html.escape(category)}</small>'
-            f'<h2 style="margin:12px 0">{html.escape(name)}</h2>'
-            f'<p>{"Subscriber API prepared; live verification pending." if key == "routecast" else "Data source not connected yet."}</p>'
-            f'<a class="refresh" style="display:inline-block" href="/apps/{key}">Open dashboard</a></section>'
-            for key, (name, status, category) in APPS.items()
-        )
-        body = '<section class="panel" style="margin-bottom:18px"><h2>Portfolio totals</h2><div class="pending">Combined subscriber, revenue and usage totals are unavailable until all applicable sources are connected and verified. No estimated counts are shown.</div></section><div class="kpis">' + cards + '</div>'
+        body = render_overview(APPS, PRODUCT_TYPES)
+        css += PORTFOLIO_CSS
     else:
         name, status, category = APPS[selected]
         title = name + " Owner Dashboard"
@@ -231,8 +226,15 @@ def handler(key, password):
                         failed = True
                 return self.reply(200, render_portfolio(selected, data, period, failed))
             try:
-                body = render(fetch_stats(key)) if key else render()
+                if key:
+                    data = fetch_stats(key)
+                    body = render(data)
+                    remember_route(data)
+                else:
+                    clear_route()
+                    body = render()
             except Exception:
+                clear_route()
                 return self.reply(502, render())
             self.reply(200, body)
     return Handler

@@ -2,6 +2,7 @@
 import html
 import math
 from datetime import datetime
+from traffic_trend import render_trend
 from acquisition_view import render_acquisition, render_link_generator
 
 def render_web(product, data, period, failed=False):
@@ -33,6 +34,8 @@ def render_traffic(product, data, period, failed=False):
     cards = "".join(f'<section class="tile"><small>{label}</small><strong>{fmt(key)}</strong></section>' for label, key in [("Visitors","totalUsers"),("New visitors","newUsers"),("Sessions","sessions"),("Page views","screenPageViews"),("Average session","averageSessionDuration"),("Bounce rate","bounceRate")])
     panels = []
     for label, rows in data["groups"].items():
+        if label == "Recent Trends":
+            continue
         rows = rows or []
         if label == "Most Visited Pages":
             rows = [(k,v) for k,v in rows if k.startswith("/") and "?" not in k and "@" not in k and not any(ch.isdigit() for ch in k)]
@@ -53,4 +56,4 @@ def render_traffic(product, data, period, failed=False):
             body = "<p>Latest 30 reported dates in the selected period.</p>" + body
         panels.append(f'<section class="panel"><h2>{html.escape(label)}</h2>{body}</section>')
     stamp = html.escape(data["fetched"])
-    return f'<section class="panel" style="margin-bottom:18px"><h2>Google Analytics · website traffic</h2>{filters}<p>Read-only GA4 · today may be incomplete · fetched {stamp}</p></section><div class="kpis">{cards}</div><div class="columns">{"".join(panels)}</div><p>Visitors are GA4 total users, not guaranteed unique people. Sources, country, device and trend panels count sessions; pages count views. Bars scale to the largest row. GA4 may omit or threshold data.</p>'
+    return f'<section class="panel" style="margin-bottom:18px"><h2>Google Analytics · website traffic</h2>{filters}<p>Read-only GA4 · today may be incomplete · fetched {stamp}</p></section><div class="kpis">{cards}</div>{render_trend(data["groups"].get("Recent Trends"))}<div class="columns" style="margin-top:16px">{"".join(panels)}</div><p>Visitors are GA4 total users, not guaranteed unique people. Sources, country, device and trend panels count sessions; pages count views. Bars scale to the largest row. GA4 may omit or threshold data.</p>'
