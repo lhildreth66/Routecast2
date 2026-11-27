@@ -84,3 +84,59 @@ Status: requirements recorded only; GA4 connector, credentials, property verific
 The website tabs now include a server-side GA4 report adapter and PWA assets. Install dependencies with `python -m pip install -r owner-dashboard/requirements.txt`, then run `python -m unittest discover -s owner-dashboard -p 'test_*.py' -v`. The GA4 properties use the numeric IDs in GA4_HILDRETH_PROPERTY_ID, GA4_PATRIOT_PROPERTY_ID, GA4_TIKHOOKS_PROPERTY_ID and GA4_MEDPOLICYREF_PROPERTY_ID. Set Google application credentials using a server-side secret file and GOOGLE_APPLICATION_CREDENTIALS; give its service account Viewer permission for each selected GA4 property and enable the GA4 Data API. Never commit keys or passwords. Verify property-to-domain mapping before connecting.
 
 For an isolated Render web service, use branch routecast-owner-dashboard-v1, root directory owner-dashboard, build command `pip install -r requirements.txt`, start command `python dashboard.py`, and environment DASHBOARD_HOSTED=1, a randomly generated DASHBOARD_PASSWORD of at least 24 characters, and optional ADMIN_API_KEY (RouteCast backend only). Use HTTPS and validate login, access controls and actual counts before opening the dashboard to routine use. Confirm hosting plan/cost before creating the service. Do not change the existing RouteCast service. The public assets are only icons, manifest and a non-caching worker; business pages require authentication. Browser installation is subject to Chrome/Edge support and verified HTTPS. No public deployment or production data connection has been performed.
+
+## Endoscopy Nurse Pro backend reporting (read-only)
+
+The Endoscopy Nurse Pro tab shows aggregate counts from the product's own backend endpoint `GET /api/owner/reporting` (implemented and validated in the gi-nurse-trainer repository). The dashboard calls it server-side only, with the dedicated key, using a fixed HTTPS URL (`URL` in `endoscopy_view.py`). Nothing is written, and no customer-identifying data is requested or shown.
+
+### Configuration
+
+| Variable | Where | Rules |
+| --- | --- | --- |
+| `ENDOSCOPY_REPORTING_KEY` | Dashboard service **and** the Endoscopy backend | Same value on both. At least 32 printable ASCII characters with no spaces; leading/trailing whitespace is trimmed before validation. Generate with `python -c "import secrets;print(secrets.token_urlsafe(48))"`. |
+
+If the variable is missing the tab shows "Backend reporting not connected" and makes no request. If it is present but malformed the tab shows "unavailable" and makes no request.
+
+### Security requirements
+
+- The key is read only on the server, sent only in the `X-Reporting-Key` request header, and never rendered into HTML, headers, URLs, logs or browser JavaScript. Error text from the backend is never displayed.
+- Use a dedicated key for this one purpose. Never reuse `ADMIN_API_KEY`, `DASHBOARD_PASSWORD` or any other secret. Never commit it, paste it into chat or an issue, or put it in a URL.
+- Redirects are rejected, so the key can never be forwarded to another host. Responses are limited to 32 KB and strictly validated (schema 1, 17 non-negative integer counts, timezone-aware timestamp, at most 10 modules); anything else is treated as unavailable.
+- The page is only reachable after dashboard authentication. Module titles are HTML-escaped.
+- Rotate the key by setting the new value on the backend and the dashboard service together; between the two changes the tab shows "unavailable".
+
+### What the numbers mean
+
+- **Registered users**: every account created in the app.
+- **Active subscription records**: backend records with active status and a future expiry (Apple, Android, monthly, annual, and active records without an expiry date shown separately). They are not verified against Apple, Google or RevenueCat.
+- **Verified paying subscribers**: not connected. No figure is estimated.
+- Weekly registrations are four consecutive 7-day periods ending at the snapshot time. Lesson, video, quiz and simulation figures count records, not unique customers. Popular modules are ranked by completed lesson records (equal counts share a rank).
+
+### Cache behavior and data age
+
+| Layer | Behavior |
+| --- | --- |
+| Backend | One shared snapshot for 60 seconds. |
+| Dashboard, success | Cached 5 minutes (per dashboard process). |
+| Dashboard, failure | Cached 60 seconds: during that time no new request is made and the tab shows "unavailable". |
+| Concurrency | Simultaneous page loads wait for a single attempt and share its result. |
+| Request timeout | 16 seconds. |
+
+Because the backend cache (up to 60 seconds) and the dashboard cache (up to 5 minutes) stack, **displayed data can be approximately 6 minutes old**. The tab always shows the last successful report timestamp. When reporting is unavailable it shows no counts and never substitutes zeros; it reports the last successful timestamp seen by this dashboard process, or states that none has occurred since it started. Cached state is in memory and is lost on restart. Only the Endoscopy tab calls this endpoint, so an outage cannot affect other product tabs.
+
+### Deployment requirements
+
+1. Deploy the Endoscopy backend reporting endpoint first and confirm it separately; until then the tab shows "unavailable".
+2. Set the same `ENDOSCOPY_REPORTING_KEY` on the Endoscopy backend and on the dashboard service (Render dashboard secrets, never the repository).
+3. Merge into `routecast-owner-dashboard-v1` (the isolated dashboard service branch), not `main`, and deploy only with the owner's explicit approval.
+4. Check the tab after deployment: timestamp present, counts plausible against the backend, no key visible in the page source.
+
+### Rollback
+
+- Fastest: remove or blank `ENDOSCOPY_REPORTING_KEY` on the dashboard service and restart it; the tab shows "not connected" and makes no requests.
+- Code: revert the Endoscopy commits on the dashboard branch and redeploy. No data migration or cleanup is needed because nothing is written.
+- Backend side: blank the key on the Endoscopy backend; the endpoint then rejects every request.
+
+### Tests
+
+`python -m unittest discover -s owner-dashboard -p 'test_*.py' -v`. Every test module imports `isolation.py` first, which removes credential variables (`ENDOSCOPY_*`, `ADMIN_API*`, `DASHBOARD_*`, `PLAY_*`, `GA4_*`, `RC_*`, `GOOGLE_*`, `GCLOUD*`, `CLOUDSDK_*`) from the environment and blocks every non-loopback connection and DNS lookup. External services must be mocked, or served from a loopback test server.

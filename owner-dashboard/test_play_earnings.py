@@ -1,4 +1,5 @@
 """Offline list-and-download workflow tests. All names, rows and errors are synthetic."""
+import isolation  # noqa: F401  (clears credentials, blocks external network; keep first)
 import io
 import sys
 import types

@@ -1,3 +1,4 @@
+import isolation  # noqa: F401  (clears credentials, blocks external network; keep first)
 import base64
 import json
 import threading
