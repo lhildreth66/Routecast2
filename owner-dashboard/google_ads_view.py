@@ -128,10 +128,6 @@ def fetch(customer):
 
 
 def report(customer):
-    with LOCK:
-        entry = CACHE.get(customer)
-        if entry and monotonic() - entry[0] < (300 if entry[1] else 60):
-            return entry[1], entry[2]
     # Avoid queueing multiple page requests behind a slow network call.
     if not LOCK.acquire(blocking=False):
         return None, "Refresh in progress; try again shortly."
