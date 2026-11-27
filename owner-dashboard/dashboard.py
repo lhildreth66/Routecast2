@@ -15,6 +15,7 @@ from web_view import render_web
 from marketing_view import render_marketing
 from revenuecat_view import render_revenuecat
 from play_earnings import render_play
+from endoscopy_view import render_endoscopy
 from pwa import ASSETS, HEAD
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.request import Request, urlopen
@@ -159,6 +160,12 @@ def render_portfolio(selected="portfolio", web_data=None, period="30", web_error
         subtitle = PRODUCT_TYPES[selected] + " · " + status + " · " + category
         metrics = product_metrics(selected)
         panel_items = product_panels(selected)
+        if selected == "endoscopy-nurse-pro":
+            metrics = [m for m in metrics if m not in ("Apple subscribers", "Google Play subscribers", "Active accounts")]
+            panel_items = [(label, detail) for label, detail in panel_items
+                           if label not in ("Subscriber Sources", "Most Used Features")]
+            panel_items = [(label, "Historical subscriptions and cancellation reporting not connected.")
+                           if label == "Recent Trends" else (label, detail) for label, detail in panel_items]
         if PRODUCT_TYPES[selected] == "Website" and web_data is not None:
             # Live GA4 report above owns these metrics; do not render duplicate placeholders.
             metrics = [m for m in metrics if m not in ("Visitors this month", "Sessions this month", "Page views", "Bounce rate")]
@@ -178,7 +185,7 @@ def render_portfolio(selected="portfolio", web_data=None, period="30", web_error
     if selected != "portfolio" and PRODUCT_TYPES[selected] == "Website":
         body = render_web(selected, web_data, period, web_error) + body
     elif selected != "portfolio":
-        body = render_revenuecat(selected) + render_play(selected) + render_marketing(selected) + body
+        body = render_endoscopy(selected) + render_revenuecat(selected) + render_play(selected) + render_marketing(selected) + body
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{html.escape(title)} | Hildreth Technologies</title>{HEAD}<style>{css}</style></head><body><div class="layout"><aside><div class="brand" style="font-size:20px">Hildreth<br><span>Technologies</span></div><nav>{navigation(selected)}</nav></aside><main><header><div><h1>{html.escape(title)}</h1><p>{html.escape(subtitle)}</p></div></header>{body}<footer>Website product status is not confirmation of a live store listing. All customer metrics require authenticated source data. No sample figures appear in the owner console.</footer></main></div></body></html>""".encode("utf-8")
 
 def handler(key, password):
