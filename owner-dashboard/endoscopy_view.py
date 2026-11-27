@@ -1,17 +1,14 @@
 """Read-only aggregate Endoscopy Nurse Pro dashboard."""
 import html
-import json
 import os
-import re
 from datetime import datetime, timezone
 from threading import Lock
 from time import monotonic
-from urllib.request import Request, build_opener, HTTPRedirectHandler
+from endoscopy_data import read_snapshot
 
 PRODUCT = "endoscopy-nurse-pro"
-URL = "https://endoscopy-owner-reporting.onrender.com/api/owner/reporting"  # Confirm assigned hostname before deployment.
-KEY_NAME = "ENDOSCOPY_REPORTING_KEY"
-KEY_FORMAT = re.compile(r"[\x21-\x7e]{32,}")
+URI_NAME = "ENDOSCOPY_MONGO_URL"
+DB_NAME = "ENDOSCOPY_DB_NAME"
 SUCCESS_SECONDS = 300
 FAILURE_SECONDS = 60
 LABELS = {
@@ -37,11 +34,6 @@ def reset():
     global CACHE, FAILURE, LAST_SUCCESS
     with LOCK:
         CACHE = FAILURE = LAST_SUCCESS = None
-
-
-class NoRedirect(HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        return None
 
 
 def validate(data):
@@ -73,11 +65,12 @@ def validate(data):
 
 def fetch():
     global CACHE, FAILURE, LAST_SUCCESS
-    key = os.getenv(KEY_NAME, "").strip()
-    if not key:
+    uri = os.getenv(URI_NAME, "").strip()
+    database = os.getenv(DB_NAME, "").strip()
+    if not uri and not database:
         return None
-    if not KEY_FORMAT.fullmatch(key):
-        raise ValueError("Invalid key configuration")
+    if not uri or not database:
+        raise ValueError("Incomplete reporting configuration")
     # One lock: concurrent page loads wait for a single attempt, then share its outcome.
     with LOCK:
         now = monotonic()
@@ -86,12 +79,7 @@ def fetch():
         if FAILURE is not None and now - FAILURE < FAILURE_SECONDS:
             raise ReportingUnavailable("Recent attempt failed")
         try:
-            req = Request(URL, headers={"X-Reporting-Key": key, "Accept": "application/json"})
-            with build_opener(NoRedirect()).open(req, timeout=16) as response:
-                raw = response.read(32769)
-            if len(raw) > 32768:
-                raise ValueError("Response too large")
-            result = validate(json.loads(raw))
+            result = validate(read_snapshot(uri, database))
         except Exception:
             FAILURE = monotonic()
             raise
@@ -124,7 +112,7 @@ def stamp_text(stamp):
 def unavailable():
     last = f"Last successful report: {stamp_text(LAST_SUCCESS)}." if LAST_SUCCESS else "No successful report since this dashboard started."
     return ('<div class="pending">Backend reporting unavailable. No counts are shown and no zero values are assumed. '
-            'Verify the dedicated key and reporting endpoint; a new attempt is made at most once per minute. ' + last + '</div>')
+            'Verify the read-only reporting connection; a new attempt is made at most once per minute. ' + last + '</div>')
 
 
 def weekly_table(counts):
@@ -174,6 +162,6 @@ def render_endoscopy(product):
         if title == "Active subscription records":
             sections += ('<h3 class="endo-h">Verified paying subscribers</h3>'
                          '<div class="pending">Not connected. Requires verified App Store, Google Play or RevenueCat data; no figure is estimated here.</div>')
-    return panel(STYLE + f'<p>Last successful report: <strong>{stamp_text(stamp)}</strong> (UTC). Backend and dashboard caches combined can make this data up to about 6 minutes old.</p>'
+    return panel(STYLE + f'<p>Last successful report: <strong>{stamp_text(stamp)}</strong> (UTC). The dashboard caches these counts for up to 5 minutes.</p>'
                  + sections + weekly_table(counts) + modules_table(rows)
                  + '<p>Registered users, active subscription records and verified paying subscribers are different measures. Active records are not independently reconciled paid subscriptions or download-to-paid conversion. Store downloads, trial/payment status, cancellations and revenue require separate sources. Counts use separate read queries and may differ during concurrent updates.</p>')

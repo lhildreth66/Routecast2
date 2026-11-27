@@ -85,58 +85,13 @@ The website tabs now include a server-side GA4 report adapter and PWA assets. In
 
 For an isolated Render web service, use branch routecast-owner-dashboard-v1, root directory owner-dashboard, build command `pip install -r requirements.txt`, start command `python dashboard.py`, and environment DASHBOARD_HOSTED=1, a randomly generated DASHBOARD_PASSWORD of at least 24 characters, and optional ADMIN_API_KEY (RouteCast backend only). Use HTTPS and validate login, access controls and actual counts before opening the dashboard to routine use. Confirm hosting plan/cost before creating the service. Do not change the existing RouteCast service. The public assets are only icons, manifest and a non-caching worker; business pages require authentication. Browser installation is subject to Chrome/Edge support and verified HTTPS. No public deployment or production data connection has been performed.
 
+
 ## Endoscopy Nurse Pro backend reporting (read-only)
 
-The Endoscopy Nurse Pro tab shows aggregate counts from the separate Endoscopy reporting-only service endpoint `GET /api/owner/reporting` (gi-nurse-trainer, branch `endoscopy-reporting-service-dev`). The existing mobile app backend is not contacted. The dashboard calls it server-side only, with the dedicated key, using a fixed HTTPS URL (`URL` in `endoscopy_view.py`). The proposed hostname is `endoscopy-owner-reporting.onrender.com`; confirm actual ownership and the assigned hostname in Render before configuring the key or enabling this connection. If the assigned hostname differs, update the fixed URL and tests on the development branch first. Nothing is written, and no customer-identifying data is requested or shown.
+The existing private owner dashboard at /apps/endoscopy-nurse-pro retrieves only aggregate counts directly from MongoDB. No extra service, no changes to the Endoscopy backend or mobile app. No database writes or migrations. The other product pages do not use this connection.
 
-### Configuration
+Configure only the existing hildreth-dashboard Render service with ENDOSCOPY_MONGO_URL (the URI of a separate MongoDB user with solely the built-in read role on the application database) and ENDOSCOPY_DB_NAME (the verified database name). Do not reuse the application's write-enabled URI. Never paste credentials in chat, commit them or expose them to the browser. Restrict network access to the dashboard's necessary egress addresses. TLS is required. The adapter verifies the authenticated user's exact read role before each snapshot. If either variable is missing, no connection is attempted. Invalid, unauthorized or failed requests show unavailable without invented counts.
 
-| Variable | Where | Rules |
-| --- | --- | --- |
-| `ENDOSCOPY_REPORTING_KEY` | Dashboard service **and** the standalone Endoscopy reporting service | Same value on both. At least 32 printable ASCII characters with no spaces; leading/trailing whitespace is trimmed before validation. Generate with `python -c "import secrets;print(secrets.token_urlsafe(48))"`. |
+The 17 validated metrics, module counts and labels remain the same. Active subscription records are not independently verified paid subscriptions. Weekly windows are four consecutive seven-day periods, oldest first. Query load is bounded: a 12-second client deadline, sequential counts, small pool, five-minute success cache, one-minute failure cooldown. Real query load and Atlas compatibility need live verification with the dedicated read-only credential.
 
-If the variable is missing the tab shows "Backend reporting not connected" and makes no request. If it is present but malformed the tab shows "unavailable" and makes no request.
-
-### Security requirements
-
-- The key is read only on the server, sent only in the `X-Reporting-Key` request header, and never rendered into HTML, headers, URLs, logs or browser JavaScript. Error text from the backend is never displayed.
-- Use a dedicated key for this one purpose. Never reuse `ADMIN_API_KEY`, `DASHBOARD_PASSWORD` or any other secret. Never commit it, paste it into chat or an issue, or put it in a URL.
-- Redirects are rejected, so the key can never be forwarded to another host. Responses are limited to 32 KB and strictly validated (schema 1, 17 non-negative integer counts, timezone-aware timestamp, at most 10 modules); anything else is treated as unavailable.
-- The page is only reachable after dashboard authentication. Module titles are HTML-escaped.
-- Rotate the key by setting the new value on the standalone reporting service and the dashboard service together; between the two changes the tab shows "unavailable".
-
-### What the numbers mean
-
-- **Registered users**: every account created in the app.
-- **Active subscription records**: backend records with active status and a future expiry (Apple, Android, monthly, annual, and active records without an expiry date shown separately). They are not verified against Apple, Google or RevenueCat.
-- **Verified paying subscribers**: not connected. No figure is estimated.
-- Weekly registrations are four consecutive 7-day periods ending at the snapshot time. Lesson, video, quiz and simulation figures count records, not unique customers. Popular modules are ranked by completed lesson records (equal counts share a rank).
-
-### Cache behavior and data age
-
-| Layer | Behavior |
-| --- | --- |
-| Backend | One shared snapshot for 60 seconds. |
-| Dashboard, success | Cached 5 minutes (per dashboard process). |
-| Dashboard, failure | Cached 60 seconds: during that time no new request is made and the tab shows "unavailable". |
-| Concurrency | Simultaneous page loads wait for a single attempt and share its result. |
-| Request timeout | 16 seconds. |
-
-Because the backend cache (up to 60 seconds) and the dashboard cache (up to 5 minutes) stack, **displayed data can be approximately 6 minutes old**. The tab always shows the last successful report timestamp. When reporting is unavailable it shows no counts and never substitutes zeros; it reports the last successful timestamp seen by this dashboard process, or states that none has occurred since it started. Cached state is in memory and is lost on restart. Only the Endoscopy tab calls this endpoint, so an outage cannot affect other product tabs.
-
-### Deployment requirements
-
-1. With owner approval, create and validate the standalone Endoscopy reporting service first, using a dedicated read-only MongoDB account. Do not deploy or change the existing Endoscopy app backend. Verify that the service's assigned hostname matches the fixed URL before configuring the key.
-2. Set the same `ENDOSCOPY_REPORTING_KEY` on the standalone reporting service and on the dashboard service (Render dashboard secrets, never the repository).
-3. Merge into `routecast-owner-dashboard-v1` (the isolated dashboard service branch), not `main`, and deploy only with the owner's explicit approval.
-4. Check the tab after deployment: timestamp present, counts plausible against the backend, no key visible in the page source.
-
-### Rollback
-
-- Fastest: remove or blank `ENDOSCOPY_REPORTING_KEY` on the dashboard service and restart it; the tab shows "not connected" and makes no requests.
-- Code: revert the Endoscopy commits on the dashboard branch and redeploy. No data migration or cleanup is needed because nothing is written.
-- Reporting side: suspend the standalone reporting service or rotate its key. Do not change the existing application backend. The reporting service refuses startup without a valid key.
-
-### Tests
-
-`python -m unittest discover -s owner-dashboard -p 'test_*.py' -v`. Every test module imports `isolation.py` first, which removes credential variables (`ENDOSCOPY_*`, `ADMIN_API*`, `DASHBOARD_*`, `PLAY_*`, `GA4_*`, `RC_*`, `GOOGLE_*`, `GCLOUD*`, `CLOUDSDK_*`) from the environment and blocks every non-loopback connection and DNS lookup. External services must be mocked, or served from a loopback test server.
+Deployment: after isolated tests and approval, release only to routecast-owner-dashboard-v1. Do not change gi-nurse-trainer main, the live Endoscopy service or its environment, billing, public websites or any other dashboard settings. Set the two new variables only on hildreth-dashboard, then verify actual counts and timestamp with the owner. To disable the integration, remove those variables from the dashboard; configuration changes may restart the dashboard. The Endoscopy application is not redeployed.
