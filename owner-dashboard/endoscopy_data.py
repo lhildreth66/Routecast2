@@ -64,7 +64,7 @@ def read_snapshot(uri, database):
     from pymongo import MongoClient, timeout
     # Explicit secure TLS and a small pool. Never reuse the app's write account.
     with MongoClient(uri, tls=True, tlsAllowInvalidCertificates=False,
-                     tlsAllowInvalidHostnames=False, tlsInsecure=False,
+                     tlsAllowInvalidHostnames=False,
                      connect=False, maxPoolSize=2, minPoolSize=0, retryReads=False,
                      serverSelectionTimeoutMS=5000, connectTimeoutMS=3000,
                      socketTimeoutMS=5000) as client:
