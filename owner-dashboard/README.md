@@ -87,13 +87,13 @@ For an isolated Render web service, use branch routecast-owner-dashboard-v1, roo
 
 ## Endoscopy Nurse Pro backend reporting (read-only)
 
-The Endoscopy Nurse Pro tab shows aggregate counts from the product's own backend endpoint `GET /api/owner/reporting` (implemented and validated in the gi-nurse-trainer repository). The dashboard calls it server-side only, with the dedicated key, using a fixed HTTPS URL (`URL` in `endoscopy_view.py`). Nothing is written, and no customer-identifying data is requested or shown.
+The Endoscopy Nurse Pro tab shows aggregate counts from the separate Endoscopy reporting-only service endpoint `GET /api/owner/reporting` (gi-nurse-trainer, branch `endoscopy-reporting-service-dev`). The existing mobile app backend is not contacted. The dashboard calls it server-side only, with the dedicated key, using a fixed HTTPS URL (`URL` in `endoscopy_view.py`). The proposed hostname is `endoscopy-owner-reporting.onrender.com`; confirm actual ownership and the assigned hostname in Render before configuring the key or enabling this connection. If the assigned hostname differs, update the fixed URL and tests on the development branch first. Nothing is written, and no customer-identifying data is requested or shown.
 
 ### Configuration
 
 | Variable | Where | Rules |
 | --- | --- | --- |
-| `ENDOSCOPY_REPORTING_KEY` | Dashboard service **and** the Endoscopy backend | Same value on both. At least 32 printable ASCII characters with no spaces; leading/trailing whitespace is trimmed before validation. Generate with `python -c "import secrets;print(secrets.token_urlsafe(48))"`. |
+| `ENDOSCOPY_REPORTING_KEY` | Dashboard service **and** the standalone Endoscopy reporting service | Same value on both. At least 32 printable ASCII characters with no spaces; leading/trailing whitespace is trimmed before validation. Generate with `python -c "import secrets;print(secrets.token_urlsafe(48))"`. |
 
 If the variable is missing the tab shows "Backend reporting not connected" and makes no request. If it is present but malformed the tab shows "unavailable" and makes no request.
 
@@ -103,7 +103,7 @@ If the variable is missing the tab shows "Backend reporting not connected" and m
 - Use a dedicated key for this one purpose. Never reuse `ADMIN_API_KEY`, `DASHBOARD_PASSWORD` or any other secret. Never commit it, paste it into chat or an issue, or put it in a URL.
 - Redirects are rejected, so the key can never be forwarded to another host. Responses are limited to 32 KB and strictly validated (schema 1, 17 non-negative integer counts, timezone-aware timestamp, at most 10 modules); anything else is treated as unavailable.
 - The page is only reachable after dashboard authentication. Module titles are HTML-escaped.
-- Rotate the key by setting the new value on the backend and the dashboard service together; between the two changes the tab shows "unavailable".
+- Rotate the key by setting the new value on the standalone reporting service and the dashboard service together; between the two changes the tab shows "unavailable".
 
 ### What the numbers mean
 
@@ -126,8 +126,8 @@ Because the backend cache (up to 60 seconds) and the dashboard cache (up to 5 mi
 
 ### Deployment requirements
 
-1. Deploy the Endoscopy backend reporting endpoint first and confirm it separately; until then the tab shows "unavailable".
-2. Set the same `ENDOSCOPY_REPORTING_KEY` on the Endoscopy backend and on the dashboard service (Render dashboard secrets, never the repository).
+1. With owner approval, create and validate the standalone Endoscopy reporting service first, using a dedicated read-only MongoDB account. Do not deploy or change the existing Endoscopy app backend. Verify that the service's assigned hostname matches the fixed URL before configuring the key.
+2. Set the same `ENDOSCOPY_REPORTING_KEY` on the standalone reporting service and on the dashboard service (Render dashboard secrets, never the repository).
 3. Merge into `routecast-owner-dashboard-v1` (the isolated dashboard service branch), not `main`, and deploy only with the owner's explicit approval.
 4. Check the tab after deployment: timestamp present, counts plausible against the backend, no key visible in the page source.
 
@@ -135,7 +135,7 @@ Because the backend cache (up to 60 seconds) and the dashboard cache (up to 5 mi
 
 - Fastest: remove or blank `ENDOSCOPY_REPORTING_KEY` on the dashboard service and restart it; the tab shows "not connected" and makes no requests.
 - Code: revert the Endoscopy commits on the dashboard branch and redeploy. No data migration or cleanup is needed because nothing is written.
-- Backend side: blank the key on the Endoscopy backend; the endpoint then rejects every request.
+- Reporting side: suspend the standalone reporting service or rotate its key. Do not change the existing application backend. The reporting service refuses startup without a valid key.
 
 ### Tests
 

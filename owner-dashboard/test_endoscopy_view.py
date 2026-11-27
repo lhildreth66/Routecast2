@@ -19,6 +19,10 @@ def data():
 
 
 class EndoscopyTests(unittest.TestCase):
+    def test_standalone_reporting_target(self):
+        self.assertEqual(v.URL, "https://endoscopy-owner-reporting.onrender.com/api/owner/reporting")
+        self.assertNotIn("endoscopy-nurse-pro-api", v.URL)
+
     def setUp(self):
         v.reset()
 

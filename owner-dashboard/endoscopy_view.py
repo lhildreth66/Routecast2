@@ -9,7 +9,7 @@ from time import monotonic
 from urllib.request import Request, build_opener, HTTPRedirectHandler
 
 PRODUCT = "endoscopy-nurse-pro"
-URL = "https://endoscopy-nurse-pro-api.onrender.com/api/owner/reporting"
+URL = "https://endoscopy-owner-reporting.onrender.com/api/owner/reporting"  # Confirm assigned hostname before deployment.
 KEY_NAME = "ENDOSCOPY_REPORTING_KEY"
 KEY_FORMAT = re.compile(r"[\x21-\x7e]{32,}")
 SUCCESS_SECONDS = 300
