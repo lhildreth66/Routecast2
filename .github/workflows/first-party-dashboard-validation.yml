@@ -1,0 +1,20 @@
+name: First-party dashboard isolated tests
+on:
+  push:
+    branches: [dashboard-first-party-analytics-dev]
+permissions:
+  contents: read
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -r owner-dashboard/requirements.txt
+      - run: python -m compileall -q owner-dashboard
+      - run: python -m unittest discover -s owner-dashboard -p 'test_*.py' -v

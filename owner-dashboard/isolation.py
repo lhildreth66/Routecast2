@@ -7,7 +7,7 @@ import ipaddress
 import os
 import socket
 
-SECRET_PREFIXES = ("ENDOSCOPY_", "ADMIN_API", "DASHBOARD_", "PLAY_", "GA4_", "RC_", "GOOGLE_", "GCLOUD", "CLOUDSDK_")
+SECRET_PREFIXES = ("HILDRETH_FIRST_PARTY_", "ENDOSCOPY_", "ADMIN_API", "DASHBOARD_", "PLAY_", "GA4_", "RC_", "GOOGLE_", "GCLOUD", "CLOUDSDK_")
 
 
 class NetworkBlocked(OSError):

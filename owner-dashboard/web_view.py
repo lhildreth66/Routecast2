@@ -3,9 +3,10 @@ import html
 import math
 from datetime import datetime
 from acquisition_view import render_acquisition, render_link_generator
+from first_party_view import render_first_party
 
 def render_web(product, data, period, failed=False):
-    return render_traffic(product, data, period, failed) + (render_acquisition(data) if data is not None else '') + render_link_generator(product)
+    return render_traffic(product, data, period, failed) + (render_acquisition(data) if data is not None else '') + render_link_generator(product) + render_first_party(product, period)
 
 def render_traffic(product, data, period, failed=False):
     base = "/apps/" + product
